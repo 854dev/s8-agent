@@ -18,6 +18,7 @@ dev_854/
 - 비공개 로컬 상태: `.s8-runtime/`
 - 웹 콘솔: `frontend/`
 - 지식베이스 API: `apps/kb-browser/`
+- MCP 허브: `apps/mcp-hub/`
 - Nginx와 Compose: `infra/nginx/`
 
 ## 빠른 시작

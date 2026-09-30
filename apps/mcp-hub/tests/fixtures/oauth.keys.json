@@ -1,0 +1,10 @@
+{
+  "installed": {
+    "client_id": "test-client.apps.googleusercontent.com",
+    "project_id": "multiplez-mcp-test",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "client_secret": "test-client-secret",
+    "redirect_uris": ["http://localhost"]
+  }
+}
