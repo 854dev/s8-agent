@@ -1,0 +1,48 @@
+services:
+  kb-browser:
+    build:
+      context: ../../apps/kb-browser
+      dockerfile: Dockerfile
+    image: 854md-kb-browser:local
+    container_name: 854md-kb-browser
+    restart: unless-stopped
+    environment:
+      KB_ROOT: /workspace
+      UPLOAD_DIR: /data/uploads
+      PORT: 8787
+      HOST: 0.0.0.0
+    volumes:
+      - "${S8_KB_ROOT:-../../../854_md}:/workspace:ro"
+      - "../../.s8-runtime/data/uploads:/data/uploads:rw"
+    networks:
+      - 854md-router
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: 854md-nginx:local
+    container_name: 854md-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_BIND_IP:-0.0.0.0}:${NGINX_HTTP_PORT:-80}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "./conf.d:/etc/nginx/conf.d:ro"
+      - "${S8_KB_ROOT:-../../../854_md}/p3 - 프리랜서외주/개인홈페이지-기획안-2026/샘플 홈페이지:/usr/share/nginx/html/homepage:ro"
+    depends_on:
+      kb-browser:
+        condition: service_healthy
+    networks:
+      - 854md-router
+
+networks:
+  854md-router:
+    name: ${NGINX_NETWORK_NAME:-854md-router}
+    driver: bridge

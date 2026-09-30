@@ -1,0 +1,26 @@
+{
+  "name": "s8-pi-environment",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Canonical Pi configuration and package environment for s8",
+  "keywords": [
+    "pi-package"
+  ],
+  "scripts": {
+    "start": "bash ../start-pi.sh"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.87.1"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  }
+}
