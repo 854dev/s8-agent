@@ -2,7 +2,12 @@
 set -euo pipefail
 
 AGENT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+[ ! -f "$AGENT_ROOT/.env" ] || { set -a; source "$AGENT_ROOT/.env"; set +a; }
 KNOWLEDGE_BASE_ROOT="${S8_KB_ROOT:-$AGENT_ROOT/../854_md}"
+case "$KNOWLEDGE_BASE_ROOT" in
+    /*) ;;
+    *) KNOWLEDGE_BASE_ROOT="$AGENT_ROOT/$KNOWLEDGE_BASE_ROOT" ;;
+esac
 KNOWLEDGE_BASE_ROOT="$(cd -- "$KNOWLEDGE_BASE_ROOT" && pwd -P)"
 PI_CONFIG_ROOT="$AGENT_ROOT/pi"
 PI_CODING_AGENT_DIR="$AGENT_ROOT/.pi-runtime"

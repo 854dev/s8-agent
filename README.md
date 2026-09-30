@@ -63,11 +63,17 @@ tmux에서 Pi를 유지하려면 저장소 루트에서 다음을 사용한다.
 tmux new-session -s pi-854-md -c "$PWD" "./start-pi.sh"
 ```
 
-`854_md`가 형제 디렉터리가 아니면 명시적으로 지정한다.
+`start-pi.sh`와 `start-pi-web-ui.sh`는 저장소 루트의 `.env`를 항상 읽는다. 기본 설정을 복사한 뒤 지식베이스 경로를 바꾸면 된다.
 
 ```bash
-S8_KB_ROOT=/path/to/854_md ./start-pi.sh
+cp .env.example .env
 ```
+
+```dotenv
+S8_KB_ROOT=/path/to/workspace
+```
+
+상대 경로는 `s8-agent` 루트 기준이며 `.env`는 Git에 포함되지 않는다.
 
 ## 다른 장비에서 재현
 

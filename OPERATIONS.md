@@ -23,7 +23,7 @@ Pi가 열리면 `/login`을 실행한다. credential과 세션은 `.pi-runtime/`
 `start-pi.sh`는 다음 역할만 담당한다.
 
 - 프로젝트 로컬 Pi 바이너리 선택
-- 작업 디렉터리를 `${S8_KB_ROOT:-../854_md}` 지식베이스 루트로 고정
+- 루트 `.env`를 읽고 작업 디렉터리를 `${S8_KB_ROOT:-../854_md}`로 고정
 - 인증정보와 세션을 `.pi-runtime/`로 분리
 - `pi/settings.json`을 런타임 설정 링크로 참조하며, 공유 extension, skill, 시스템 지침은 `pi/`에서 로드
 - 사용할 기본 파일 도구 명시
