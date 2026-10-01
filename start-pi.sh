@@ -33,6 +33,8 @@ else
 fi
 export PI_CODING_AGENT_DIR
 export PI_TELEMETRY=0
+export S8_PI_BINARY="$PI_BINARY"
+export S8_PI_CONFIG_ROOT="$PI_CONFIG_ROOT"
 
 cd "$KNOWLEDGE_BASE_ROOT"
 case "${1:-}" in
@@ -43,6 +45,7 @@ esac
 
 exec "$PI_BINARY" \
     --extension "$PI_CONFIG_ROOT/extensions/s8-guard.ts" \
+    --extension "$PI_CONFIG_ROOT/extensions/projectman.ts" \
     --skill "$PI_CONFIG_ROOT/skills/s8-operations" \
     --append-system-prompt "$PI_CONFIG_ROOT/APPEND_SYSTEM.md" \
     --tools read,bash,edit,write,grep,find,ls \

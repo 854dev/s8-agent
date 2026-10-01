@@ -11,6 +11,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 0.87.1
         version: 0.87.1(ws@8.22.0)
+      typebox:
+        specifier: 1.3.27
+        version: 1.3.27
 
 packages:
 
