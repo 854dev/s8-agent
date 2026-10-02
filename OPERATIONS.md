@@ -28,26 +28,6 @@ Pi가 열리면 `/login`을 실행한다. credential과 세션은 `.pi-runtime/`
 - `pi/settings.json`을 런타임 설정 링크로 참조하며, 공유 extension, skill, 시스템 지침은 `pi/`에서 로드
 - 사용할 기본 파일 도구 명시
 
-## Pi Web UI 실행
-
-```bash
-./start-pi-web-ui.sh
-```
-
-기본 주소는 `http://127.0.0.1:8788`이다. Web UI 상태와 세션 데이터는 `.s8-runtime/pi-web-ui`에 저장한다.
-
-환경변수로 주소, 포트, 작업 디렉터리를 바꿀 수 있다.
-
-```bash
-PI_WEB_HOST=127.0.0.1 PI_WEB_PORT=8789 ./start-pi-web-ui.sh --no-browser
-```
-
-백그라운드에서 시작:
-
-```bash
-tmux new-session -d -s pi-web-ui -c "$PWD" "./start-pi-web-ui.sh --no-browser"
-```
-
 ## tmux 활용
 
 현재 터미널에서 새 세션을 만들고 바로 접속:

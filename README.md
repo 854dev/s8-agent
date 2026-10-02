@@ -45,25 +45,13 @@ Pi가 열리면 `/login`으로 이 장비의 모델 인증을 설정한다. 인�
 ./start-pi.sh --continue
 ```
 
-Pi Web UI 실행:
-
-```bash
-./start-pi-web-ui.sh
-```
-
-브라우저에서 `http://127.0.0.1:8788`을 연다. 포트나 bind 주소를 바꾸려면 환경변수를 사용한다.
-
-```bash
-PI_WEB_HOST=127.0.0.1 PI_WEB_PORT=8789 ./start-pi-web-ui.sh --no-browser
-```
-
 tmux에서 Pi를 유지하려면 저장소 루트에서 다음을 사용한다.
 
 ```bash
 tmux new-session -s pi-854-md -c "$PWD" "./start-pi.sh"
 ```
 
-`start-pi.sh`와 `start-pi-web-ui.sh`는 저장소 루트의 `.env`를 항상 읽는다. 기본 설정을 복사한 뒤 지식베이스 경로를 바꾸면 된다.
+`start-pi.sh`는 저장소 루트의 `.env`를 항상 읽는다. 기본 설정을 복사한 뒤 지식베이스 경로를 바꾸면 된다.
 
 ```bash
 cp .env.example .env
@@ -96,14 +84,12 @@ s8에서 사용하는 Pi 패키지는 다음 목록을 기준으로 설치한다
 
 ```bash
 ./start-pi.sh install npm:@calesennett/pi-codex-usage@0.1.14
-./start-pi.sh install npm:pi-web-ui@0.96.1
 ./start-pi.sh install npm:@dietrichgebert/ponytail@4.10.0
 ./start-pi.sh install npm:pi-web-access@0.33.0
 ./start-pi.sh install npm:pi-mcp-extension@1.5.0
 ```
 
 - `@calesennett/pi-codex-usage`: Codex 사용량 footer 표시
-- `pi-web-ui`: 브라우저 기반 Pi Web UI, 한국어 언어팩 지원
 - `@dietrichgebert/ponytail`: 과잉 구현 방지와 최소 구현 지향 스킬
 - `pi-web-access`: 웹 검색, URL fetch, GitHub clone, PDF와 미디어 분석 도구
 - `pi-mcp-extension`: MCP 서버 연결용 클라이언트 확장

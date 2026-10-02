@@ -6,7 +6,6 @@
   },
   "packages": [
     "npm:@calesennett/pi-codex-usage@0.1.14",
-    "npm:pi-web-ui@0.96.1",
     "npm:@dietrichgebert/ponytail@4.10.0",
     "npm:pi-web-access@0.33.0",
     "npm:pi-mcp-extension@1.5.0"
