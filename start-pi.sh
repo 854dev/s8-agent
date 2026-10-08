@@ -55,6 +55,7 @@ export PI_CODING_AGENT_DIR
 export PI_TELEMETRY=0
 export S8_PI_BINARY="$PI_BINARY"
 export S8_PI_CONFIG_ROOT="$PI_CONFIG_ROOT"
+export S8_PI_RESTART_DIR="$PI_CODING_AGENT_DIR"
 
 cd "$KNOWLEDGE_BASE_ROOT"
 case "${1:-}" in
@@ -63,11 +64,34 @@ case "${1:-}" in
         ;;
 esac
 
-exec "$PI_BINARY" \
-    --extension "$PI_CONFIG_ROOT/extensions/s8-guard.ts" \
-    --extension "$PI_CONFIG_ROOT/extensions/projectman.ts" \
-    ${TELEGRAM_EXTENSION:+--extension} ${TELEGRAM_EXTENSION:+"$TELEGRAM_EXTENSION"} \
-    --skill "$PI_CONFIG_ROOT/skills/s8-operations" \
-    --append-system-prompt "$PI_CONFIG_ROOT/APPEND_SYSTEM.md" \
-    --tools read,bash,edit,write,grep,find,ls \
-    "$@"
+restart_args=()
+while true; do
+    pi_args=(
+        --extension "$PI_CONFIG_ROOT/extensions/s8-guard.ts"
+        --extension "$PI_CONFIG_ROOT/extensions/projectman.ts"
+    )
+    if [[ -n "$TELEGRAM_EXTENSION" ]]; then
+        pi_args+=(--extension "$TELEGRAM_EXTENSION")
+    fi
+    pi_args+=(
+        --skill "$PI_CONFIG_ROOT/skills/s8-operations"
+        --append-system-prompt "$PI_CONFIG_ROOT/APPEND_SYSTEM.md"
+        --tools read,bash,edit,write,grep,find,ls
+    )
+    if ((${#restart_args[@]} > 0)); then
+        pi_args+=("${restart_args[@]}")
+    fi
+    if (($# > 0)); then
+        pi_args+=("$@")
+    fi
+
+    "$PI_BINARY" "${pi_args[@]}" <&0 &
+    pi_pid=$!
+    if wait "$pi_pid"; then status=0; else status=$?; fi
+    if [ -f "$PI_CODING_AGENT_DIR/restart-$$" ]; then
+        rm -f "$PI_CODING_AGENT_DIR/restart-$$"
+        restart_args=(--continue)
+        continue
+    fi
+    exit "$status"
+done

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { Bot, Gateway, sessionKey, visible, toolOutput } from './gateway.mjs';
+import { Bot, Gateway, sessionKey, visible, toolOutput, tokenUsage } from './gateway.mjs';
 
 function fake() {
   const commands = [];
@@ -76,6 +76,50 @@ test('independent sessions can run concurrently and commands stay in their chat'
   assert.notEqual(processes.get('123'), old);
   assert.ok(processes.get('123').commands.some(c => c.message === 'after restart'));
   bot.stop();
+});
+
+test('token usage totals current-branch model and tool usage', () => {
+  assert.deepEqual(tokenUsage([
+    { type: 'message', message: { role: 'assistant', usage: { input: 10, output: 4, cacheRead: 2, cacheWrite: 1 } } },
+    { type: 'message', message: { role: 'toolResult', usage: { input: 3, output: 0, cacheRead: 0, cacheWrite: 0 } } },
+    { type: 'usage', usage: { input: 2, output: 1, cacheRead: 0, cacheWrite: 0 } },
+    { type: 'message', message: { role: 'user', usage: { input: 100 } } },
+  ]), { input: 15, output: 5, cacheRead: 2, cacheWrite: 1, total: 23 });
+});
+
+test('Telegram keyboard buttons invoke the matching Pi actions and model selection', async t => {
+  const { sent, fetchImpl } = transport();
+  const calls = [];
+  const pi = fake().pi;
+  const models = [{ id: 'provider/model-id', name: 'Provider · Model' }];
+  const session = await new Gateway({ token: 'fake', chat: 123, pi, fetchImpl,
+    commandImpl: async (type, fields) => {
+      calls.push({ type, ...fields });
+      if (type === 'get_models') return models;
+      if (type === 'set_model') return { ok: true, name: 'Model' };
+      if (type === 'restart') return { ok: true };
+      return { isStreaming: false, tokenUsage: { input: 15, output: 5, cacheRead: 2, cacheWrite: 1, total: 23 } };
+    },
+  }).start();
+  t.after(() => session.stop());
+  await session.showMenu();
+  assert.deepEqual(sent.find(item => item.reply_markup)?.reply_markup.keyboard[0], ['상태', '중단']);
+  await session.incoming(privateMessage(123, '/status'));
+  assert.ok(sent.some(item => item.text.includes('토큰 23')));
+  await session.incoming(privateMessage(123, '/help'));
+  const help = sent.find(item => item.text.startsWith('명령어:'));
+  assert.deepEqual(help.text.match(/^\/\w+/gm), ['/status', '/abort', '/new', '/model', '/restart', '/help']);
+  assert.equal(help.reply_markup.is_persistent, true);
+  await session.incoming(privateMessage(123, '모델'));
+  assert.deepEqual(sent.find(item => item.text === '모델을 선택하세요.').reply_markup.keyboard[0], ['Provider · Model']);
+  await session.incoming(privateMessage(123, 'Provider · Model'));
+  assert.deepEqual(calls.at(-1), { type: 'set_model', model: 'provider/model-id' });
+  await session.incoming(privateMessage(123, '중단'));
+  assert.deepEqual(calls.slice(-2).map(call => call.type), ['clear_queue', 'abort']);
+  await session.incoming(privateMessage(123, '새 대화'));
+  assert.equal(calls.at(-1).type, 'new_session');
+  await session.incoming(privateMessage(123, '재시작'));
+  assert.equal(calls.at(-1).type, 'restart');
 });
 
 test('one chat streams edits and hides successful tool end, args and raw results', async () => {

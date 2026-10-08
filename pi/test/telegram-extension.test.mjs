@@ -18,6 +18,7 @@ test('Telegram and TUI send messages through the same Pi session', async t => {
   const { port } = socket.address();
   await new Promise(resolve => socket.close(resolve));
   const pi = new EventEmitter();
+  pi.registerCommand = () => {};
   const prompts = [], sent = [];
   pi.sendUserMessage = (text, options) => prompts.push({ text, options });
   let updates = 0;
@@ -36,7 +37,7 @@ test('Telegram and TUI send messages through the same Pi session', async t => {
   };
   attach(pi, { port, config: { TELEGRAM_BOT_TOKEN: 'test-token', TELEGRAM_ALLOWED_USER_IDS: '123' }, fetchImpl });
   t.after(() => pi.emit('session_shutdown'));
-  pi.emit('session_start', null, { mode: 'tui', isIdle: () => true, abort() {} });
+  pi.emit('session_start', null, { mode: 'tui', isIdle: () => true, abort() {}, sessionManager: { getBranch: () => [] } });
   await waitFor(() => prompts.length === 1);
   assert.equal(prompts[0].text, 'telegram prompt');
   pi.emit('input', { source: 'interactive', text: 'terminal prompt' });

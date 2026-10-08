@@ -1,7 +1,8 @@
 import net from 'node:net';
+import { writeFile } from 'node:fs/promises';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { Bot, Gateway, sessionKey } from '../../apps/telegram-gateway/gateway.mjs';
+import { Bot, Gateway, sessionKey, tokenUsage } from '../../apps/telegram-gateway/gateway.mjs';
 
 // One local polling owner per bot. Older Pi instances retry only when the owner exits.
 export function ownership({ port, key, onAcquire, onRelease, interval = 1000 }) {
@@ -51,6 +52,7 @@ export function ownership({ port, key, onAcquire, onRelease, interval = 1000 }) 
 
 export function attach(pi, { port = 39485, config = process.env, fetchImpl = fetch } = {}) {
   let stopOwner, gateway, telegramPrompt = false;
+  pi.registerCommand('telegram-new', { description: 'Telegram에서 새 대화를 시작합니다', handler: async (_args, ctx) => { await ctx.newSession(); } });
   pi.on('session_start', (_event, ctx) => {
     stopOwner?.();
     stopOwner = null;
@@ -82,7 +84,10 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
           fake.stdin = { writableEnded: false, end() { this.writableEnded = true; fake.emit('exit'); } };
           gateway = new Gateway({ token, chat: message.chat.id, thread: message.message_thread_id, pi: fake, fetchImpl,
             commandImpl: async (type, fields) => {
-              if (type === 'get_state') return { isStreaming: !ctx.isIdle() };
+              if (type === 'get_state') return {
+                isStreaming: !ctx.isIdle(),
+                tokenUsage: tokenUsage(ctx.sessionManager.getBranch()),
+              };
               if (type === 'prompt') {
                 telegramPrompt = true;
                 try { pi.sendUserMessage(fields.message, ctx.isIdle() ? {} : { deliverAs: 'steer' }); }
@@ -91,10 +96,28 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
               }
               if (type === 'abort') { ctx.abort(); return; }
               if (type === 'clear_queue') return;
-              if (type === 'new_session') return { cancelled: true };
+              if (type === 'new_session') {
+                pi.sendUserMessage('/telegram-new', { expandPromptTemplates: true });
+                return { cancelled: false };
+              }
+              if (type === 'get_models') return ctx.modelRegistry.getAvailable().map(model => ({ id: `${model.provider}/${model.id}`, name: `${ctx.modelRegistry.getProviderDisplayName(model.provider)} · ${model.name}` }));
+              if (type === 'set_model') {
+                const [provider, ...parts] = String(fields.model ?? '').split('/');
+                const model = ctx.modelRegistry.find(provider, parts.join('/'));
+                if (!model || !ctx.modelRegistry.hasConfiguredAuth(model)) return { ok: false };
+                const ok = await pi.setModel(model);
+                return { ok, name: model.name };
+              }
+              if (type === 'restart') {
+                if (!config.S8_PI_RESTART_DIR) return { ok: false };
+                await writeFile(`${config.S8_PI_RESTART_DIR}/restart-${process.ppid}`, 'restart\n', { mode: 0o600 });
+                ctx.shutdown();
+                return { ok: true };
+              }
             },
           });
           await gateway.start();
+          await gateway.showMenu();
         }
         if (currentBot.closed || !gateway) return;
         const active = gateway;

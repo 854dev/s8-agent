@@ -12,6 +12,18 @@ export const visible = text => String(text)
 export const toolOutput = event => event.type === 'tool_execution_start'
   ? `🔧 ${String(event.toolName).replace(/[^\w-]/g, '').slice(0, 40) || 'tool'}`
   : event.type === 'tool_execution_end' && event.isError ? '❌ 도구 실행 실패 (상세 결과는 표시하지 않음)' : null;
+export function tokenUsage(entries) {
+  const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  for (const entry of entries) {
+    const message = entry.type === 'message' ? entry.message : null;
+    const usage = message?.role === 'assistant' || message?.role === 'toolResult'
+      ? message.usage
+      : entry.type === 'usage' || entry.type === 'compaction' || entry.type === 'branch_summary' ? entry.usage : null;
+    if (!usage) continue;
+    for (const key of Object.keys(totals)) if (Number.isFinite(usage[key])) totals[key] += usage[key];
+  }
+  return { ...totals, total: totals.input + totals.output + totals.cacheRead + totals.cacheWrite };
+}
 
 async function telegram(token, fetchImpl, method, body, signal) {
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -95,11 +107,16 @@ export class Gateway {
     this.serial = job.catch(error => console.error('Telegram send failed:', error.message));
     return job;
   }
-  send(text) {
+  send(text, reply_markup) {
     return this.queue(() => this.telegram('sendMessage', {
       chat_id: this.chat, ...(this.thread === undefined ? {} : { message_thread_id: this.thread }), text: visible(text),
+      ...(reply_markup ? { reply_markup } : {}),
     }));
   }
+  menuMarkup() {
+    return { keyboard: [['상태', '중단'], ['새 대화', '모델'], ['재시작', '메뉴', '도움말']], resize_keyboard: true, is_persistent: true };
+  }
+  showMenu() { return this.send('s8 메뉴', this.menuMarkup()); }
   command(type, fields = {}) {
     if (this.closed) return Promise.reject(new Error('Pi process stopped'));
     if (this.commandImpl) return this.commandImpl(type, fields);
@@ -196,22 +213,51 @@ export class Gateway {
   async incoming(message) {
     const text = message.text.trim();
     if (!text) return;
+    const action = ({ '상태': '/status', '중단': '/abort', '새 대화': '/new', '재시작': '/restart', '도움말': '/help', '모델': '/model' })[text]
+      ?? (this.models?.find(model => model.name === text) ? `model:${this.models.find(model => model.name === text).id}` : text);
     try {
-      if (text === '/help') return await this.send('/status /abort /new /help');
-      if (text === '/status') {
+      if (action === '/help') return await this.send([
+        '명령어:',
+        '/status - 현재 상태',
+        '/abort - 작업 중단',
+        '/new - 새 대화',
+        '/model - 모델 선택',
+        '/restart - Pi 재시작',
+        '/help - 이 도움말',
+      ].join('\n'), this.menuMarkup());
+      if (action === '/status') {
         const state = await this.command('get_state');
-        return await this.send(`Pi: ${state.isStreaming ? 'running' : 'idle'} · 이 채팅 전용 세션`);
+        const usage = state.tokenUsage;
+        const tokens = usage ? ` · 토큰 ${usage.total.toLocaleString()} (입력 ${usage.input.toLocaleString()} · 출력 ${usage.output.toLocaleString()} · 캐시 ${ (usage.cacheRead + usage.cacheWrite).toLocaleString()})` : '';
+        return await this.send(`Pi: ${state.isStreaming ? 'running' : 'idle'} · 이 채팅 전용 세션${tokens}`);
       }
-      if (text === '/abort') {
+      if (action === '/abort') {
         await this.command('clear_queue');
         await this.command('abort');
         return await this.send('중단 요청을 전달했습니다.');
       }
-      if (text === '/new') {
-        if (this.busy) return await this.send('진행 중입니다. /abort 후 다시 시도하세요.');
+      if (action === '/new') {
+        if (this.busy) return await this.send('진행 중입니다. 먼저 중단한 뒤 다시 시도하세요.');
         const result = await this.command('new_session');
-        return await this.send(result?.cancelled ? '새 세션 요청이 거부되었습니다.' : '새 대화를 시작합니다.');
+        return await this.send(result?.cancelled ? '새 대화 요청이 취소되었습니다.' : '새 대화를 시작했습니다.');
       }
+      if (action === '/model') {
+        this.models = await this.command('get_models');
+        if (!this.models?.length) return await this.send('사용 가능한 모델을 찾지 못했습니다.');
+        return await this.send('모델을 선택하세요.', { keyboard: [...this.models.map(model => [model.name]), ['메뉴']], resize_keyboard: true, is_persistent: true });
+      }
+      if (action.startsWith('model:')) {
+        const result = await this.command('set_model', { model: action.slice(6) });
+        return await this.send(result?.ok ? `모델을 ${result.name}(으)로 변경했습니다.` : '모델을 변경하지 못했습니다.');
+      }
+      if (action === '/restart') {
+        if (this.busy) return await this.send('진행 중입니다. 먼저 중단한 뒤 재시작하세요.');
+        await this.send('Pi를 재시작합니다.');
+        const result = await this.command('restart');
+        if (!result?.ok) return await this.send('자동 재시작이 설정되지 않았습니다.');
+        return;
+      }
+      if (action === '메뉴') return await this.showMenu();
       if (text.startsWith('/')) return await this.send('알 수 없는 명령입니다. /help');
       const running = this.busy;
       if (!running) { this.busy = true; this.startTyping(); }
