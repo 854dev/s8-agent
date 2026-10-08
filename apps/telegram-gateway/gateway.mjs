@@ -58,13 +58,36 @@ export class Gateway {
     this.serial = Promise.resolve();
     this.inbound = Promise.resolve();
     this.busy = false;
+    this.typingState = null;
     this.stream = null;
     this.nextId = 0;
     this.buffer = '';
     this.decoder = new StringDecoder('utf8');
     this.closed = false;
   }
-  telegram(method, body) { return telegram(this.token, this.fetch, method, body); }
+  telegram(method, body, signal) { return telegram(this.token, this.fetch, method, body, signal); }
+  startTyping() {
+    if (this.typingState) return;
+    const state = { controller: new AbortController(), pending: false, timer: null };
+    this.typingState = state;
+    const pulse = () => {
+      if (!this.busy || this.closed || this.typingState !== state || state.pending) return;
+      state.pending = true;
+      void this.telegram('sendChatAction', {
+        chat_id: this.chat, ...(this.thread === undefined ? {} : { message_thread_id: this.thread }), action: 'typing',
+      }, AbortSignal.any([state.controller.signal, AbortSignal.timeout(5000)]))
+        .catch(() => {}) // Telegram availability must not block Pi.
+        .finally(() => { state.pending = false; });
+    };
+    pulse();
+    state.timer = setInterval(pulse, 4000);
+  }
+  stopTyping() {
+    if (!this.typingState) return;
+    clearInterval(this.typingState.timer);
+    this.typingState.controller.abort();
+    this.typingState = null;
+  }
   queue(fn) {
     const job = this.serial.then(fn);
     this.serial = job.catch(error => console.error('Telegram send failed:', error.message));
@@ -131,6 +154,7 @@ export class Gateway {
       if (text) this.send(text).catch(() => {});
     } else if (event.type === 'agent_settled') {
       this.busy = false;
+      this.stopTyping();
     }
   }
   flush(stream) {
@@ -181,11 +205,11 @@ export class Gateway {
       }
       if (text.startsWith('/')) return await this.send('알 수 없는 명령입니다. /help');
       const running = this.busy;
-      if (!running) this.busy = true;
+      if (!running) { this.busy = true; this.startTyping(); }
       try {
         await this.command('prompt', { message: text, ...(running ? { streamingBehavior: 'steer' } : {}) });
       } catch (error) {
-        if (!running) this.busy = false;
+        if (!running) { this.busy = false; this.stopTyping(); }
         throw error;
       }
     } catch (error) {
@@ -206,6 +230,7 @@ export class Gateway {
   close() {
     if (this.closed) return;
     this.closed = true;
+    this.stopTyping();
     clearInterval(this.timer);
     for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error('Pi process stopped')); }
     this.pending.clear();

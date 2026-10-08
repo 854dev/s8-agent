@@ -46,12 +46,13 @@ test('private sender and group ID authorize independently, including topic separ
   assert.equal(sessionKey({ ...privateMessage(123, 'hello'), from: undefined }, users, groups), null);
 });
 
-test('independent sessions can run concurrently and commands stay in their chat', async () => {
+test('independent sessions can run concurrently and commands stay in their chat', async t => {
   const { sent, fetchImpl } = transport();
   const processes = new Map();
   const bot = new Bot({ token: 'fake', users: new Set(['123', '456']), groups: new Set(['-1009']), fetchImpl,
     spawnPi: key => { const process = fake(); processes.set(key, process); return process.pi; },
   });
+  t.after(() => bot.stop());
   await bot.route({ message: privateMessage(999, 'unauthorized') });
   assert.equal(processes.size, 0);
   await Promise.all([
@@ -68,7 +69,7 @@ test('independent sessions can run concurrently and commands stay in their chat'
   assert.equal(processes.get('123').commands.at(-1).streamingBehavior, 'steer');
   assert.ok(processes.get('-1009-5').commands.some(c => c.type === 'new_session') === false); // busy until settled
   assert.deepEqual(processes.get('456').commands.slice(-2).map(c => c.type), ['clear_queue', 'abort']);
-  assert.ok(sent.some(m => m.chat_id === -1009 && m.message_thread_id === 5 && m.text.includes('진행 중')));
+  assert.ok(sent.some(m => m.chat_id === -1009 && m.message_thread_id === 5 && m.text?.includes('진행 중')));
   const old = processes.get('123');
   old.pi.emit('exit');
   await bot.route({ message: privateMessage(123, 'after restart') });
@@ -93,13 +94,37 @@ test('one chat streams edits and hides successful tool end, args and raw results
   await session.serial;
   await new Promise(resolve => setImmediate(resolve));
   await session.serial;
-  assert.deepEqual(sent.map(m => m.method), ['sendMessage', 'sendMessage', 'sendMessage', 'editMessageText']);
+  assert.deepEqual(sent.filter(m => m.method !== 'sendChatAction').map(m => m.method), ['sendMessage', 'sendMessage', 'sendMessage', 'editMessageText']);
+  assert.ok(sent.some(m => m.method === 'sendChatAction' && m.chat_id === 123 && m.action === 'typing'));
   assert.ok(sent.every(m => !JSON.stringify(m).includes('secret') && !JSON.stringify(m).includes('.env')));
   assert.equal(sent.at(-1).text, 'hello world');
   session.onRecord({ type: 'agent_settled' });
   await session.incoming(privateMessage(123, '/new'));
   assert.ok(commands.some(c => c.type === 'new_session'));
   session.stop();
+});
+
+test('typing repeats while busy, stops on settlement and does not block Pi on Telegram failure', async () => {
+  const { pi, commands } = fake();
+  const { sent, fetchImpl } = transport();
+  const session = await new Gateway({ token: 'fake', chat: -1009, thread: 5, pi,
+    fetchImpl: (url, options) => url.endsWith('/sendChatAction') ? Promise.reject(new Error('offline')) : fetchImpl(url, options),
+  }).start();
+  await session.incoming(groupMessage(-1009, 999, 'hello', 5));
+  assert.ok(commands.some(c => c.type === 'prompt'));
+  assert.ok(session.typingState);
+  session.onRecord({ type: 'agent_settled' });
+  assert.equal(session.typingState, null);
+  session.stop();
+
+  const other = fake();
+  const active = await new Gateway({ token: 'fake', chat: -1009, thread: 6, pi: other.pi, fetchImpl }).start();
+  await active.incoming(groupMessage(-1009, 999, 'hello', 6));
+  await new Promise(resolve => setTimeout(resolve, 4100));
+  assert.ok(sent.filter(m => m.method === 'sendChatAction' && m.message_thread_id === 6).length >= 2);
+  active.onRecord({ type: 'agent_settled' });
+  assert.equal(active.typingState, null);
+  active.stop();
 });
 
 test('RPC unicode framing survives split bytes; approval dialog is cancelled', async () => {
