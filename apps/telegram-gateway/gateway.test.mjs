@@ -94,13 +94,42 @@ test('one chat streams edits and hides successful tool end, args and raw results
   await session.serial;
   await new Promise(resolve => setImmediate(resolve));
   await session.serial;
-  assert.deepEqual(sent.filter(m => m.method !== 'sendChatAction').map(m => m.method), ['sendMessage', 'sendMessage', 'sendMessage', 'editMessageText']);
+  assert.deepEqual(sent.filter(m => m.method !== 'sendChatAction').map(m => m.method), ['sendMessage', 'sendMessage', 'editMessageText']);
   assert.ok(sent.some(m => m.method === 'sendChatAction' && m.chat_id === 123 && m.action === 'typing'));
   assert.ok(sent.every(m => !JSON.stringify(m).includes('secret') && !JSON.stringify(m).includes('.env')));
   assert.equal(sent.at(-1).text, 'hello world');
   session.onRecord({ type: 'agent_settled' });
   await session.incoming(privateMessage(123, '/new'));
   assert.ok(commands.some(c => c.type === 'new_session'));
+  session.stop();
+});
+
+test('first tool starts immediately; later tools update one message live and reset next turn', async () => {
+  const { pi } = fake();
+  const { sent, fetchImpl } = transport();
+  const session = await new Gateway({ token: 'fake', chat: 123, pi, fetchImpl, editInterval: 20 }).start();
+  await session.incoming(privateMessage(123, 'go'));
+  session.onRecord({ type: 'tool_execution_start', toolName: 'read', args: { path: '.env' } });
+  await session.serial;
+  assert.deepEqual(sent.filter(m => m.method === 'sendMessage').map(m => m.text), ['🔧 read']);
+  session.onRecord({ type: 'tool_execution_start', toolName: 'bash' });
+  session.onRecord({ type: 'tool_execution_end', isError: true, result: { content: 'secret' } });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  await session.serial;
+  assert.equal(sent.filter(m => m.method === 'sendMessage').length, 1);
+  assert.equal(sent.filter(m => m.method === 'editMessageText').at(-1).text, '🔧 read\n🔧 bash\n❌ 도구 실행 실패 (상세 결과는 표시하지 않음)');
+  assert.ok(sent.every(m => !JSON.stringify(m).includes('.env') && !JSON.stringify(m).includes('secret')));
+  session.onRecord({ type: 'agent_settled' });
+  await session.incoming(privateMessage(123, 'again'));
+  session.onRecord({ type: 'tool_execution_start', toolName: 'grep' });
+  await session.serial;
+  assert.deepEqual(sent.filter(m => m.method === 'sendMessage').map(m => m.text), ['🔧 read', '🔧 grep']);
+  session.onRecord({ type: 'tool_execution_start', toolName: 'find' });
+  session.onRecord({ type: 'agent_settled' });
+  await session.serial;
+  await new Promise(resolve => setImmediate(resolve));
+  await session.serial;
+  assert.equal(sent.filter(m => m.method === 'editMessageText').at(-1).text, '🔧 grep\n🔧 find');
   session.stop();
 });
 

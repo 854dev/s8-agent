@@ -46,7 +46,7 @@ export function sessionKey(message, users, groups) {
 }
 
 export class Gateway {
-  constructor({ token, pi, chat, thread, fetchImpl = fetch, editInterval = 1000, onClose = () => {} }) {
+  constructor({ token, pi, chat, thread, fetchImpl = fetch, editInterval = 1000, onClose = () => {}, commandImpl }) {
     this.token = token;
     this.pi = pi;
     this.chat = chat;
@@ -54,12 +54,14 @@ export class Gateway {
     this.fetch = fetchImpl;
     this.editInterval = editInterval;
     this.onClose = onClose;
+    this.commandImpl = commandImpl;
     this.pending = new Map();
     this.serial = Promise.resolve();
     this.inbound = Promise.resolve();
     this.busy = false;
     this.typingState = null;
     this.stream = null;
+    this.tools = null;
     this.nextId = 0;
     this.buffer = '';
     this.decoder = new StringDecoder('utf8');
@@ -100,6 +102,7 @@ export class Gateway {
   }
   command(type, fields = {}) {
     if (this.closed) return Promise.reject(new Error('Pi process stopped'));
+    if (this.commandImpl) return this.commandImpl(type, fields);
     const id = String(++this.nextId);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Pi RPC timeout')); }, type === 'abort' ? 120000 : 30000);
@@ -151,8 +154,14 @@ export class Gateway {
       if (event.message.stopReason === 'error') this.send('Pi 응답 오류가 발생했습니다.').catch(() => {});
     } else if (event.type === 'tool_execution_start' || event.type === 'tool_execution_end') {
       const text = toolOutput(event);
-      if (text) this.send(text).catch(() => {});
+      if (text) {
+        if (!this.tools) this.tools = { text: '', sent: '', ids: [], flushing: false };
+        this.tools.text += `${this.tools.text ? '\n' : ''}${text}`;
+        if (!this.tools.ids.length) this.flush(this.tools);
+      }
     } else if (event.type === 'agent_settled') {
+      if (this.tools) this.flush(this.tools);
+      this.tools = null;
       this.busy = false;
       this.stopTyping();
     }
@@ -222,7 +231,10 @@ export class Gateway {
     this.pi.stderr.on('data', () => { /* Pi diagnostics may contain secrets. */ });
     this.pi.on('error', error => { console.error('Pi process failed:', error.message); this.close(); });
     this.pi.on('exit', () => this.close());
-    this.timer = setInterval(() => { if (this.stream) this.flush(this.stream); }, this.editInterval);
+    this.timer = setInterval(() => {
+      if (this.stream) this.flush(this.stream);
+      if (this.tools) this.flush(this.tools);
+    }, this.editInterval);
     try { await this.command('get_state'); }
     catch (error) { this.stop(); throw error; }
     return this;

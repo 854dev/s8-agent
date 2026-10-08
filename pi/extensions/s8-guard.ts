@@ -2,14 +2,16 @@ import path from "node:path";
 import { lstatSync, realpathSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const protectedSegments = [".git", ".pi", ".pi-runtime", ".s8-runtime", "SECRET", "secret"];
 const pathTools = new Set(["read", "write", "edit", "grep", "find", "ls"]);
+
+function sensitive(value: string): boolean {
+  return value.split(path.sep).some(segment => /secret/i.test(segment) ||
+    (segment.startsWith('.env') && !(segment === '.env.example' && path.basename(value) === segment)));
+}
 
 function protectedPath(value: unknown, cwd: string): boolean {
   if (typeof value !== "string" || value.length === 0) return false;
   const absolute = path.resolve(cwd, value.replace(/^@/, ""));
-  const devRoot = path.resolve(cwd, "..");
-  const realDevRoot = realpathSync(devRoot);
   if (path.basename(absolute) === '.env.example') {
     try {
       const stat = lstatSync(absolute);
@@ -18,24 +20,22 @@ function protectedPath(value: unknown, cwd: string): boolean {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return true;
     }
   }
-  const paths = [absolute];
-  try { paths.push(realpathSync(absolute)); }
-  catch {
-    // For a new file, resolve its existing parent to catch links into protected directories.
-    try { paths.push(path.join(realpathSync(path.dirname(absolute)), path.basename(absolute))); }
-    catch { return true; }
+  if (sensitive(absolute)) return true;
+  let ancestor = absolute;
+  while (true) {
+    try { return sensitive(path.join(realpathSync(ancestor), path.relative(ancestor, absolute))); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return true;
+      try { if (lstatSync(ancestor).isSymbolicLink()) return true; }
+      catch { /* Parent does not exist yet. */ }
+      ancestor = path.dirname(ancestor);
+    }
   }
-  return paths.some((candidate, index) => {
-    const relative = path.relative(index === 0 ? devRoot : realDevRoot, candidate);
-    return relative.startsWith('..') || path.isAbsolute(relative) ||
-      relative.split(path.sep).some(segment => protectedSegments.includes(segment) || segment === '.env' ||
-        (segment.startsWith('.env.') && !(segment === '.env.example' && path.basename(candidate) === segment)));
-  });
 }
 
 function protectedShellCommand(value: unknown): boolean {
   if (typeof value !== "string") return false;
-  return /(^|[\s/'"=])\.(?:pi|pi-runtime)(?:[\s/'";]|$)|PI_CODING_AGENT_DIR|S8_RUNTIME_ROOT/.test(value);
+  return /(^|[\s/'"=])(?:\.env(?!\.example(?:[\s/'";]|$))[^\s/'";]*|[^\s/'";]*secret[^\s/'";]*)(?=[\s/'";]|$)/i.test(value);
 }
 
 export default function (pi: ExtensionAPI) {

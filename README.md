@@ -63,7 +63,7 @@ S8_KB_ROOT=/path/to/workspace
 
 상대 경로는 `s8-agent` 루트 기준이며 `.env`는 Git에 포함되지 않는다.
 
-## Telegram Gateway (별도 Pi RPC 세션)
+## Telegram 연동 (Pi 터미널 세션 공유)
 
 기존 `~/.pi/agent/telegram.json`은 자동으로 읽거나 복사하지 않는다. 봇 토큰과 허용할 사용자 또는 그룹 ID를 사용자가 직접 설정한다. 기존 `TELEGRAM_ALLOWED_CHAT_IDS`는 더 이상 사용하지 않는다. `s8-agent/.env`에 다음을 추가한다(기존 항목은 덮어쓰지 않는다).
 
@@ -79,10 +79,10 @@ TELEGRAM_ALLOWED_GROUP_IDS=-1001234567890,-1009876543210
 ```bash
 cd /path/to/s8-agent
 chmod 600 .env
-./start-pi.sh telegram
+./start-pi.sh
 ```
 
-`./start-pi.sh --help`로 실행 방법을 확인할 수 있다. `telegram`은 기존 Pi TUI를 시작하지 않는다. 허용된 채팅에서 `/help`, `/status`, `/abort`, `/new` 사용 가능. 각 개인 채팅 및 그룹 토픽은 독립 Pi RPC 프로세스·세션 디렉터리를 사용하며 채팅 수 제한은 두지 않는다(채팅 수만큼 프로세스가 늘어난다). 기존 단일 Telegram 세션은 자동 이관하지 않는다. 각 채팅의 `/new`는 그 채팅 세션만 새로 시작한다. 오프라인 중 전송된 메시지는 재시작 시 재실행하지 않고 건너뛴다. 같은 봇 토큰으로 polling하는 다른 프로세스나 여러 게이트웨이 인스턴스를 동시에 띄우지 않는다. Pi 확인 대화상자는 안전을 위해 취소한다. 민감한 결과를 다루는 작업은 Telegram으로 요청하지 않는다. 정규식 기반 redaction은 완전한 유출 방지책이 아니다.
+`./start-pi.sh --help`로 실행 방법을 확인할 수 있다. 설정된 경우 Pi 터미널 안에서 Telegram을 연결한다. 같은 장비에서 여러 Pi 터미널이 실행되면 마지막에 시작한 인스턴스가 Telegram을 맡고, 종료되면 이전 인스턴스가 다시 연결한다. 첫 번째로 메시지를 보낸 허용 채팅에만 해당 터미널을 연결하며, 다른 채팅은 응답하지 않는다. 터미널과 연결된 Telegram 채팅은 같은 대화와 도구 진행을 공유한다. `/help`, `/status`, `/abort`를 지원하며 새 대화(`/new`)는 터미널에서만 수행한다. 기존 독립 Telegram 세션은 자동 이관하지 않는다. 오프라인 중 전송된 메시지는 재연결 시 재실행하지 않고 건너뛴다. 다른 장비에서 같은 봇 토큰으로 polling하지 않는다. Telegram 요청 중 Pi 확인 대화상자가 열리면 중단을 요청한다. 터미널에서 추가 확인이 필요한 작업은 직접 처리한다. 민감한 결과를 다루는 작업은 Telegram으로 요청하지 않는다. 정규식 기반 redaction은 완전한 유출 방지책이 아니다.
 
 검증: `node --test apps/telegram-gateway/gateway.test.mjs`
 
