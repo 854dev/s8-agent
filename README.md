@@ -63,6 +63,29 @@ S8_KB_ROOT=/path/to/workspace
 
 상대 경로는 `s8-agent` 루트 기준이며 `.env`는 Git에 포함되지 않는다.
 
+## Telegram Gateway (별도 Pi RPC 세션)
+
+기존 `~/.pi/agent/telegram.json`은 자동으로 읽거나 복사하지 않는다. 봇 토큰과 허용할 사용자 또는 그룹 ID를 사용자가 직접 설정한다. 기존 `TELEGRAM_ALLOWED_CHAT_IDS`는 더 이상 사용하지 않는다. `s8-agent/.env`에 다음을 추가한다(기존 항목은 덮어쓰지 않는다).
+
+```dotenv
+S8_KB_ROOT=/path/to/existing/workspace
+TELEGRAM_BOT_TOKEN=your-bot-token
+TELEGRAM_ALLOWED_USER_IDS=123456789,987654321
+TELEGRAM_ALLOWED_GROUP_IDS=-1001234567890,-1009876543210
+```
+
+두 허용 목록 중 하나만 설정해도 된다. 개인 채팅은 `from.id`가 허용 사용자 목록에 있어야 한다. 그룹·슈퍼그룹은 `chat.id`가 허용 그룹 목록에 있어야 하며, 그 그룹의 **모든 참여자**가 봇을 사용할 수 있다. 허용된 사용자가 미등록 그룹에서 보낸 메시지는 무시한다. 그룹 전체 메시지를 받으려면 BotFather의 privacy mode 설정을 별도 확인한다. 그룹 권한이 과도하다면 그룹 ID 대신 개인 채팅의 사용자 ID만 사용한다. 토큰이나 ID를 Git에 넣지 않는다.
+
+```bash
+cd /path/to/s8-agent
+chmod 600 .env
+./start-pi.sh telegram
+```
+
+`./start-pi.sh --help`로 실행 방법을 확인할 수 있다. `telegram`은 기존 Pi TUI를 시작하지 않는다. 허용된 채팅에서 `/help`, `/status`, `/abort`, `/new` 사용 가능. 각 개인 채팅 및 그룹 토픽은 독립 Pi RPC 프로세스·세션 디렉터리를 사용하며 채팅 수 제한은 두지 않는다(채팅 수만큼 프로세스가 늘어난다). 기존 단일 Telegram 세션은 자동 이관하지 않는다. 각 채팅의 `/new`는 그 채팅 세션만 새로 시작한다. 오프라인 중 전송된 메시지는 재시작 시 재실행하지 않고 건너뛴다. 같은 봇 토큰으로 polling하는 다른 프로세스나 여러 게이트웨이 인스턴스를 동시에 띄우지 않는다. Pi 확인 대화상자는 안전을 위해 취소한다. 민감한 결과를 다루는 작업은 Telegram으로 요청하지 않는다. 정규식 기반 redaction은 완전한 유출 방지책이 아니다.
+
+검증: `node --test apps/telegram-gateway/gateway.test.mjs`
+
 ## 다른 장비에서 재현
 
 ```bash

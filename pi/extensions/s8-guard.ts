@@ -1,5 +1,5 @@
 import path from "node:path";
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const protectedSegments = [".git", ".pi", ".pi-runtime", ".s8-runtime", "SECRET", "secret"];
@@ -9,12 +9,27 @@ function protectedPath(value: unknown, cwd: string): boolean {
   if (typeof value !== "string" || value.length === 0) return false;
   const absolute = path.resolve(cwd, value.replace(/^@/, ""));
   const devRoot = path.resolve(cwd, "..");
+  const realDevRoot = realpathSync(devRoot);
+  if (path.basename(absolute) === '.env.example') {
+    try {
+      const stat = lstatSync(absolute);
+      if (!stat.isFile() || stat.nlink !== 1) return true; // No symlink or hardlink to a secret file.
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return true;
+    }
+  }
   const paths = [absolute];
-  try { paths.push(realpathSync(absolute)); } catch { /* Nonexistent paths are checked by their resolved names. */ }
-  return paths.some(candidate => {
-    const relative = path.relative(devRoot, candidate);
+  try { paths.push(realpathSync(absolute)); }
+  catch {
+    // For a new file, resolve its existing parent to catch links into protected directories.
+    try { paths.push(path.join(realpathSync(path.dirname(absolute)), path.basename(absolute))); }
+    catch { return true; }
+  }
+  return paths.some((candidate, index) => {
+    const relative = path.relative(index === 0 ? devRoot : realDevRoot, candidate);
     return relative.startsWith('..') || path.isAbsolute(relative) ||
-      relative.split(path.sep).some(segment => protectedSegments.includes(segment) || segment === '.env' || segment.startsWith('.env.'));
+      relative.split(path.sep).some(segment => protectedSegments.includes(segment) || segment === '.env' ||
+        (segment.startsWith('.env.') && !(segment === '.env.example' && path.basename(candidate) === segment)));
   });
 }
 

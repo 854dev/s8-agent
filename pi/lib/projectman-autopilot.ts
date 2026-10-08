@@ -18,16 +18,19 @@ export function eligibleForReadOnly(item: ProjectmanContent): boolean {
 
 export type RunResult = { status: 'completed' | 'stopped' | 'timeout' | 'failed'; output: string };
 
-// GNU timeout remains the deadline owner even if the Pi parent exits unexpectedly.
+// Linux keeps GNU timeout as an independent deadline owner.
+// ponytail: macOS uses the Pi parent timer; add a detached watchdog if forced parent crashes leave orphaned children.
 export async function runBoundedProcess(binary: string, args: string[], cwd: string, maxMs: number, signal: AbortSignal, scope: string): Promise<RunResult> {
-  if (process.platform !== 'linux' || !Number.isFinite(maxMs) || maxMs <= 0 || signal.aborted) {
+  if (!['linux', 'darwin'].includes(process.platform) || !Number.isFinite(maxMs) || maxMs <= 0 || signal.aborted) {
     return { status: 'stopped', output: '' };
   }
   const env = { ...process.env };
   delete env.PHCMS_ACCESS_TOKEN;
   delete env.PHCMS_API_URL;
   env.S8_AUTOPILOT_SCOPE = scope;
-  const child = spawn('/usr/bin/timeout', ['--signal=TERM', '--kill-after=2s', `${Math.max(1, Math.ceil(maxMs / 1000))}s`, binary, ...args],
+  const linux = process.platform === 'linux';
+  const child = spawn(linux ? '/usr/bin/timeout' : binary,
+    linux ? ['--signal=TERM', '--kill-after=2s', `${Math.max(1, Math.ceil(maxMs / 1000))}s`, binary, ...args] : args,
     { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   let status: RunResult['status'] | undefined;
   let forceKill: ReturnType<typeof setTimeout> | undefined;
@@ -50,7 +53,7 @@ export async function runBoundedProcess(binary: string, args: string[], cwd: str
     return await new Promise<RunResult>(resolve => {
       child.once('error', () => resolve({ status: 'failed', output: '' }));
       child.once('close', code => resolve({
-        status: status ?? (code === 0 ? 'completed' : code === 124 || code === 137 ? 'timeout' : 'failed'), output,
+        status: status ?? (code === 0 ? 'completed' : linux && (code === 124 || code === 137) ? 'timeout' : 'failed'), output,
       }));
     });
   } finally {

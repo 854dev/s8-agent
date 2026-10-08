@@ -2,7 +2,25 @@
 set -euo pipefail
 
 AGENT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
+    printf '%s\n' \
+        '사용법: ./start-pi.sh [telegram | Pi 옵션]' \
+        '  (인자 없음)      Pi 터미널 실행' \
+        '  telegram         Telegram Gateway 실행 (별도 Pi RPC 세션)' \
+        '  --help, -h       이 도움말 표시' \
+        '  그 외 인자는 Pi CLI에 전달합니다. Pi 옵션: pi/node_modules/.bin/pi --help' \
+        '  Telegram 설정: TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USER_IDS / TELEGRAM_ALLOWED_GROUP_IDS' \
+        '  작업 디렉터리: S8_KB_ROOT (기본값: ../854_md)'
+    exit 0
+fi
 [ ! -f "$AGENT_ROOT/.env" ] || { set -a; source "$AGENT_ROOT/.env"; set +a; }
+if [[ "${1:-}" == telegram ]]; then
+    if (( $# != 1 )); then
+        printf '%s\n' '오류: telegram 명령은 추가 인자를 받지 않습니다.' >&2
+        exit 2
+    fi
+    exec node "$AGENT_ROOT/apps/telegram-gateway/gateway.mjs"
+fi
 KNOWLEDGE_BASE_ROOT="${S8_KB_ROOT:-$AGENT_ROOT/../854_md}"
 case "$KNOWLEDGE_BASE_ROOT" in
     /*) ;;
