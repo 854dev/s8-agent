@@ -5,7 +5,8 @@ AGENT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
     printf '%s\n' \
         '사용법: ./start-pi.sh [Pi 옵션]' \
-        '  (인자 없음)      Pi 터미널 및 Telegram 연동 실행' \
+        '  (인자 없음)      Telegram 없이 Pi 터미널 실행' \
+        '  --telegram       Telegram 연동 실행 (Pi 옵션과 함께 사용 가능)' \
         '  --help, -h       이 도움말 표시' \
         '  그 외 인자는 Pi CLI에 전달합니다. Pi 옵션: pi/node_modules/.bin/pi --help' \
         '  Telegram 설정: TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USER_IDS / TELEGRAM_ALLOWED_GROUP_IDS' \
@@ -26,6 +27,11 @@ KNOWLEDGE_BASE_ROOT="$(cd -- "$KNOWLEDGE_BASE_ROOT" && pwd -P)"
 PI_CONFIG_ROOT="$AGENT_ROOT/pi"
 PI_CODING_AGENT_DIR="$AGENT_ROOT/.pi-runtime"
 PI_BINARY="$PI_CONFIG_ROOT/node_modules/.bin/pi"
+TELEGRAM_EXTENSION=''
+if [[ "${1:-}" == --telegram ]]; then
+    TELEGRAM_EXTENSION="$PI_CONFIG_ROOT/extensions/telegram.mjs"
+    shift
+fi
 
 [ -x "$PI_BINARY" ] || {
     printf '%s\n' '오류: Pi가 설치되지 않았습니다. npm ci --ignore-scripts --prefix pi를 실행하세요.' >&2
@@ -60,7 +66,7 @@ esac
 exec "$PI_BINARY" \
     --extension "$PI_CONFIG_ROOT/extensions/s8-guard.ts" \
     --extension "$PI_CONFIG_ROOT/extensions/projectman.ts" \
-    --extension "$PI_CONFIG_ROOT/extensions/telegram.mjs" \
+    ${TELEGRAM_EXTENSION:+--extension} ${TELEGRAM_EXTENSION:+"$TELEGRAM_EXTENSION"} \
     --skill "$PI_CONFIG_ROOT/skills/s8-operations" \
     --append-system-prompt "$PI_CONFIG_ROOT/APPEND_SYSTEM.md" \
     --tools read,bash,edit,write,grep,find,ls \

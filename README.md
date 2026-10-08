@@ -43,6 +43,8 @@ Pi가 열리면 `/login`으로 이 장비의 모델 인증을 설정한다. 인�
 ```bash
 ./start-pi.sh
 ./start-pi.sh --continue
+./start-pi.sh --telegram              # Telegram을 연결할 때만 명시
+./start-pi.sh --telegram --continue
 ```
 
 tmux에서 Pi를 유지하려면 저장소 루트에서 다음을 사용한다.
@@ -79,10 +81,10 @@ TELEGRAM_ALLOWED_GROUP_IDS=-1001234567890,-1009876543210
 ```bash
 cd /path/to/s8-agent
 chmod 600 .env
-./start-pi.sh
+./start-pi.sh --telegram
 ```
 
-`./start-pi.sh --help`로 실행 방법을 확인할 수 있다. 설정된 경우 Pi 터미널 안에서 Telegram을 연결한다. 같은 장비에서 여러 Pi 터미널이 실행되면 마지막에 시작한 인스턴스가 Telegram을 맡고, 종료되면 이전 인스턴스가 다시 연결한다. 첫 번째로 메시지를 보낸 허용 채팅에만 해당 터미널을 연결하며, 다른 채팅은 응답하지 않는다. 터미널과 연결된 Telegram 채팅은 같은 대화와 도구 진행을 공유한다. `/help`, `/status`, `/abort`를 지원하며 새 대화(`/new`)는 터미널에서만 수행한다. 기존 독립 Telegram 세션은 자동 이관하지 않는다. 오프라인 중 전송된 메시지는 재연결 시 재실행하지 않고 건너뛴다. 다른 장비에서 같은 봇 토큰으로 polling하지 않는다. Telegram 요청 중 Pi 확인 대화상자가 열리면 중단을 요청한다. 터미널에서 추가 확인이 필요한 작업은 직접 처리한다. 민감한 결과를 다루는 작업은 Telegram으로 요청하지 않는다. 정규식 기반 redaction은 완전한 유출 방지책이 아니다.
+`./start-pi.sh --help`로 실행 방법을 확인할 수 있다. 기본 실행은 Telegram을 연결하지 않는다(토큰이 설정돼 있어도 polling하지 않음). `--telegram`을 지정하면 Pi 터미널 안에서 Telegram을 연결한다. 같은 장비에서 여러 Pi 터미널이 실행되면 마지막에 시작한 인스턴스가 Telegram을 맡고, 종료되면 이전 인스턴스가 다시 연결한다. 첫 번째로 메시지를 보낸 허용 채팅에만 해당 터미널을 연결하며, 다른 채팅은 응답하지 않는다. 터미널과 연결된 Telegram 채팅은 같은 대화와 도구 진행을 공유한다. `/help`, `/status`, `/abort`를 지원하며 새 대화(`/new`)는 터미널에서만 수행한다. 기존 독립 Telegram 세션은 자동 이관하지 않는다. 오프라인 중 전송된 메시지는 재연결 시 재실행하지 않고 건너뛴다. 다른 장비에서 같은 봇 토큰으로 polling하지 않는다. Telegram 요청 중 Pi 확인 대화상자가 열리면 중단을 요청한다. 터미널에서 추가 확인이 필요한 작업은 직접 처리한다. 민감한 결과를 다루는 작업은 Telegram으로 요청하지 않는다. 정규식 기반 redaction은 완전한 유출 방지책이 아니다.
 
 검증: `node --test apps/telegram-gateway/gateway.test.mjs`
 
