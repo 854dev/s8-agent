@@ -1,0 +1,52 @@
+.terminal-page {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: var(--terminal-viewport-height, 100dvh);
+  padding: 8px;
+  overflow: hidden;
+  background: light-dark(#f4f4f1, #121212);
+}
+
+.terminal-page--fullscreen {
+  position: fixed;
+  top: var(--terminal-viewport-top, 0px);
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding-top: max(6px, env(safe-area-inset-top));
+  padding-bottom: max(6px, env(safe-area-inset-bottom));
+}
+
+.terminal-page:fullscreen {
+  top: 0;
+  width: 100%;
+}
+
+.terminal-topbar, .terminal-key-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.terminal-heading { margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 14px; white-space: nowrap; }
+.terminal-topbar button, .terminal-key-row button { min-height: 44px; min-width: 44px; flex-shrink: 0; padding-inline: 9px; }
+.terminal-topbar output { min-width: 32px; text-align: center; font-size: 12px; }
+.terminal-status { flex-shrink: 0; margin: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-settings { flex-shrink: 0; font-size: 13px; }
+.terminal-settings summary { cursor: pointer; padding: 6px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-settings-content { max-height: min(260px, 35dvh); overflow: auto; padding: 6px 0; }
+.terminal-settings-content input, .terminal-paste textarea { font-size: 16px; }
+.terminal-screen { flex: 1; min-height: 40px; overflow: hidden; padding: 4px; background: #000; border-radius: 6px; }
+.terminal-shortcuts { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+.terminal-key-row { overflow-x: auto; scrollbar-width: thin; overscroll-behavior-x: contain; }
+.terminal-paste { flex-shrink: 0; max-height: 40%; overflow: auto; }
+/* Avoid iOS input auto-zoom without disabling the user's browser zoom. */
+.terminal-page .xterm-helper-textarea { font-size: 16px !important; }
+
+@media (max-width: 480px) {
+  .terminal-topbar { gap: 2px; }
+  .terminal-topbar button { padding-inline: 7px; font-size: 12px; }
+  .terminal-heading { font-size: 13px; }
+}

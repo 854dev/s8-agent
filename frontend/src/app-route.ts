@@ -1,4 +1,4 @@
-export type AppView = 'dashboard' | 'knowledge-base' | 'upload'
+export type AppView = 'dashboard' | 'knowledge-base' | 'upload' | 'terminal'
 
 function normalizePath(pathname: string) {
   if (pathname.length <= 1) return '/'
@@ -21,6 +21,7 @@ export function getAppView(pathname: string, baseUrl = '/'): AppView {
   const normalized = normalizePath(pathname)
   if (normalized === knowledgeBasePath) return 'knowledge-base'
   if (normalized === uploadPath) return 'upload'
+  if (normalized === `${base}/terminal`) return 'terminal'
   return 'dashboard'
 }
 

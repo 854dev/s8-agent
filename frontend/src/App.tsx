@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
   ActionIcon,
   Badge,
@@ -33,6 +33,7 @@ import {
 import { buildKnowledgeBaseUrl, getAppBaseUrl, getAppView, type AppView } from './app-route'
 import KnowledgeBasePage from './features/knowledge-base/KnowledgeBasePage'
 import UploadPage from './features/upload/UploadPage'
+const TerminalPage = lazy(() => import('./features/terminal/TerminalPage'))
 
 type GroupKey = '로컬링크' | '멀티플즈ax' | '854sw'
 type TaskStatus = '진행중' | '승인대기' | '보충가능' | '보류'
@@ -193,7 +194,8 @@ function App() {
 
   const navigate = (nextView: AppView) => {
     const baseUrl = appBaseUrl
-    const nextUrl = nextView === 'knowledge-base' ? buildKnowledgeBaseUrl(baseUrl) : baseUrl
+    const nextUrl = nextView === 'knowledge-base' ? buildKnowledgeBaseUrl(baseUrl)
+      : nextView === 'dashboard' ? baseUrl : `${baseUrl.replace(/\/$/, '')}/${nextView}`
     window.history.pushState({}, '', nextUrl)
     setView(nextView)
   }
@@ -205,6 +207,7 @@ function App() {
   if (view === 'upload') {
     return <UploadPage />
   }
+  if (view === 'terminal') return <Suspense fallback={<Text>터미널 로딩 중…</Text>}><TerminalPage onBack={() => navigate('dashboard')} /></Suspense>
 
   const activeTask = tasks[0]
 
@@ -230,6 +233,7 @@ function App() {
             </Stack>
 
             <Group gap="xs">
+              <Button size="xs" variant="light" color="dark" onClick={() => navigate('terminal')}>터미널</Button>
               <Button size="xs" variant="light" color="dark" onClick={() => navigate('upload')}>업로드</Button>
               <Button size="xs" variant="light" color="dark" onClick={() => navigate('knowledge-base')}>지식베이스</Button>
               <Button size="xs" color="dark" leftSection={<IconArrowRight size={14} />}>다음 턴</Button>

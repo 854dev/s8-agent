@@ -35,9 +35,12 @@ test('Telegram and TUI send messages through the same Pi session', async t => {
     sent.push({ method, ...body });
     return { ok: true, json: async () => ({ ok: true, result: { message_id: sent.length } }) };
   };
-  attach(pi, { port, config: { TELEGRAM_BOT_TOKEN: 'test-token', TELEGRAM_ALLOWED_USER_IDS: '123' }, fetchImpl });
+  const activate = attach(pi, { port, autoStart: false, config: { TELEGRAM_BOT_TOKEN: 'test-token', TELEGRAM_ALLOWED_USER_IDS: '123' }, fetchImpl });
   t.after(() => pi.emit('session_shutdown'));
   pi.emit('session_start', null, { mode: 'tui', isIdle: () => true, abort() {}, sessionManager: { getBranch: () => [] } });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(updates, 0); // Managed sessions must not steal polling at startup.
+  activate();
   await waitFor(() => prompts.length === 1);
   assert.equal(prompts[0].text, 'telegram prompt');
   pi.emit('input', { source: 'interactive', text: 'terminal prompt' });

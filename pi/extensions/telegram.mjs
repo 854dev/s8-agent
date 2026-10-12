@@ -50,10 +50,10 @@ export function ownership({ port, key, onAcquire, onRelease, interval = 1000 }) 
   return () => { stopped = true; clearInterval(timer); release(); };
 }
 
-export function attach(pi, { port = 39485, config = process.env, fetchImpl = fetch } = {}) {
-  let stopOwner, gateway, telegramPrompt = false;
+export function attach(pi, { port = 39485, config = process.env, fetchImpl = fetch, autoStart = true } = {}) {
+  let stopOwner, gateway, telegramPrompt = false, context, enabled = autoStart;
   pi.registerCommand('telegram-new', { description: 'Telegram에서 새 대화를 시작합니다', handler: async (_args, ctx) => { await ctx.newSession(); } });
-  pi.on('session_start', (_event, ctx) => {
+  const start = ctx => {
     stopOwner?.();
     stopOwner = null;
     telegramPrompt = false;
@@ -129,7 +129,9 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
         if (bot === currentBot) releaseOwner();
       });
     } });
-  });
+    return true;
+  };
+  pi.on('session_start', (_event, ctx) => { context = ctx; if (enabled) start(ctx); });
   // Keep event delivery in the same Pi process so terminal and Telegram see one conversation.
   pi.on('input', event => {
     if (event.source === 'interactive' && event.text && !event.text.startsWith('/'))
@@ -142,7 +144,12 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
   pi.on('tool_execution_end', event => gateway?.onRecord(event));
   pi.on('ui_prompt_start', (_event, ctx) => { if (telegramPrompt) ctx.abort(); });
   pi.on('agent_settled', event => { gateway?.onRecord(event); telegramPrompt = false; });
-  pi.on('session_shutdown', () => { stopOwner?.(); stopOwner = null; });
+  pi.on('session_shutdown', () => { stopOwner?.(); stopOwner = null; context = undefined; });
+  return () => {
+    if (!context || !config.TELEGRAM_BOT_TOKEN) throw new Error('Telegram 설정 또는 실행 세션이 없습니다.');
+    if (!start(context)) throw new Error('Telegram 허용 채팅 설정이 올바르지 않습니다.');
+    enabled = true;
+  };
 }
 
 export default attach;

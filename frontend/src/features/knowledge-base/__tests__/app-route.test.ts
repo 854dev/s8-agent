@@ -17,6 +17,11 @@ describe('app route', () => {
     expect(getAppView('/s8/knowledge-base/', '/s8/')).toBe('knowledge-base')
   })
 
+  it('recognizes the terminal route', () => {
+    expect(getAppView('/s8/terminal', '/s8/')).toBe('terminal')
+    expect(getAppView('/s8/terminal/', '/s8/')).toBe('terminal')
+  })
+
   it('falls back to the dashboard for unknown paths', () => {
     expect(getAppView('/s8/settings', '/s8/')).toBe('dashboard')
     expect(getAppView('/other/knowledge-base', '/s8/')).toBe('dashboard')

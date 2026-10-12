@@ -28,6 +28,20 @@ Pi가 열리면 `/login`을 실행한다. credential과 세션은 `.pi-runtime/`
 - `pi/settings.json`을 런타임 설정 링크로 참조하며, 공유 extension, skill, 시스템 지침은 `pi/`에서 로드
 - 사용할 기본 파일 도구 명시
 
+## S8 관리 세션과 웹 터미널
+
+```bash
+./start-pi.sh --sessions
+./start-pi.sh --session main
+./start-pi.sh --session main --telegram
+npm start --prefix apps/terminal-gateway
+```
+
+- 기존 세션에는 재실행 없이 접속하며 `--telegram`은 그 세션으로 polling 소유권을 이전한다.
+- 웹에서는 `/s8/terminal`이 기본으로 호스트 셸 `s8-host-shell`에 연결된다. S8 Pi 세션도 선택할 수 있다.
+- `셸 열기`는 고정 셸을 생성·재사용한다. 브라우저 연결 해제는 셸을 종료하지 않는다. 모바일 입력은 보조 키 버튼을 사용한다.
+- 설치, 네트워크 경계와 복구 절차는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.
+
 ## tmux 활용
 
 현재 터미널에서 새 세션을 만들고 바로 접속:
@@ -55,7 +69,7 @@ frontend를 같은 tmux 세션의 별도 창에서 실행하려면 다음을 사
 
 ```bash
 tmux new-window -t pi-854-md -n frontend -c "$PWD" \
-  "npm run preview --prefix frontend -- --host 0.0.0.0 --port 4178"
+  "npm run preview --prefix frontend -- --host 127.0.0.1 --port 4178"
 ```
 
 ## frontend 준비와 실행
@@ -63,7 +77,7 @@ tmux new-window -t pi-854-md -n frontend -c "$PWD" \
 ```bash
 npm ci --ignore-scripts --prefix frontend
 npm run build --prefix frontend
-npm run preview --prefix frontend -- --host 0.0.0.0 --port 4178
+npm run preview --prefix frontend -- --host 127.0.0.1 --port 4178
 ```
 
 상태 확인:
@@ -160,7 +174,8 @@ API health만 실패:
 ```bash
 bash -n start-pi.sh
 ./start-pi.sh --version
-docker compose -f infra/nginx/docker-compose.yml config
+NGINX_BIND_IP=127.0.0.1 docker compose --env-file /dev/null -f infra/nginx/docker-compose.yml config --quiet
+npm test --prefix apps/terminal-gateway
 npm test --prefix apps/kb-browser
 npm run test:run --prefix frontend
 npm run build --prefix frontend

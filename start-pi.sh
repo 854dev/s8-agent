@@ -7,12 +7,49 @@ if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
         '사용법: ./start-pi.sh [Pi 옵션]' \
         '  (인자 없음)      Telegram 없이 Pi 터미널 실행' \
         '  --telegram       Telegram 연동 실행 (Pi 옵션과 함께 사용 가능)' \
+        '  --sessions       실행 중인 S8 tmux 세션 목록' \
+        '  --session 이름   S8 tmux 세션 생성 또는 접속 (--telegram으로 연결 이전)' \
         '  --help, -h       이 도움말 표시' \
         '  그 외 인자는 Pi CLI에 전달합니다. Pi 옵션: pi/node_modules/.bin/pi --help' \
         '  Telegram 설정: TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USER_IDS / TELEGRAM_ALLOWED_GROUP_IDS' \
         '  작업 디렉터리: S8_KB_ROOT (기본값: ../854_md)'
     exit 0
 fi
+if [[ "${1:-}" == --sessions ]]; then
+    node --input-type=module -e "import {listSessions} from '$AGENT_ROOT/pi/lib/managed-sessions.mjs'; console.log((await listSessions()).join('\\n') || '실행 중인 S8 세션이 없습니다.');"
+    exit 0
+fi
+# Pi's --session file.jsonl option remains available for saved conversation files.
+if [[ "${1:-}" == --telegram && "${2:-}" == --session && "${3:-}" != */* && "${3:-}" != *.jsonl ]]; then
+    shift
+    session_arg="${2:-}"
+    shift 2
+    set -- --session "$session_arg" --telegram "$@"
+fi
+if [[ "${1:-}" == --session && "${2:-}" != */* && "${2:-}" != *.jsonl ]]; then
+    name="${2:-}"
+    [[ "$name" =~ ^[A-Za-z0-9_-]{1,40}$ ]] || { echo '잘못된 세션 이름입니다.' >&2; exit 2; }
+    shift 2
+    session="s8-$name"
+    telegram=false
+    if [[ "${1:-}" == --telegram ]]; then telegram=true; shift; fi
+    if ! tmux has-session -t "=$session" 2>/dev/null; then
+        printf -v cmd '%q ' "$AGENT_ROOT/start-pi.sh" --managed "$@"
+        tmux new-session -d -s "$session" -c "$AGENT_ROOT" "$cmd"
+        tmux set-option -t "$session" @s8-managed 1
+    elif [[ "$(tmux show-option -t "$session" -v @s8-managed 2>/dev/null)" != 1 ]]; then
+        echo 'S8이 관리하지 않는 세션입니다.' >&2; exit 2
+    elif (($# > 0)); then
+        echo '기존 세션 접속 시 Pi 실행 옵션은 변경할 수 없습니다.' >&2; exit 2
+    fi
+    if $telegram; then
+        node --input-type=module -e "import {moveTelegram} from '$AGENT_ROOT/pi/lib/managed-sessions.mjs'; await moveTelegram(process.argv[1]);" "$AGENT_ROOT/.pi-runtime/$session.sock"
+    fi
+    if [[ -n "${TMUX:-}" ]]; then exec tmux switch-client -t "=$session"; fi
+    exec tmux attach-session -t "=$session"
+fi
+managed=false
+if [[ "${1:-}" == --managed ]]; then managed=true; shift; fi
 [ ! -f "$AGENT_ROOT/.env" ] || { set -a; source "$AGENT_ROOT/.env"; set +a; }
 if [[ "${1:-}" == telegram ]]; then
     printf '%s\n' 'telegram 단독 실행은 지원하지 않습니다. 인자 없이 ./start-pi.sh를 실행하세요.' >&2
@@ -70,7 +107,11 @@ while true; do
         --extension "$PI_CONFIG_ROOT/extensions/s8-guard.ts"
         --extension "$PI_CONFIG_ROOT/extensions/projectman.ts"
     )
-    if [[ -n "$TELEGRAM_EXTENSION" ]]; then
+    if $managed; then
+        managed_name="$(tmux display-message -p '#S')"
+        [[ "$managed_name" =~ ^s8-[A-Za-z0-9_-]{1,40}$ ]] || { echo '관리 세션에서만 실행할 수 있습니다.' >&2; exit 2; }
+        pi_args+=(--session-dir "$PI_CODING_AGENT_DIR/managed/$managed_name" --extension "$PI_CONFIG_ROOT/extensions/managed-session.mjs")
+    elif [[ -n "$TELEGRAM_EXTENSION" ]]; then
         pi_args+=(--extension "$TELEGRAM_EXTENSION")
     fi
     pi_args+=(

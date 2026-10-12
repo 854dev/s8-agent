@@ -65,6 +65,14 @@ S8_KB_ROOT=/path/to/workspace
 
 상대 경로는 `s8-agent` 루트 기준이며 `.env`는 Git에 포함되지 않는다.
 
+## 웹 터미널
+
+- `/s8/terminal`은 기본으로 호스트 셸에 접속한다. 설정 편집·명령 실행과 모바일 보조 키를 지원하며 S8 Pi 세션도 선택할 수 있다.
+- `./start-pi.sh --sessions`로 목록, `./start-pi.sh --session main`으로 생성·접속한다.
+- `./start-pi.sh --session main --telegram`으로 실행 중인 세션에 Telegram 연결을 이전한다.
+- backend 설치·실행, Tailscale 전용 노출 및 복구는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.
+- 별도 웹 인증은 없으므로 Tailscale IP와 ACL을 접근 권한 경계로 유지한다.
+
 ## Telegram 연동 (Pi 터미널 세션 공유)
 
 기존 `~/.pi/agent/telegram.json`은 자동으로 읽거나 복사하지 않는다. 봇 토큰과 허용할 사용자 또는 그룹 ID를 사용자가 직접 설정한다. 기존 `TELEGRAM_ALLOWED_CHAT_IDS`는 더 이상 사용하지 않는다. `s8-agent/.env`에 다음을 추가한다(기존 항목은 덮어쓰지 않는다).

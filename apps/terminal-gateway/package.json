@@ -1,0 +1,7 @@
+{
+  "name": "s8-terminal-gateway",
+  "private": true,
+  "type": "module",
+  "scripts": { "postinstall": "node prepare-pty.mjs", "start": "node prepare-pty.mjs && node server.mjs", "test": "node --test *.test.mjs" },
+  "dependencies": { "node-pty": "1.1.0", "ws": "8.22.0" }
+}

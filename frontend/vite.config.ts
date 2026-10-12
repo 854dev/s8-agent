@@ -11,15 +11,17 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      '/api/terminal': { target: 'http://127.0.0.1:8790', ws: true, changeOrigin: false },
       '/api': apiProxy,
     },
-    host: '0.0.0.0',
+    host: '127.0.0.1',
   },
   preview: {
     proxy: {
+      '/api/terminal': { target: 'http://127.0.0.1:8790', ws: true, changeOrigin: false },
       '/api': apiProxy,
     },
-    host: '0.0.0.0',
+    host: '127.0.0.1',
   },
   test: {
     environment: 'jsdom',

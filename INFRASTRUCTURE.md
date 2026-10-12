@@ -17,6 +17,7 @@ dev_854/
 ├── 854_md/                   # 지식과 프로젝트 문서
 │   └── AGENTS.md
 └── s8-agent/                # 에이전트 설정과 실행 코드
+    ├── apps/terminal-gateway/ # 호스트 PTY/WebSocket 서비스
     ├── apps/kb-browser/      # 읽기 전용 문서 API
     ├── frontend/             # 운영 콘솔
     ├── infra/nginx/          # proxy와 Compose
@@ -34,6 +35,7 @@ Tailscale 장치
   -> Nginx container
       -> /s8/        -> host.docker.internal:4178
       -> /api/docs/  -> kb-browser:8787
+      -> /api/terminal/ -> host.docker.internal:8790
       -> /health     -> Nginx 자체 응답
 
 호스트
@@ -59,7 +61,9 @@ NGINX_BIND_IP=100.120.50.80 docker compose -f infra/nginx/docker-compose.yml up 
 
 - Tailscale 전용 운영에서는 실제 Tailscale IPv4를 명시한다.
 - localhost 앞단만 사용할 때는 `127.0.0.1`을 지정한다.
-- `0.0.0.0`은 모든 인터페이스에 노출될 수 있으므로 운영 기본값으로 간주하지 않는다.
+- `NGINX_BIND_IP`는 필수이며 전체 인터페이스로의 기본 바인딩은 없다. 운영에서 실제 Tailscale IP를 지정한다.
+- `0.0.0.0`은 모든 인터페이스에 노출되므로 웹 터미널 운영에 사용하지 않는다.
+- 웹 터미널은 별도 인증 없이 호스트 사용자 권한을 제공한다. Tailscale ACL과 전용 바인딩을 접근 권한 경계로 사용한다. Host/Origin 검사로 다른 웹사이트의 연결을 차단한다.
 - 쓰기 API는 인증과 승인 정책 없이 추가하지 않는다.
 
 ## 지식베이스 공개 경계
@@ -104,5 +108,5 @@ NGINX_BIND_IP=100.120.50.80 docker compose -f infra/nginx/docker-compose.yml up 
 test -f pi/settings.json
 test -f pi/package-lock.json
 bash -n start-pi.sh
-docker compose -f infra/nginx/docker-compose.yml config
+NGINX_BIND_IP=127.0.0.1 docker compose --env-file /dev/null -f infra/nginx/docker-compose.yml config --quiet
 ```
