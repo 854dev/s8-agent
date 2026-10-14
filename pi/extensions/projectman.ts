@@ -5,7 +5,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { projectmanFromEnv, type ProjectmanClient } from '../lib/projectman-client.ts';
 
 const fields = Type.Object({
-  action: Type.Union([Type.Literal('list'), Type.Literal('get'), Type.Literal('create'), Type.Literal('transition'), Type.Literal('resume')]),
+  action: Type.Union([Type.Literal('list'), Type.Literal('get'), Type.Literal('create'), Type.Literal('transition'), Type.Literal('resume'), Type.Literal('schedule')]),
   uid: Type.Optional(Type.String()),
   parentUid: Type.Optional(Type.String()),
   type: Type.Optional(Type.String()),
@@ -18,6 +18,7 @@ const fields = Type.Object({
   event: Type.Optional(Type.String()),
   message: Type.Optional(Type.String()),
   requestId: Type.Optional(Type.String()),
+  scheduledAt: Type.Optional(Type.Union([Type.String(), Type.Null()])),
 });
 
 const approvalTags = new Set(['need:approval', 'need:review', 'risk:sensitive']);
@@ -52,6 +53,9 @@ export default function (pi: ExtensionAPI) {
       } else if (args.action === 'get') {
         if (!args.uid) throw new Error('uid required');
         result = await client.get(args.uid);
+      } else if (args.action === 'schedule') {
+        if (!args.uid || args.scheduledAt === undefined) throw new Error('uid and scheduledAt (ISO date/time or null) required');
+        result = await client.schedule(args.uid, args.scheduledAt);
       } else if (args.action === 'resume') {
         if (!args.uid) throw new Error('uid required');
         result = await client.resume(args.uid);

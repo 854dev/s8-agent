@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import { controlSchedules } from '../../pi/lib/scheduler-control.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const visible = text => String(text)
@@ -58,7 +59,7 @@ export function sessionKey(message, users, groups) {
 }
 
 export class Gateway {
-  constructor({ token, pi, chat, thread, fetchImpl = fetch, editInterval = 1000, onClose = () => {}, commandImpl }) {
+  constructor({ token, pi, chat, thread, fetchImpl = fetch, editInterval = 1000, onClose = () => {}, commandImpl, schedulerImpl = (action, id) => controlSchedules(path.join(root, '.s8-runtime', 'scheduler'), action, id) }) {
     this.token = token;
     this.pi = pi;
     this.chat = chat;
@@ -67,6 +68,7 @@ export class Gateway {
     this.editInterval = editInterval;
     this.onClose = onClose;
     this.commandImpl = commandImpl;
+    this.schedulerImpl = schedulerImpl;
     this.pending = new Map();
     this.serial = Promise.resolve();
     this.inbound = Promise.resolve();
@@ -114,7 +116,7 @@ export class Gateway {
     }));
   }
   menuMarkup() {
-    return { keyboard: [['상태', '중단'], ['새 대화', '모델'], ['재시작', '메뉴', '도움말']], resize_keyboard: true, is_persistent: true };
+    return { keyboard: [['상태', '중단'], ['배치'], ['새 대화', '모델'], ['재시작', '메뉴', '도움말']], resize_keyboard: true, is_persistent: true };
   }
   showMenu() { return this.send('s8 메뉴', this.menuMarkup()); }
   command(type, fields = {}) {
@@ -213,9 +215,18 @@ export class Gateway {
   async incoming(message) {
     const text = message.text.trim();
     if (!text) return;
-    const action = ({ '상태': '/status', '중단': '/abort', '새 대화': '/new', '재시작': '/restart', '도움말': '/help', '모델': '/model' })[text]
+    const action = ({ '상태': '/status', '중단': '/abort', '새 대화': '/new', '재시작': '/restart', '도움말': '/help', '모델': '/model', '배치': '/jobs' })[text]
       ?? (this.models?.find(model => model.name === text) ? `model:${this.models.find(model => model.name === text).id}` : text);
     try {
+      const scheduleCommand = /^\/jobs(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$/.exec(action);
+      if (scheduleCommand) {
+        const [operation = 'list', id, ...extra] = (scheduleCommand[1] ?? '').trim().split(/\s+/).filter(Boolean);
+        if (extra.length || !['list', 'pause', 'resume', 'stop'].includes(operation) || (operation !== 'list' && !id)) {
+          return await this.send('사용법: /jobs\n/jobs pause ID — 예약 정지\n/jobs resume ID — 예약 재개\n/jobs stop ID — 실행 중인 배치 중단');
+        }
+        try { return await this.send(await this.schedulerImpl(operation, id)); }
+        catch (error) { return await this.send(`예약 관리 실패: ${error.message}`); }
+      }
       if (action === '/help') return await this.send([
         '명령어:',
         '/status - 현재 상태',
@@ -223,6 +234,7 @@ export class Gateway {
         '/new - 새 대화',
         '/model - 모델 선택',
         '/restart - Pi 재시작',
+        '/jobs - 배치 상태·중단 (stop ID)',
         '/help - 이 도움말',
       ].join('\n'), this.menuMarkup());
       if (action === '/status') {

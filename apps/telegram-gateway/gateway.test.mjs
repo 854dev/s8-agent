@@ -108,7 +108,7 @@ test('Telegram keyboard buttons invoke the matching Pi actions and model selecti
   assert.ok(sent.some(item => item.text.includes('토큰 23')));
   await session.incoming(privateMessage(123, '/help'));
   const help = sent.find(item => item.text.startsWith('명령어:'));
-  assert.deepEqual(help.text.match(/^\/\w+/gm), ['/status', '/abort', '/new', '/model', '/restart', '/help']);
+  assert.deepEqual(help.text.match(/^\/\w+/gm), ['/status', '/abort', '/new', '/model', '/restart', '/jobs', '/help']);
   assert.equal(help.reply_markup.is_persistent, true);
   await session.incoming(privateMessage(123, '모델'));
   assert.deepEqual(sent.find(item => item.text === '모델을 선택하세요.').reply_markup.keyboard[0], ['Provider · Model']);
@@ -120,6 +120,26 @@ test('Telegram keyboard buttons invoke the matching Pi actions and model selecti
   assert.equal(calls.at(-1).type, 'new_session');
   await session.incoming(privateMessage(123, '재시작'));
   assert.equal(calls.at(-1).type, 'restart');
+});
+
+test('jobs commands manage batches without prompting the model', async () => {
+  const { sent, fetchImpl } = transport();
+  const { pi } = fake();
+  const calls = [];
+  const session = new Gateway({ token: 'fake', chat: 123, pi, fetchImpl,
+    schedulerImpl: async (action, id) => { calls.push([action, id]); return 'schedule result'; },
+  });
+  for (const text of ['/jobs', '배치', '/jobs pause morning', '/jobs resume morning', '/jobs stop morning']) {
+    await session.incoming(privateMessage(123, text));
+  }
+  assert.deepEqual(calls, [['list', undefined], ['list', undefined], ['pause', 'morning'], ['resume', 'morning'], ['stop', 'morning']]);
+  await session.incoming(privateMessage(123, '/jobs delete morning'));
+  assert.equal(calls.length, 5);
+  assert.ok(sent.at(-1).text.startsWith('사용법:'));
+  await session.incoming(privateMessage(123, '/schedule'));
+  assert.equal(calls.length, 5);
+  assert.match(sent.at(-1).text, /알 수 없는 명령/);
+  session.stop();
 });
 
 test('one chat streams edits and hides successful tool end, args and raw results', async () => {

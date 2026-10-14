@@ -3,16 +3,17 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import TerminalPage from './TerminalPage'
 
-const mock = vi.hoisted(() => ({ input: null as null | ((data: string) => void), sent: [] as string[], url: '', options: { fontSize: 12 }, instances: 0, fits: 0 }))
+const mock = vi.hoisted(() => ({ input: null as null | ((data: string) => void), sent: [] as string[], url: '', options: { fontSize: 12, fontFamily: '' }, instances: 0, fits: 0, refreshes: 0 }))
 vi.mock('@xterm/xterm', () => ({ Terminal: class {
   cols = 80; rows = 24
-  options: { fontSize: number }
-  constructor(options: { fontSize: number }) { this.options = options; mock.options = options; mock.instances++ }
+  options: { fontSize: number; fontFamily: string }
+  constructor(options: { fontSize: number; fontFamily: string }) { this.options = options; mock.options = options; mock.instances++ }
   loadAddon() {} open() {} write() {} focus() {} dispose() {}
+  refresh() { mock.refreshes++ }
   onData(handler: (data: string) => void) { mock.input = handler; return { dispose() {} } }
 } }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() { mock.fits++ } } }))
-afterEach(() => { vi.unstubAllGlobals(); Reflect.deleteProperty(document, 'fullscreenElement'); mock.sent = []; mock.input = null; mock.instances = 0; mock.fits = 0 })
+afterEach(() => { vi.unstubAllGlobals(); Reflect.deleteProperty(document, 'fullscreenElement'); Reflect.deleteProperty(document, 'fonts'); mock.sent = []; mock.input = null; mock.instances = 0; mock.fits = 0; mock.refreshes = 0 })
 it('defaults to host shell and sends mobile keys, Ctrl chords, and paste without an appended Enter', async () => {
   class Socket {
     static OPEN = 1
@@ -27,9 +28,15 @@ it('defaults to host shell and sends mobile keys, Ctrl chords, and paste without
   const viewport = Object.assign(new EventTarget(), { height: 844, offsetTop: 0 })
   vi.stubGlobal('visualViewport', viewport)
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ sessions: ['s8-host-shell', 's8-main'] }) })))
+  const loadFont = vi.fn(async () => [])
+  Object.defineProperty(document, 'fonts', { configurable: true, value: { load: loadFont } })
   const view = render(<MantineProvider><TerminalPage onBack={() => {}} /></MantineProvider>)
   await screen.findByText('연결됨')
   expect(mock.url).toContain('session=s8-host-shell')
+  expect(loadFont).toHaveBeenCalledWith('12px "S8 Nerd Symbols"', '\uf4d3')
+  expect(mock.options.fontFamily).toContain('"S8 Nerd Symbols"')
+  expect(mock.options.fontFamily).toContain('"Noto Sans Mono CJK KR"')
+  expect(mock.refreshes).toBe(1)
   const fits = mock.fits
   fireEvent.click(screen.getByRole('button', { name: '글자 축소' }))
   expect(mock.options.fontSize).toBe(11)
@@ -76,4 +83,17 @@ it('defaults to host shell and sends mobile keys, Ctrl chords, and paste without
   expect(view.container.querySelector('.terminal-page--fullscreen')).toBeNull()
   expect(document.body.style.overflow).not.toBe('hidden')
   view.unmount()
+  let finishLoading!: () => void
+  loadFont.mockImplementation(() => new Promise(resolve => { finishLoading = () => resolve([]) }))
+  const pending = render(<MantineProvider><TerminalPage onBack={() => {}} /></MantineProvider>)
+  expect(mock.instances).toBe(2) // A slow font download must not delay the shell connection.
+  const refreshes = mock.refreshes
+  pending.unmount()
+  await act(async () => finishLoading())
+  expect(mock.refreshes).toBe(refreshes) // A late font download must not touch a disposed terminal.
+  loadFont.mockRejectedValue(new Error('Font unavailable'))
+  const fallback = render(<MantineProvider><TerminalPage onBack={() => {}} /></MantineProvider>)
+  await screen.findByText('연결됨')
+  expect(mock.instances).toBe(3)
+  fallback.unmount()
 })

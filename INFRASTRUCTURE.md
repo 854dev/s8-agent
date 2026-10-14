@@ -36,6 +36,7 @@ Tailscale 장치
       -> /s8/        -> host.docker.internal:4178
       -> /api/docs/  -> kb-browser:8787
       -> /api/terminal/ -> host.docker.internal:8790
+      -> /api/v2/    -> host.docker.internal:8000 (PH-CMS API와 관리자 UI)
       -> /health     -> Nginx 자체 응답
 
 호스트

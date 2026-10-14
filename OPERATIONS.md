@@ -137,6 +137,28 @@ curl -fsS http://<BIND_IP>/api/docs/health
 curl -fsS -H 'Accept: text/html' http://<BIND_IP>/s8/knowledge-base
 ```
 
+## PH-CMS 프록시
+
+- PH-CMS는 호스트 `127.0.0.1:8000`에서 별도로 실행한다. Nginx 설정만으로 서버가 시작되지는 않는다.
+- `/api/v2/`는 원래 URI를 유지해 PH-CMS로 전달한다. `/s8/`, 문서·업로드·터미널 경로는 그대로 유지한다.
+- 관리자 로그인: `http://<TAILSCALE_IP>/api/v2/admin/login`
+- 관리자 UI의 API URL은 같은 Tailscale origin, API prefix는 `/api/v2`로 지정한다. 원격 장치에서 `localhost:8000`을 지정하지 않는다.
+- 관리자 로그인 후 키 발급 요청은 PH-CMS 관리자 페이지의 같은 origin에서 실행한다. Nginx는 별도 관리자 인증을 제공하지 않으며 PH-CMS 인증·권한 검사를 유지한다.
+- 검증 후 무중단 적용: `docker exec 854md-nginx nginx -t && docker exec 854md-nginx nginx -s reload`
+- 상태 확인: `curl -fsS http://<TAILSCALE_IP>/api/v2/health`
+- `/api/v2/`만 502이면 PH-CMS 실행 상태와 컨테이너에서 `host.docker.internal:8000` 접근을 확인한다.
+- 롤백은 `/api/v2/` location과 `phcms_api` upstream을 제거하고 설정 검사·reload를 수행한다. PH-CMS DB와 S8 세션에는 영향을 주지 않는다.
+
+## PH-CMS MCP 인증 연결
+
+- PH-CMS 루트에서 기존 명령 `pnpm dev -- --server --mcp`로 API와 MCP를 함께 실행한다. MCP 호스트 기본값은 현재 Tailscale IPv4이며 추가 실행 스크립트는 필요 없다.
+- MCP만 실행할 때는 `pnpm --filter @ph-cms/content-mcp dev`를 사용한다. 직접 실행의 기본 호스트는 `127.0.0.1`이다. Tailscale 접근이 필요하면 `PHCMS_MCP_HOST`에 실제 Tailscale IP를 지정한다.
+- 별도 실행과 통합 실행을 동시에 사용하지 않는다. 설정이 없더라도 MCP는 정상 기동하고 초기화·도구 목록을 제공한다.
+- MCP는 JSON 설정 파일을 읽지 않는다. API 연결 설정은 `PHCMS_BASE_URL`·`PHCMS_API_PREFIX`·`PHCMS_TIMEOUT_MS`와 기본값만 사용한다. 인증 키는 저장하지 않으며 S8 `.env`도 읽지 않는다.
+- S8은 기존 `PHCMS_ACCESS_TOKEN`에 보관한 서비스 키를 MCP 요청의 `Authorization: Bearer ...`로 전송한다. MCP는 요청별 클라이언트로 같은 헤더를 PH-CMS API에 전달한다. 키 원문은 출력하거나 기록하지 않는다.
+- 키가 없으면 API 도구만 오류를 반환하고 잘못된 헤더·JWT는 401로 거부한다. 유효성·만료·권한은 PH-CMS가 검증하며 계정 로그인으로 전환하지 않는다.
+- 키 변경은 S8 클라이언트 설정에서 한다. MCP 재시작은 필요 없다. 변경된 환경을 로드하려면 S8과 스케줄러를 재시작한다. 기존 서버 JSON은 더 이상 사용하지 않는다.
+
 ## 장애 분리
 
 Pi가 시작되지 않음:

@@ -6,6 +6,7 @@ import { controlInput, terminalKeys } from './key-input'
 import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
 
+const terminalFontFamily = '"S8 Nerd Symbols", Menlo, Consolas, "Liberation Mono", "Noto Sans Mono CJK KR", "Apple SD Gothic Neo", "Malgun Gothic", monospace'
 const shellSession = 's8-host-shell'
 const primaryKeys = terminalKeys.filter(([label]) => ['Esc', 'Tab', 'Ctrl+C', '↑', '↓', '←', '→'].includes(label))
 const secondaryKeys = terminalKeys.filter(key => !primaryKeys.includes(key))
@@ -96,7 +97,7 @@ export default function TerminalPage({ onBack }: { onBack: () => void }) {
   }, [expanded])
   useEffect(() => {
     if (!session || !container.current) return
-    const terminal = new Terminal({ cursorBlink: true, fontSize: fontSizeRef.current, scrollback: 3000 })
+    const terminal = new Terminal({ cursorBlink: true, fontFamily: terminalFontFamily, fontSize: fontSizeRef.current, scrollback: 3000 })
     terminalRef.current = terminal
     const fit = new FitAddon()
     terminal.loadAddon(fit)
@@ -113,6 +114,12 @@ export default function TerminalPage({ onBack }: { onBack: () => void }) {
       if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'resize', cols: Math.min(300, Math.max(2, terminal.cols)), rows: Math.min(150, Math.max(2, terminal.rows)) }))
     }
     resizeRef.current = sendSize
+    // Font downloads must not delay the shell connection or refresh a disposed terminal.
+    void document.fonts?.load('12px "S8 Nerd Symbols"', '\uf4d3').then(() => {
+      if (terminalRef.current !== terminal) return
+      sendSize()
+      terminal.refresh(0, terminal.rows - 1)
+    }).catch(() => { /* Keep system font fallback if the icon font cannot load. */ })
     socket.onopen = () => { setStatus('연결됨'); setConnected(true); sendSize() }
     socket.onmessage = event => { if (typeof event.data === 'string') terminal.write(event.data) }
     socket.onerror = () => setStatus('연결 오류')

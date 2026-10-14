@@ -106,6 +106,7 @@ while true; do
     pi_args=(
         --extension "$PI_CONFIG_ROOT/extensions/s8-guard.ts"
         --extension "$PI_CONFIG_ROOT/extensions/projectman.ts"
+        --extension "$PI_CONFIG_ROOT/extensions/scheduler.ts"
     )
     if $managed; then
         managed_name="$(tmux display-message -p '#S')"

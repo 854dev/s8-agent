@@ -136,6 +136,10 @@ s8에서 사용하는 Pi 패키지는 다음 목록을 기준으로 설치한다
 - 비밀정보와 `.pi/`, `.pi-runtime/`, `.s8-runtime/` 내용을 읽거나 문서화하지 않는다.
 - Pi extension은 전체 시스템 권한으로 실행되므로 저장소에서 검토한 코드만 사용한다.
 
+## 스케줄러
+
+S8 대화에서 쉘 작업 예약을 CRUD하고 OS 독립 Node 스케줄러로 실행한다. 설정과 운영은 [`pi/SCHEDULER.md`](pi/SCHEDULER.md)를 참고한다.
+
 ## Pi와 tmux
 
 ```bash

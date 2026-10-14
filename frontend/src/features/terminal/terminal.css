@@ -1,3 +1,13 @@
+/* Icons only: keep Latin/CJK text on the browser's normal font fallbacks. */
+@font-face {
+  font-family: 'S8 Nerd Symbols';
+  src: url('/fonts/SymbolsNerdFontMono-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+E000-F8FF, U+F0000-FFFFD;
+}
+
 .terminal-page {
   display: flex;
   flex-direction: column;

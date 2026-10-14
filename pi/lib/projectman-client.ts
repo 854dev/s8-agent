@@ -75,6 +75,14 @@ export class ProjectmanClient {
     }) });
   }
 
+  async schedule(uid: string, scheduledAt: string | null) {
+    if (scheduledAt !== null && (!/(Z|[+-]\d{2}:\d{2})$/i.test(scheduledAt) || !Number.isFinite(Date.parse(scheduledAt)))) throw new Error('scheduledAt requires ISO date/time with explicit timezone');
+    const item = await this.get(uid);
+    const state = item.detail?.attributes.state;
+    if (!['task', 'subtask'].includes(item.type) || !['todo', 'ready'].includes(String(state))) throw new Error('Only unstarted tasks can be scheduled');
+    return this.request<ProjectmanContent>(`contents/${encodeURIComponent(uid)}`, { method: 'PUT', body: JSON.stringify({ attributes: { state, scheduledAt: scheduledAt === null ? null : new Date(scheduledAt).toISOString() } }) });
+  }
+
   async ensurePhases(taskUid: string) {
     const task = await this.get(taskUid);
     if (task.type !== 'task') throw new Error('Phase template requires a task UID');

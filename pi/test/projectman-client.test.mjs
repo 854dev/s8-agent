@@ -57,6 +57,19 @@ test('creates missing phase subtasks and skips existing phases on rerun', async 
   assert.ok(created.every(payload => payload.attributes.timeBudgetMinutes === 20 && payload.attributes.autorun === false));
 });
 
+test('sets or clears scheduledAt without replacing unrelated attributes', async () => {
+  const writes = [];
+  const client = new ProjectmanClient('https://cms.example/api', 'fixture-token', async (_url, init) => {
+    if (init.method === 'PUT') { writes.push(JSON.parse(init.body)); return response(item('task-1')); }
+    return response({ content: [item('task-1')], last: true });
+  });
+  await client.schedule('task-1', '2026-10-14T09:00:00+09:00');
+  assert.deepEqual(writes[0], { attributes: { state: 'ready', scheduledAt: '2026-10-14T00:00:00.000Z' } });
+  await client.schedule('task-1', null);
+  assert.equal(writes[1].attributes.scheduledAt, null);
+  await assert.rejects(client.schedule('task-1', '2026-10-14T09:00:00'), /timezone/);
+});
+
 test('resumes from parent and subtask logs', async () => {
   const urls = [];
   const client = new ProjectmanClient('https://cms.example/api', 'token', async url => {
