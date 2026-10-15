@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { IntakePlan, IntakePreview, IntakeResult } from './projectman-intake.ts';
 
 export type ProjectmanContent = {
   uid: string;
@@ -11,6 +12,10 @@ export type ProjectmanContent = {
   parent?: { uid: string } | null;
   detail: { text: string | null; attributes: Record<string, unknown> } | null;
 };
+
+// Keep large original requests out of ordinary lists / execution prompts; intake_get pages the authoritative manifest.
+export const projectmanJson = (value: unknown) => JSON.stringify(value, (key, data) =>
+  key === 'intake' && data?.manifest ? { ...data, manifest: { stored: true, readWith: 'projectman intake_get using requestId' } } : data);
 
 type Page = { content: ProjectmanContent[]; last: boolean };
 type State = 'todo' | 'ready' | 'doing' | 'blocked' | 'review' | 'done' | 'canceled';
@@ -33,11 +38,11 @@ export class ProjectmanClient {
     }
   }
 
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+  private async request<T>(path: string, init?: RequestInit, timeoutMs = 10000): Promise<T> {
     const response = await this.fetcher(new URL(`${this.base.replace(/\/$/, '')}/${path}`, undefined), {
       ...init,
       headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
-      signal: this.signal ? AbortSignal.any([this.signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
+      signal: this.signal ? AbortSignal.any([this.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) throw new Error(`PH-CMS request failed (HTTP ${response.status})`);
     return response.json() as Promise<T>;
@@ -63,6 +68,25 @@ export class ProjectmanClient {
     const item = result.content.find(content => content.uid === uid);
     if (!item || !['task', 'subtask', 'project', 'workspace'].includes(item.type)) throw new Error('Projectman item not found');
     return item;
+  }
+
+  async previewIntake(plan: IntakePlan): Promise<IntakePreview> {
+    return this.request('projectman/intakes/preview', { method: 'POST', body: JSON.stringify(plan) }, 60000);
+  }
+
+  async registerIntake(plan: IntakePlan, hash: string): Promise<IntakeResult> {
+    return this.request('projectman/intakes', { method: 'POST', body: JSON.stringify({ plan, hash }) }, 60000);
+  }
+
+  async getIntake(requestId: string, rootUid?: string) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) throw new Error('UUID requestId required');
+    if (rootUid) {
+      const item = await this.get(rootUid); // Normal channel/read policy applies, including other authorized request authors.
+      const intake = item.detail?.attributes.intake as Record<string, unknown> | undefined;
+      if (intake?.requestId !== requestId || intake.root !== true) throw new Error('Intake root does not match requestId');
+      return { uid: rootUid, ...intake };
+    }
+    return this.request(`projectman/intakes/${requestId}`);
   }
 
   async create(parentUid: string, type: 'task' | 'subtask', title: string, text: string, tags: string[] = [], phase?: string) {

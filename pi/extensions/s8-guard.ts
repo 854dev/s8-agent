@@ -9,7 +9,7 @@ function sensitive(value: string): boolean {
     (segment.startsWith('.env') && !(segment === '.env.example' && path.basename(value) === segment)));
 }
 
-function protectedPath(value: unknown, cwd: string): boolean {
+export function protectedPath(value: unknown, cwd: string): boolean {
   if (typeof value !== "string" || value.length === 0) return false;
   const absolute = path.resolve(cwd, value.replace(/^@/, ""));
   if (path.basename(absolute) === '.env.example') {

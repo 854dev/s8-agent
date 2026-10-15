@@ -2,7 +2,7 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { eligibleForReadOnly, runBoundedProcess } from './projectman-autopilot.ts';
-import { projectmanFromEnv } from './projectman-client.ts';
+import { projectmanFromEnv, projectmanJson } from './projectman-client.ts';
 
 export type Paths = { cwd: string; binary: string; guard: string; scopeExtension: string; systemPrompt: string };
 
@@ -35,7 +35,7 @@ export async function runProjectmanResearch(projectUid: string, minutes: number,
   const repoPath = candidate.detail?.attributes.repoPath ?? project.detail?.attributes.repoPath;
   const repo = permittedRepoPath(repoPath, paths.cwd);
   if (signal.aborted || Date.now() >= deadline) return { status: 'stopped', message: '시작 전 제한 시간이 끝났습니다.' };
-  const context = JSON.stringify(snapshot);
+  const context = projectmanJson(snapshot);
   if (context.length > 12000) return { status: 'skipped', message: '작업 이력이 너무 깁니다. 수동 검토가 필요합니다.' };
   // ponytail: one Pi process owns one runner; add distributed claim only when multiple agents actually run.
   await client.transition(candidate.uid, 'ready', 'doing', '사용자 요청 오토파일럿: 읽기 전용 조사 시작', 'started', randomUUID());

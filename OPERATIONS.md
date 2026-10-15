@@ -38,6 +38,18 @@ Pi가 열리면 `/login`을 실행한다. credential과 세션은 `.pi-runtime/`
 - 변경 후 S8의 Telegram 연결과 스케줄러를 재시작한다. 기존 Pi가 polling 소유권을 다시 얻을 때도 파일 정책을 새로 읽는다. 이미 연결된 프로세스에 모든 변경이 즉시 반영되는 것은 아니다.
 - 롤백은 파일을 제거하고 기존 ID 환경변수로 재시작한다. 파일은 Git 제외 대상이며 작업 데이터·발급된 서비스 키·봇 토큰은 변경하지 않는다.
 
+## 작업요청 등록
+
+- PH-CMS의 `POST /projectman/intakes/preview`, `POST /projectman/intakes`, `GET /projectman/intakes/:requestId`가 있는 버전을 먼저 적용하고 S8을 재시작한다. API prefix는 기존 `PHCMS_API_URL`을 사용하며 새 환경변수·서비스 키·DB 마이그레이션은 없다. 운영 서버 적용은 별도 승인 후 수행한다.
+- `intake_source`가 허용된 MD 파일 또는 실제 사용자 메시지를 원문 그대로 캡처한다. 모델이 원문을 다시 써서 전달하지 못하며 `sourceId`의 페이지 조회로 분석한다. 파일은 보호 경로·개발 루트 외부·하드 링크·UTF-8/제어문자·크기를 검증하고 읽는 동안의 변경도 확인한다. S8이 캡처를 분석하고 기존 항목을 조회한 뒤 `sourceId`와 등록안으로 `projectman intake_preview`를 호출한다. `intake_register` 또는 `/projectman-register <requestId>`의 대화형 확인 전에는 생성하지 않는다. headless 등록은 거부한다. Telegram 승인 UI 전달 여부는 별도 검증하며 확인되지 않으면 웹 터미널/TUI를 사용한다.
+- 서버는 기존 콘텐츠 생성의 계층·권한·채널 규칙·생성 감사 경계를 재사용한다. 등록은 채널별 직렬 트랜잭션이며 부모를 잠그고 미리보기의 콘텐츠 지문을 재검증한다. 중간 삽입 실패는 생성·감사를 모두 롤백한다. 같은 요청 ID로 다른 등록안을 보내면 409다.
+- S8은 성공 후 모든 항목을 재조회해 계층·자동 실행 꺼짐·승인 필요 설정을 확인한다. 응답 유실/검증 실패는 완료로 보고하지 않고 같은 요청 ID를 보존한다. 네트워크 오류에 쓰기 자동 재시도는 없다.
+- 승인 전 원문 캡처와 미리보기는 Pi 세션 브랜치의 custom entry로만 복구한다. 등록된 원문·해시·완료 조건·의존 UID는 Projectman에 보존한다. `intake_get`의 세션 fallback은 미리보기일 뿐 실제 등록 상태가 아니다. 일반 도구 조회/조사 프롬프트에는 대형 원문을 넣지 않는다.
+- `intake` 메타데이터와 예약 slug는 일반 생성/수정 API로 위조·변경하지 못한다. 일반 일정·속성 수정은 저장된 속성을 병합하여 원문과 승인 설정을 지우지 않는다. 등록된 항목이 삭제·이동·변경되어 재시도 검증이 실패하면 중단하고 확인하며 자동 재생성하지 않는다.
+- `requiresApproval=true`도 기존 승인 태그와 동일하게 `/projectman-approve` 대상이다. 등록 확인은 작업 실행 확인이 아니고, 초기 작업에는 실행 권한·예정 시각·예약 잡을 부여하지 않는다. 의존 관계를 실행 단계에서 자동 처리하는 기능은 이번 범위가 아니다.
+- 롤백은 신규 등록을 중지하고 S8 intake 도구/지침을 이전 버전으로 돌린 뒤 PH-CMS 코드를 되돌린다. 신규 테이블·컬럼이 없어 역마이그레이션은 필요 없다. 기존 등록 콘텐츠·원문·상태는 삭제하거나 초기화하지 않는다. 이전 서버에 새 도구를 호출해 404가 나면 중단하고 임의 API로 우회하지 않는다.
+- S8 검증: `node --test pi/test/*.test.mjs apps/telegram-gateway/gateway.test.mjs` 및 `git diff --check`. PH-CMS의 전용 `vitest.intake.config.ts`는 비어 있는 일회용 DB만 허용하며 기존 테스트/운영 DB를 reset하지 않는다. fixture 실행 절차는 PH-CMS Projectman README를 참고한다.
+
 ## Projectman 지시 잡 운영
 
 - `scheduler`에서 `kind=projectman`, `projectUid`, `intervalMinutes=5`로 생성한다. 대화형 승인 정책은 유지한다. 쉘 잡과 혼용할 수 있다.

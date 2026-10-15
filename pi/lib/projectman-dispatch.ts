@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { authorizedForReadOnly, runBoundedProcess } from './projectman-autopilot.ts';
-import { projectmanFromEnv, type ProjectmanClient, type ProjectmanContent } from './projectman-client.ts';
+import { projectmanFromEnv, projectmanJson, type ProjectmanClient, type ProjectmanContent } from './projectman-client.ts';
 import { permittedRepoPath, type Paths } from './projectman-run.ts';
 import { visible } from '../../apps/telegram-gateway/gateway.mjs';
 
@@ -66,7 +66,7 @@ export async function runProjectmanTurn({ projectUid, paths, deadline, signal, n
   const uid = candidate.uid;
   const repo = permittedRepoPath(candidate.detail?.attributes.repoPath ?? parent?.detail?.attributes.repoPath ?? project.detail?.attributes.repoPath, paths.cwd);
   const snapshot = { project: { uid: project.uid, title: project.title, text: project.detail?.text, attributes: project.detail?.attributes }, parent: parent ? { uid: parent.uid, title: parent.title, detail: parent.detail } : null, item: candidate };
-  if (JSON.stringify(snapshot).length > 24000) throw new Error('Work context exceeds 24,000 characters; split the work before activation');
+  if (projectmanJson(snapshot).length > 24000) throw new Error('Work context exceeds 24,000 characters; split the work before activation');
   if (expired()) return { status: 'idle' };
   // The server's expectedState CAS claims one item across hosts. Never resume an orphaned doing item automatically.
   try { await client.transition(uid, 'ready', 'doing', '스케줄러: 워크 1건에 프롬프트 1회 실행을 선점했습니다.', 'started', randomUUID()); }
@@ -82,7 +82,7 @@ export async function runProjectmanTurn({ projectUid, paths, deadline, signal, n
     if (permittedRepoPath(fresh.detail?.attributes.repoPath ?? freshParent?.detail?.attributes.repoPath ?? freshProject.detail?.attributes.repoPath, paths.cwd) !== repo) throw new Error('Repository authorization changed');
     // Read checkpoints after claiming: another dispatcher may have finished a partial turn before our CAS.
     const history = ordered(await client.list('work_log', uid)).filter(log => log.title !== 'started').slice(-2).map(log => ({ event: log.title, text: log.detail?.text?.slice(-4000) }));
-    const context = visible(JSON.stringify({ ...snapshot, item: fresh, history }));
+    const context = visible(projectmanJson({ ...snapshot, item: fresh, history }));
     if (!await notify({ stage: 'start', uid, message: `작업 지시 시작: ${candidate.title} (${uid})\n워크/서브워크 1건 · 프롬프트 1회 · 읽기 전용 조사` })) {
       next = 'ready';
       throw new Error('Start notification unavailable; no prompt executed');

@@ -7,10 +7,10 @@ import { loadTelegramConfig } from '../../pi/lib/telegram-config.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const visible = text => String(text)
-  .replace(/\b(API_KEY|TOKEN|PASSWORD|SECRET|AUTHORIZATION|COOKIE|DATABASE_URL|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\s*[:=]\s*[^\s,]+/gi, '$1=[REDACTED]')
+  .replace(/\b((?:[A-Z][A-Z0-9]*_)*(?:API_KEY|TOKEN|PASSWORD|SECRET|AUTHORIZATION|COOKIE|DATABASE_URL|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY))\s*[:=]\s*[^\s,]+/gi, '$1=[REDACTED]')
   .replace(/\bBearer\s+\S+/gi, 'Bearer [REDACTED]')
   .replace(/\b(?:postgres(?:ql)?|mysql):\/\/[^\s/@]+:[^\s/@]+@/gi, 'database://[REDACTED]@')
-  .replace(/\b(?:sk-|ghp_)[A-Za-z0-9_-]{8,}/g, '[REDACTED]');
+  .replace(/\b(?:sk-|ghp_|phcms_sk_)[A-Za-z0-9_-]{8,}/g, '[REDACTED]');
 export const toolOutput = event => event.type === 'tool_execution_start'
   ? `🔧 ${String(event.toolName).replace(/[^\w-]/g, '').slice(0, 40) || 'tool'}`
   : event.type === 'tool_execution_end' && event.isError ? '❌ 도구 실행 실패 (상세 결과는 표시하지 않음)' : null;
