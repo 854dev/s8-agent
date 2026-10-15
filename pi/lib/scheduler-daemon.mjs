@@ -5,22 +5,36 @@ import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { dueDate, isDue, validId, validateJob } from './scheduler-store.mjs';
 import { visible } from '../../apps/telegram-gateway/gateway.mjs';
+import { loadTelegramConfig, telegramConfigFromEnv } from './telegram-config.mjs';
+import { runProjectmanTurn } from './projectman-dispatch.ts';
 
 const MAX_OUTPUT = 8000;
 const RUN_TIMEOUT = 10 * 60_000;
-const sendTelegram = async (text, env = process.env, fetchImpl = fetch) => {
-  if (!env.TELEGRAM_BOT_TOKEN || !env.S8_SCHEDULE_TELEGRAM_CHAT_ID) return false;
-  const allowed = new Set([...(env.TELEGRAM_ALLOWED_USER_IDS ?? '').split(','), ...(env.TELEGRAM_ALLOWED_GROUP_IDS ?? '').split(',')].map(id => id.trim()).filter(Boolean));
-  if (!allowed.has(env.S8_SCHEDULE_TELEGRAM_CHAT_ID)) throw new Error('Scheduled Telegram target must be in an allowed user or group list.');
+export const sendTelegram = async (text, env = process.env, fetchImpl = fetch, settings = telegramConfigFromEnv(env)) => {
+  if (!env.TELEGRAM_BOT_TOKEN || !settings.scheduleChatId) return false;
+  const allowed = new Set([...settings.allowedUserIds, ...settings.allowedGroupIds]);
+  if (!allowed.has(settings.scheduleChatId)) throw new Error('Scheduled Telegram target must be in an allowed user or group list.');
   const safe = Array.from(visible(text));
   for (let offset = 0; offset < safe.length; offset += 3500) {
-    const response = await fetchImpl(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: env.S8_SCHEDULE_TELEGRAM_CHAT_ID, text: safe.slice(offset, offset + 3500).join('') }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    const body = await response.json();
-    if (!response.ok || !body.ok) throw new Error(`Telegram send failed (HTTP ${response.status})`);
+    // ponytail: a lost response can cause a duplicate notification; a durable outbox is needed for crash recovery.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const response = await fetchImpl(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ chat_id: settings.scheduleChatId, text: safe.slice(offset, offset + 3500).join('') }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        const body = await response.json();
+        if (!response.ok || !body.ok) {
+          const status = Number.isInteger(body.error_code) ? body.error_code : response.status;
+          throw Object.assign(new Error(`Telegram send failed (HTTP ${status})`), { status, retryAfterMs: Math.min(5000, Math.max(0, Number(body.parameters?.retry_after) || 0) * 1000) });
+        }
+        break;
+      } catch (error) {
+        if (attempt === 2 || (error.status && error.status !== 429 && error.status < 500)) throw error;
+        await new Promise(resolve => setTimeout(resolve, Math.max(300 * (attempt + 1), error.retryAfterMs ?? 0)));
+      }
+    }
   }
   return true;
 };
@@ -37,6 +51,10 @@ const writeJson = async (file, data) => {
 
 function runScript(scriptPath, job, options) {
   return new Promise(resolve => {
+    if (job.expiresAt && options.now().getTime() >= Date.parse(job.expiresAt)) {
+      resolve({ ok: false, output: 'Operation window ended; no batch started.' });
+      return;
+    }
     const child = spawn(options.bash ?? 'bash', [scriptPath], {
       cwd: options.cwd,
       env: { ...options.env, S8_SCHEDULE_ID: job.id, S8_SCHEDULE_TIME: job.time ?? `${job.intervalMinutes}m` },
@@ -68,16 +86,17 @@ function runScript(scriptPath, job, options) {
     child.stdout.on('data', collect);
     child.stderr.on('data', collect);
     const finish = result => { if (settled) return; settled = true; clearTimeout(timeout); clearInterval(cancelTimer); clearTimeout(killTimer); resolve(result); };
+    const timeoutMs = job.expiresAt ? Math.min(RUN_TIMEOUT, Math.max(0, Date.parse(job.expiresAt) - options.now().getTime())) : RUN_TIMEOUT;
     const timeout = setTimeout(() => {
       timedOut = true;
       terminate();
-    }, RUN_TIMEOUT);
+    }, timeoutMs);
     child.on('error', error => finish({ ok: false, output: `${error.message}\n${output}` }));
-    child.on('close', code => finish({ ok: !timedOut && !cancelled && code === 0, cancelled, output: `${cancelled ? 'Cancelled by user.\n' : timedOut ? 'Timed out after 10 minutes.\n' : ''}${output}` }));
+    child.on('close', code => finish({ ok: !timedOut && !cancelled && code === 0, cancelled, output: `${cancelled ? 'Cancelled by user.\n' : timedOut ? 'Timed out (batch limit or operation window ended).\n' : ''}${output}` }));
   });
 }
 
-export async function runScheduler({ root, cwd = process.cwd(), bash, env = process.env, fetchImpl = fetch, onResult = console.log, now = () => new Date() }) {
+export async function runScheduler({ root, cwd = process.cwd(), bash, env = process.env, fetchImpl = fetch, onResult = console.log, now = () => new Date(), telegramSettings = loadTelegramConfig(path.resolve(root, '../..'), env), projectmanTurn = runProjectmanTurn }) {
   const scripts = path.join(root, 'scripts');
   const jobsFile = path.join(root, 'jobs.json');
   const stateFile = path.join(root, 'state.json');
@@ -90,17 +109,18 @@ export async function runScheduler({ root, cwd = process.cwd(), bash, env = proc
     throw error;
   }
   // ponytail: fail closed on stale locks rather than risk two schedulers; manually remove the lock after an unclean crash.
-  await lock.writeFile(`${process.pid}\n`);
+  await lock.writeFile(`${process.pid}\nexpiresAt-v1\nprojectman-v1\n`);
+  let activeProjectman;
   const executeDue = async () => {
     const data = await readJson(jobsFile, { version: 1, jobs: [] });
     const state = await readJson(stateFile, { version: 1, jobs: {} });
     if (data.version !== 1 || !Array.isArray(data.jobs) || state.version !== 1 || !state.jobs) throw new Error('Invalid scheduler data.');
-    const current = now();
     for (const entry of data.jobs) {
       if (!validId(entry.id) || typeof entry.enabled !== 'boolean') continue;
-      const script = await readFile(path.join(scripts, `${entry.id}.sh`), 'utf8').catch(() => '');
+      const script = entry.kind === 'projectman' ? undefined : await readFile(path.join(scripts, `${entry.id}.sh`), 'utf8').catch(() => '');
       let job;
       try { job = validateJob({ ...entry, script }); } catch { continue; }
+      const current = now();
       const prior = state.jobs[job.id] ?? {};
       if (!isDue(job, current, prior.lastRunDate)) continue;
       const when = dueDate(job, current).date;
@@ -108,17 +128,81 @@ export async function runScheduler({ root, cwd = process.cwd(), bash, env = proc
       const cancelFile = path.join(root, `${job.id}.cancel`);
       await rm(cancelFile, { force: true });
       state.jobs[job.id] = { ...prior, runId, lastRunDate: when, lastRunAt: current.toISOString(), result: 'running' };
+      if (job.kind !== 'projectman') {
+        state.jobs[job.id].notificationStatus = 'pending';
+        delete state.jobs[job.id].notificationError;
+        delete state.jobs[job.id].notifiedAt;
+      }
       await writeJson(stateFile, state);
-      const result = await runScript(path.join(scripts, `${job.id}.sh`), job, { cwd, bash, env, cancelFile, runId });
+      if (job.kind === 'projectman') {
+        const controller = new AbortController();
+        activeProjectman = controller;
+        if (stopping) controller.abort('scheduler_stop');
+        const deadline = Date.now() + Math.min(RUN_TIMEOUT, job.expiresAt ? Math.max(0, Date.parse(job.expiresAt) - now().getTime()) : Infinity);
+        const timeout = setTimeout(() => controller.abort('deadline'), Math.max(0, deadline - Date.now()));
+        const cancelTimer = setInterval(async () => {
+          try { if (await readFile(cancelFile, 'utf8') === runId) controller.abort('user_stop'); } catch {}
+        }, 250);
+        try {
+          const config = env.S8_PI_CONFIG_ROOT;
+          if (!config || !env.S8_PI_BINARY) throw new Error('Run through start-scheduler.sh');
+          const outcome = await projectmanTurn({ projectUid: job.projectUid, deadline, signal: controller.signal,
+            paths: { cwd, binary: env.S8_PI_BINARY, guard: path.join(config, 'extensions/s8-guard.ts'), scopeExtension: path.join(config, 'extensions/projectman-read-scope.ts'), systemPrompt: path.join(config, 'APPEND_SYSTEM.md') },
+            notify: async ({ stage, uid, message }) => {
+              state.jobs[job.id].workUid = uid;
+              state.jobs[job.id].notificationStatus = 'pending';
+              delete state.jobs[job.id].notificationError;
+              delete state.jobs[job.id].notifiedAt;
+              await writeJson(stateFile, state);
+              let sent = false;
+              try {
+                sent = await sendTelegram(message, env, fetchImpl, telegramSettings);
+                state.jobs[job.id].notificationStatus = sent ? 'sent' : 'not_configured';
+                delete state.jobs[job.id].notificationError;
+                if (sent) state.jobs[job.id].notifiedAt = now().toISOString();
+              } catch (error) {
+                state.jobs[job.id].notificationStatus = 'failed';
+                state.jobs[job.id].notificationError = error.status ? `http_${error.status}` : 'transport_error';
+                onResult(`Projectman ${stage} notification failed`);
+              }
+              state.jobs[job.id][stage === 'start' ? 'dispatchNotificationStatus' : 'notificationStatus'] = state.jobs[job.id].notificationStatus;
+              await writeJson(stateFile, state);
+              return sent;
+            },
+          });
+          state.jobs[job.id].result = outcome.status;
+        } catch {
+          state.jobs[job.id].result = 'failed';
+          onResult('Projectman poll/dispatch failed; inspect the job and Projectman state.');
+        } finally {
+          clearTimeout(timeout);
+          clearInterval(cancelTimer);
+          activeProjectman = undefined;
+          await rm(cancelFile, { force: true });
+        }
+        state.jobs[job.id].finishedAt = now().toISOString();
+        state.jobs[job.id].notificationStatus ??= 'not_needed';
+        await writeJson(stateFile, state);
+        continue;
+      }
+      const result = await runScript(path.join(scripts, `${job.id}.sh`), job, { cwd, bash, env, cancelFile, runId, now });
       await rm(cancelFile, { force: true });
       state.jobs[job.id] = { ...state.jobs[job.id], result: result.cancelled ? 'cancelled' : result.ok ? 'success' : 'failed', finishedAt: now().toISOString() };
       await writeJson(stateFile, state);
       const message = `예약 작업 ${job.id} (${job.time ?? `${job.intervalMinutes}분마다`}, ${job.timezone}) ${result.ok ? '완료' : '실패'}\n\n${result.output.trim() || '(출력 없음)'}`;
       try {
-        if (!await sendTelegram(message, env, fetchImpl)) onResult(visible(message));
+        const sent = await sendTelegram(message, env, fetchImpl, telegramSettings);
+        state.jobs[job.id].notificationStatus = sent ? 'sent' : 'not_configured';
+        delete state.jobs[job.id].notificationError;
+        if (sent) state.jobs[job.id].notifiedAt = now().toISOString();
+        else { delete state.jobs[job.id].notifiedAt; onResult(visible(message)); }
       } catch (error) {
-        onResult(`${visible(message)}\n\nTelegram 알림 실패: ${error.message}`);
+        state.jobs[job.id].notificationStatus = 'failed';
+        state.jobs[job.id].notificationError = error.status ? `http_${error.status}` : error.name === 'TimeoutError' ? 'timeout' : 'transport_error';
+        delete state.jobs[job.id].notifiedAt;
+        onResult(`${visible(message)}\n\nTelegram 알림 실패: ${state.jobs[job.id].notificationError}`);
       }
+      await writeJson(stateFile, state);
     }
   };
   let busy = false, stopping = false, timer, stopPromise;
@@ -132,6 +216,7 @@ export async function runScheduler({ root, cwd = process.cwd(), bash, env = proc
   const stop = () => {
     if (stopPromise) return stopPromise;
     stopping = true;
+    activeProjectman?.abort('scheduler_stop');
     clearInterval(timer);
     stopPromise = (async () => {
       while (busy) await new Promise(resolve => setTimeout(resolve, 50));

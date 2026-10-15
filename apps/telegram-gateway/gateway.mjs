@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { controlSchedules } from '../../pi/lib/scheduler-control.mjs';
+import { loadTelegramConfig } from '../../pi/lib/telegram-config.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const visible = text => String(text)
@@ -314,7 +315,7 @@ export class Bot {
   constructor({ token, users, groups, fetchImpl = fetch, spawnPi = (key) => spawn(path.join(root, 'start-pi.sh'), [
     '--mode', 'rpc', '--continue', '--session-dir', path.join(root, '.pi-runtime', 'telegram-sessions', key),
   ], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] }) }) {
-    if (!token || (!users.size && !groups.size)) throw new Error('Set TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_USER_IDS or TELEGRAM_ALLOWED_GROUP_IDS');
+    if (!token || (!users.size && !groups.size)) throw new Error('Telegram requires an environment bot token and allowed IDs in s8-config.yml (or legacy environment settings)');
     this.token = token;
     this.users = users;
     this.groups = groups;
@@ -381,13 +382,9 @@ export class Bot {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const parseIds = name => {
-    const entries = (process.env[name] ?? '').split(',').map(id => id.trim()).filter(Boolean);
-    if (entries.some(id => !/^-?\d+$/.test(id))) throw new Error(`Invalid ${name}: comma-separated numeric IDs required`);
-    return new Set(entries);
-  };
   try {
-    const bot = new Bot({ token: process.env.TELEGRAM_BOT_TOKEN, users: parseIds('TELEGRAM_ALLOWED_USER_IDS'), groups: parseIds('TELEGRAM_ALLOWED_GROUP_IDS') });
+    const settings = loadTelegramConfig(root);
+    const bot = new Bot({ token: process.env.TELEGRAM_BOT_TOKEN, users: new Set(settings.allowedUserIds), groups: new Set(settings.allowedGroupIds) });
     process.on('SIGINT', () => bot.stop());
     process.on('SIGTERM', () => bot.stop());
     bot.run().catch(error => { console.error('Gateway stopped:', error.message); bot.stop(); process.exitCode = 1; });

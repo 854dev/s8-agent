@@ -1,0 +1,8 @@
+# 비인증 설정만 저장한다. 봇 토큰·서비스 키는 환경변수에 유지한다.
+telegram:
+  allowedUserIds:
+    - "123456789"
+  allowedGroupIds: []
+  # 개인 알림은 해당 사용자의 chat ID, 그룹 알림은 허용된 그룹 chat ID를 지정한다.
+  # 아직 대상을 지정하지 않을 때는 null로 두며 임의 수신자를 자동 선택하지 않는다.
+  scheduleChatId: "123456789"

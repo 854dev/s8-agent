@@ -4,7 +4,15 @@ import { randomUUID } from 'node:crypto';
 import { eligibleForReadOnly, runBoundedProcess } from './projectman-autopilot.ts';
 import { projectmanFromEnv } from './projectman-client.ts';
 
-type Paths = { cwd: string; binary: string; guard: string; scopeExtension: string; systemPrompt: string };
+export type Paths = { cwd: string; binary: string; guard: string; scopeExtension: string; systemPrompt: string };
+
+export function permittedRepoPath(repoPath: unknown, cwd: string) {
+  if (typeof repoPath !== 'string' || !path.isAbsolute(repoPath)) throw new Error('Task/project needs an absolute repoPath');
+  const repo = realpathSync(repoPath);
+  const relative = path.relative(realpathSync(path.resolve(cwd, '..')), repo);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || relative.split(path.sep).some(part => /secret/i.test(part) || /^\.env/i.test(part) || ['.git', '.pi', '.pi-runtime', '.s8-runtime'].includes(part))) throw new Error('Repository outside permitted dev_854 scope');
+  return repo;
+}
 
 export async function runProjectmanResearch(projectUid: string, minutes: number, signal: AbortSignal, paths: Paths) {
   const deadline = Date.now() + minutes * 60_000;
@@ -25,13 +33,7 @@ export async function runProjectmanResearch(projectUid: string, minutes: number,
   }
   if (!candidate || !snapshot) return { status: 'empty', message: '실행 가능한 독립 읽기 전용 태스크가 없습니다. 승인 필요·서브워크가 있는 피처·쓰기 작업은 제외됩니다.' };
   const repoPath = candidate.detail?.attributes.repoPath ?? project.detail?.attributes.repoPath;
-  if (typeof repoPath !== 'string' || !path.isAbsolute(repoPath)) throw new Error('Task/project needs an absolute repoPath');
-  const repo = realpathSync(repoPath);
-  const devRoot = realpathSync(path.resolve(paths.cwd, '..'));
-  const relative = path.relative(devRoot, repo);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || relative.split(path.sep).some(part => ['secret', 'SECRET', '.git', '.pi', '.pi-runtime', '.s8-runtime'].includes(part))) {
-    throw new Error('Repository outside permitted dev_854 scope');
-  }
+  const repo = permittedRepoPath(repoPath, paths.cwd);
   if (signal.aborted || Date.now() >= deadline) return { status: 'stopped', message: '시작 전 제한 시간이 끝났습니다.' };
   const context = JSON.stringify(snapshot);
   if (context.length > 12000) return { status: 'skipped', message: '작업 이력이 너무 깁니다. 수동 검토가 필요합니다.' };

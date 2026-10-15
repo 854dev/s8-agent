@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
+import { PiOutput } from './pi-output.mjs';
 import type { ProjectmanContent } from './projectman-client.ts';
 
 const approvalTags = new Set(['need:approval', 'need:review', 'risk:sensitive']);
@@ -7,20 +9,24 @@ export function needsConfirmation(item: ProjectmanContent): boolean {
   return Boolean(item.detail?.attributes.requiresApproval === true || item.tags?.some(tag => approvalTags.has(tag)));
 }
 
-export function eligibleForReadOnly(item: ProjectmanContent): boolean {
+export function authorizedForReadOnly(item: ProjectmanContent): boolean {
   const attrs = item.detail?.attributes;
-  return item.type === 'task' && item.status === 'published' && attrs?.state === 'ready' &&
+  return ['task', 'subtask'].includes(item.type) && item.status === 'published' &&
     attrs.autorun === true && attrs.autorunMode === 'safe' && attrs.risk === 'low' &&
     attrs.requiresApproval === false && Array.isArray(attrs.allowedActions) &&
     attrs.allowedActions.length === 1 && attrs.allowedActions[0] === 'read' &&
     typeof item.detail?.text === 'string' && item.detail.text.trim().length > 0 && !needsConfirmation(item);
 }
 
-export type RunResult = { status: 'completed' | 'stopped' | 'timeout' | 'failed'; output: string };
+export function eligibleForReadOnly(item: ProjectmanContent): boolean {
+  return item.type === 'task' && item.detail?.attributes.state === 'ready' && authorizedForReadOnly(item);
+}
+
+export type RunResult = { status: 'completed' | 'stopped' | 'timeout' | 'failed'; output: string; stopReason?: string };
 
 // Linux keeps GNU timeout as an independent deadline owner.
 // ponytail: macOS uses the Pi parent timer; add a detached watchdog if forced parent crashes leave orphaned children.
-export async function runBoundedProcess(binary: string, args: string[], cwd: string, maxMs: number, signal: AbortSignal, scope: string): Promise<RunResult> {
+export async function runBoundedProcess(binary: string, args: string[], cwd: string, maxMs: number, signal: AbortSignal, scope: string, keepTail = false, piJson = false): Promise<RunResult> {
   if (!['linux', 'darwin'].includes(process.platform) || !Number.isFinite(maxMs) || maxMs <= 0 || signal.aborted) {
     return { status: 'stopped', output: '' };
   }
@@ -47,14 +53,21 @@ export async function runBoundedProcess(binary: string, args: string[], cwd: str
   const onExit = () => { killGroup('SIGKILL'); };
   signal.addEventListener('abort', onAbort, { once: true });
   process.once('exit', onExit);
-  child.stdout?.on('data', (chunk: Buffer) => { output = (output + chunk.toString('utf8')).slice(0, 10000); });
+  const decoder = new StringDecoder('utf8');
+  const events = piJson ? new PiOutput(scope) : undefined;
+  child.stdout?.on('data', (chunk: Buffer) => {
+    const text = decoder.write(chunk);
+    if (events) events.write(text);
+    else { const next = output + text; output = keepTail ? next.slice(-10000) : next.slice(0, 10000); }
+  });
   child.stderr?.resume(); // Never persist diagnostics: they may contain credentials.
   try {
     return await new Promise<RunResult>(resolve => {
       child.once('error', () => resolve({ status: 'failed', output: '' }));
-      child.once('close', code => resolve({
-        status: status ?? (code === 0 ? 'completed' : linux && (code === 124 || code === 137) ? 'timeout' : 'failed'), output,
-      }));
+      child.once('close', code => {
+        const finished = status ?? (linux && (code === 124 || code === 137) ? 'timeout' : code !== 0 ? 'failed' : events ? events.reason === 'length' ? 'timeout' : events.complete ? 'completed' : 'failed' : 'completed');
+        resolve({ status: finished, output: events ? finished === 'completed' ? events.text : events.checkpoint : output, ...(events ? { stopReason: events.reason } : {}) });
+      });
     });
   } finally {
     clearTimeout(timer);

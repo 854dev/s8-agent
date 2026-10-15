@@ -29,3 +29,12 @@ test('read-only child completes or is stopped at its deadline', async () => {
   setTimeout(() => controller.abort(), 100);
   assert.equal((await run).status, 'stopped');
 });
+
+test('continuation mode keeps the latest checkpoint and decodes split Korean UTF-8 bytes safely', async () => {
+  const script = `process.stdout.write('x'.repeat(12000)); const b=Buffer.from('미완료: 다음 단계는 테스트 확인'); process.stdout.write(b.subarray(0,2)); setTimeout(()=>process.stdout.write(b.subarray(2)),20);`;
+  const result = await runBoundedProcess(process.execPath, ['-e', script], process.cwd(), 5000, new AbortController().signal, process.cwd(), true);
+  assert.equal(result.status, 'completed');
+  assert.ok(result.output.length <= 10000);
+  assert.ok(result.output.endsWith('미완료: 다음 단계는 테스트 확인'));
+  assert.equal(result.output.includes('�'), false);
+});

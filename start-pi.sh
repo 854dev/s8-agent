@@ -11,7 +11,8 @@ if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
         '  --session 이름   S8 tmux 세션 생성 또는 접속 (--telegram으로 연결 이전)' \
         '  --help, -h       이 도움말 표시' \
         '  그 외 인자는 Pi CLI에 전달합니다. Pi 옵션: pi/node_modules/.bin/pi --help' \
-        '  Telegram 설정: TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USER_IDS / TELEGRAM_ALLOWED_GROUP_IDS' \
+        '  Telegram 인증: TELEGRAM_BOT_TOKEN (환경변수)' \
+        '  Telegram ID·알림 대상: s8-config.yml (파일이 없으면 기존 ID 환경변수)' \
         '  작업 디렉터리: S8_KB_ROOT (기본값: ../854_md)'
     exit 0
 fi
@@ -118,7 +119,7 @@ while true; do
     pi_args+=(
         --skill "$PI_CONFIG_ROOT/skills/s8-operations"
         --append-system-prompt "$PI_CONFIG_ROOT/APPEND_SYSTEM.md"
-        --tools read,bash,edit,write,grep,find,ls
+        --tools read,bash,edit,write,grep,find,ls,projectman,scheduler
     )
     if ((${#restart_args[@]} > 0)); then
         pi_args+=("${restart_args[@]}")

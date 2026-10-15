@@ -13,7 +13,7 @@ export async function controlSchedules(root, action = 'list', id) {
   const state = await read(path.join(root, 'state.json'), { jobs: {} });
   if (action === 'list') {
     const data = await read(jobsFile, { version: 1, jobs: [] });
-    return data.jobs.map(job => `${job.id} · ${job.time ?? `${job.intervalMinutes}분마다`} (${job.timezone}) · ${job.enabled ? '활성' : '정지'} · ${state.jobs[job.id]?.result ?? '실행 이력 없음'}`).join('\n') || '등록된 예약이 없습니다.';
+    return data.jobs.map(job => `${job.id} · ${job.time ?? `${job.intervalMinutes}분마다`} (${job.timezone}) · ${job.expiresAt && Date.now() >= Date.parse(job.expiresAt) ? '기간 종료' : job.enabled ? '활성' : '정지'} · 실행 ${state.jobs[job.id]?.result ?? '이력 없음'} · 알림 ${state.jobs[job.id]?.notificationStatus ?? '미기록'}${job.expiresAt ? ` · 종료 ${job.expiresAt}` : ''}`).join('\n') || '등록된 예약이 없습니다.';
   }
   if (!validId(id)) throw new Error('유효한 예약 ID가 필요합니다.');
   await mkdir(root, { recursive: true, mode: 0o700 });
@@ -30,6 +30,7 @@ export async function controlSchedules(root, action = 'list', id) {
       await writeFile(path.join(root, `${id}.cancel`), run.runId, { mode: 0o600 });
       return `${id}: 현재 배치 중단을 요청했습니다. 예약은 유지됩니다.`;
     }
+    if (action === 'resume' && job.expiresAt && Date.now() >= Date.parse(job.expiresAt)) throw new Error('운영 기간이 끝났습니다. 새 종료 시각을 설정한 뒤 재개하세요.');
     job.enabled = action === 'resume';
     const temp = `${jobsFile}.${process.pid}.tmp`;
     await writeFile(temp, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });

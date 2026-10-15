@@ -17,6 +17,7 @@ dev_854/
 - Pi 장비별 런타임: `.pi-runtime/`
 - Pi 실행 진입점: `start-pi.sh`
 - 비공개 로컬 상태: `.s8-runtime/`
+- 비인증 Telegram ID·알림 대상 설정: `s8-config.yml` (예시: `s8-config.example.yml`)
 - 웹 콘솔·업로드·xterm.js 터미널: `frontend/`
 - 호스트 PTY·tmux 웹 터미널 게이트웨이: `apps/terminal-gateway/`
 - Telegram 명령·알림: `apps/telegram-gateway/`
@@ -82,16 +83,25 @@ S8_KB_ROOT=/path/to/workspace
 
 ## Telegram 연동 (Pi 터미널 세션 공유)
 
-기존 `~/.pi/agent/telegram.json`은 자동으로 읽거나 복사하지 않는다. 봇 토큰과 허용할 사용자 또는 그룹 ID를 사용자가 직접 설정한다. 기존 `TELEGRAM_ALLOWED_CHAT_IDS`는 더 이상 사용하지 않는다. `s8-agent/.env`에 다음을 추가한다(기존 항목은 덮어쓰지 않는다).
+기존 `~/.pi/agent/telegram.json`은 자동으로 읽거나 복사하지 않는다. 봇 토큰은 기존 `.env` 또는 실행 환경의 `TELEGRAM_BOT_TOKEN`에 유지하고, 사용자·그룹 ID와 예약 알림 대상은 저장소 루트 `s8-config.yml`에 설정한다. 서비스 키나 봇 토큰을 YAML에 넣지 않는다.
 
-```dotenv
-S8_KB_ROOT=/path/to/existing/workspace
-TELEGRAM_BOT_TOKEN=your-bot-token
-TELEGRAM_ALLOWED_USER_IDS=123456789,987654321
-TELEGRAM_ALLOWED_GROUP_IDS=-1001234567890,-1009876543210
+```yaml
+telegram:
+    allowedUserIds:
+        - "123456789"
+    allowedGroupIds:
+        - "-1001234567890"
+    scheduleChatId: "123456789"
 ```
 
-두 허용 목록 중 하나만 설정해도 된다. 개인 채팅은 `from.id`가 허용 사용자 목록에 있어야 한다. 그룹·슈퍼그룹은 `chat.id`가 허용 그룹 목록에 있어야 하며, 그 그룹의 **모든 참여자**가 봇을 사용할 수 있다. 허용된 사용자가 미등록 그룹에서 보낸 메시지는 무시한다. 그룹 전체 메시지를 받으려면 BotFather의 privacy mode 설정을 별도 확인한다. 그룹 권한이 과도하다면 그룹 ID 대신 개인 채팅의 사용자 ID만 사용한다. 토큰이나 ID를 Git에 넣지 않는다.
+- 예시: [`s8-config.example.yml`](s8-config.example.yml). 실제 `s8-config.yml`은 Git에서 제외하지만 에이전트가 비인증 설정으로 조회·수정할 수 있다.
+- 예약 알림 대상은 허용 목록에 포함된 개인/그룹 chat ID를 명시한다. 대상 미지정은 `null`이며 임의 사용자에게 자동 전송하지 않는다.
+- 파일이 있으면 모든 ID 설정은 파일만 사용한다. 누락된 목록은 빈 목록, 누락된 알림 대상은 `null`이며 기존 환경변수와 합치지 않는다. 잘못된 파일·숫자 ID·허용되지 않은 알림 대상이면 명확히 실패한다.
+- 파일이 없을 때만 기존 `TELEGRAM_ALLOWED_USER_IDS`, `TELEGRAM_ALLOWED_GROUP_IDS`, `S8_SCHEDULE_TELEGRAM_CHAT_ID`를 사용한다. 기존 `TELEGRAM_ALLOWED_CHAT_IDS`는 지원하지 않는다.
+- 이미 ID 환경이 로드된 S8에서 `node ../s8-agent/pi/bin/s8-config.mjs init`으로 ID만 이관할 수 있다. 인증정보는 이관하지 않고 기존 파일은 덮어쓰지 않는다. `show`는 ID·알림 대상·설정 출처만 출력한다.
+- 변경 후 S8의 Telegram 연결과 스케줄러를 재시작한다. 빈 허용 목록은 접근을 막으므로 기존 사용자가 남아 있는지 확인하고 변경한다. 롤백은 파일을 제거하고 기존 환경변수로 재시작한다.
+
+두 허용 목록 중 하나만 설정해도 된다. 개인 채팅은 `from.id`가 허용 사용자 목록에 있어야 한다. 그룹·슈퍼그룹은 `chat.id`가 허용 그룹 목록에 있어야 하며, 그 그룹의 **모든 참여자**가 봇을 사용할 수 있다. 허용된 사용자가 미등록 그룹에서 보낸 메시지는 무시한다. 그룹 전체 메시지를 받으려면 BotFather의 privacy mode 설정을 별도 확인한다. 그룹 권한이 과도하다면 그룹 ID 대신 개인 채팅의 사용자 ID만 사용한다. 토큰은 환경에만 유지하고 로컬 ID 설정도 Git에 넣지 않는다.
 
 ```bash
 cd /path/to/s8-agent
@@ -145,7 +155,7 @@ s8에서 사용하는 Pi 패키지는 다음 목록을 기준으로 설치한다
 
 ## 스케줄러
 
-S8 대화의 `scheduler` 도구로 승인한 쉘 작업을 CRUD하고 별도 Node 데몬으로 실행한다.
+S8 대화의 `scheduler` 도구로 승인한 쉘 잡 또는 Projectman 지시 잡을 CRUD하고 별도 Node 데몬으로 실행한다.
 
 ```bash
 ./start-scheduler.sh
@@ -155,7 +165,10 @@ S8 대화의 `scheduler` 도구로 승인한 쉘 작업을 CRUD하고 별도 Nod
 - 데몬이 중지된 동안의 실행은 따라잡지 않는다. 호스트당 인스턴스 하나만 운영하며 다른 장치와 상태를 동기화하지 않는다.
 - Telegram의 `/jobs`, `/jobs pause ID`, `/jobs resume ID`, `/jobs stop ID`로 예약과 현재 배치를 관리한다. 중단은 이미 수행한 변경을 롤백하지 않는다.
 - OS 자동 시작 등록은 별도다. 비정상 종료 후 남은 잠금은 프로세스 종료를 확인한 뒤 수동 복구한다.
-- Projectman 카운트 테스트는 작업별 예정 시각과 순서를 확인하고 결과 UID 기록으로 중복 차감을 막는다. 일반 자연어 작업을 자동 실행하는 기능은 아니다.
+- `kind=projectman` 잡은 지정 프로젝트를 5분마다 확인하고, 승인된 읽기 전용 워크·서브워크 1건에 정해진 프롬프트를 한 번 보낸다. 빈 조회·승인 대기에는 무알림이고 실제 지시 시작·결과만 Telegram에 보고한다.
+- 미완료 결과는 Projectman 로그에 남기고 다음 프롬프트에서 재개한다. 완료 결과는 `review`, 수동 중단·사용자 판단 필요는 `blocked`로 남기며 승인·쓰기 권한은 확대하지 않는다. 병렬 실행은 아직 없다.
+- 기존 잡은 최신 데몬에서 `node pi/bin/projectman-job.mjs JOB_ID PROJECT_UID`로 명시적으로 전환한다. 작업 상태·결과·운영 종료 시각은 초기화하지 않는다. 새 CRUD 필드는 S8 재시작 후 사용한다.
+- 기존 쉘 방식의 Projectman 카운트 테스트는 예정 시각·순서·결과 UID 기록으로 중복 차감을 막는다. 지시 잡으로 전환한 뒤에는 쉘 결과를 매번 알리지 않는다.
 
 설정·승인·알림·복구 절차는 [`pi/SCHEDULER.md`](pi/SCHEDULER.md)를 참고한다.
 
@@ -164,6 +177,8 @@ S8 대화의 `scheduler` 도구로 승인한 쉘 작업을 CRUD하고 별도 Nod
 - S8이 비관리자 agent 서비스 키를 `PHCMS_ACCESS_TOKEN`에 보관한다. 변수 이름은 기존 호환성을 유지하지만 MCP 호출에는 JWT가 아닌 서비스 키가 필요하다.
 - Projectman 도구는 `PHCMS_API_URL`의 API를 직접 사용하며, 카운트 테스트 실행기는 MCP 요청에 `Authorization: Bearer <서비스 키>`를 보낸다.
 - MCP는 그 요청의 헤더를 PH-CMS API에 전달할 뿐 키를 저장하거나 S8 환경 파일을 읽지 않는다. MCP의 JSON 설정 파일은 사용하지 않는다.
+- `start-pi.sh`가 시작 시 로드한 환경을 도구에 전달한다. 기본 허용 목록에 `projectman`·`scheduler`를 포함하므로 데이터·예약 조회는 이 도구로 요청한다. 도구가 인증에 환경변수를 사용하며 에이전트는 키 원문이나 환경 파일을 조회하지 않는다.
+- 실행 중인 Pi에는 실행 인자 변경이 즉시 반영되지 않는다. 종료 후 `./start-pi.sh --continue`로 재개하거나 Telegram `/restart`로 재시작한다. 별도 `--tools` 옵션을 지정하면 해당 허용 목록을 우선한다.
 - PH-CMS 루트에서 `pnpm dev -- --server --mcp`로 API·MCP를 실행한다. 서버·관리자 UI·MCP의 API prefix를 같은 값으로 맞춘다. 현재 카운트 테스트 CLI의 MCP URL은 장비별 소스 설정이므로 다른 장비에서는 변경해야 한다.
 - Nginx의 `/api/v2/`는 PH-CMS API·관리자 UI로 프록시하며, MCP는 별도의 `/mcp` 엔드포인트를 사용한다.
 - 인증정보는 읽어 자동 이관하거나 로그·Git에 기록하지 않는다. 설정·재시작 안내는 [`OPERATIONS.md`](OPERATIONS.md)의 PH-CMS MCP 절을 참고한다.

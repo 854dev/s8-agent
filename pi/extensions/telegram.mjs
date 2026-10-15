@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { Bot, Gateway, sessionKey, tokenUsage } from '../../apps/telegram-gateway/gateway.mjs';
+import { loadTelegramConfig } from '../lib/telegram-config.mjs';
 
 // One local polling owner per bot. Older Pi instances retry only when the owner exits.
 export function ownership({ port, key, onAcquire, onRelease, interval = 1000 }) {
@@ -50,7 +51,7 @@ export function ownership({ port, key, onAcquire, onRelease, interval = 1000 }) 
   return () => { stopped = true; clearInterval(timer); release(); };
 }
 
-export function attach(pi, { port = 39485, config = process.env, fetchImpl = fetch, autoStart = true } = {}) {
+export function attach(pi, { port = 39485, config = process.env, fetchImpl = fetch, autoStart = true, settings } = {}) {
   let stopOwner, gateway, telegramPrompt = false, context, enabled = autoStart;
   pi.registerCommand('telegram-new', { description: 'Telegram에서 새 대화를 시작합니다', handler: async (_args, ctx) => { await ctx.newSession(); } });
   const start = ctx => {
@@ -59,16 +60,21 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
     telegramPrompt = false;
     if (ctx.mode !== 'tui') return;
     const token = config.TELEGRAM_BOT_TOKEN;
-    const users = new Set((config.TELEGRAM_ALLOWED_USER_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean));
-    const groups = new Set((config.TELEGRAM_ALLOWED_GROUP_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean));
+    let current;
+    try { current = settings ?? loadTelegramConfig(undefined, config); }
+    catch (error) { console.error(error.message); return; }
+    let users = new Set(current.allowedUserIds);
+    let groups = new Set(current.allowedGroupIds);
     if (!token || (!users.size && !groups.size)) return;
-    if ([...users, ...groups].some(id => !/^-?\d+$/.test(id))) {
-      console.error('Telegram allowed IDs must be numeric');
-      return;
-    }
     let bot, selected;
     const stop = () => { bot?.stop(); bot = null; gateway?.stop(); gateway = null; selected = null; telegramPrompt = false; };
     stopOwner = ownership({ port, key: token, onRelease: stop, onAcquire: releaseOwner => {
+      // A prior Pi owner must re-read the shared policy before resuming polling.
+      try {
+        current = settings ?? loadTelegramConfig(undefined, config);
+        users = new Set(current.allowedUserIds); groups = new Set(current.allowedGroupIds);
+        if (!users.size && !groups.size) { releaseOwner(); return; }
+      } catch (error) { console.error(error.message); releaseOwner(); return; }
       const currentBot = new Bot({ token, users, groups, fetchImpl, spawnPi: () => { throw new Error('not used'); } });
       bot = currentBot;
       currentBot.route = async update => {

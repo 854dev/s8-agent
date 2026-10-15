@@ -11,7 +11,10 @@ const parameters = Type.Object({
   intervalMinutes: Type.Optional(Type.Integer()),
   timezone: Type.Optional(Type.String()),
   enabled: Type.Optional(Type.Boolean()),
+  expiresAt: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   script: Type.Optional(Type.String()),
+  kind: Type.Optional(Type.Union([Type.Literal('shell'), Type.Literal('projectman')])),
+  projectUid: Type.Optional(Type.String()),
 });
 
 export default function (pi: ExtensionAPI) {
@@ -56,7 +59,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: 'scheduler',
     label: 'Scheduler',
-    description: 'CRUD for daily or interval shell-script jobs. Scripts execute as the current OS user at the scheduled local time. Creating, changing, or deleting a job requires interactive user confirmation. Use list/create/update/delete.',
+    description: 'CRUD for shell jobs or Projectman dispatch jobs. Projectman jobs poll one project every 5 minutes and issue one bounded read-only S8 prompt per authorized task/subtask; idle polls are silent. Existing approval restrictions apply. Creating, changing, or deleting requires interactive user confirmation. Use list/create/update/delete.',
     parameters,
     async execute(_id, args, _signal, _onUpdate, ctx) {
       return withFileMutationQueue(jobsFile, async () => {
@@ -75,14 +78,17 @@ export default function (pi: ExtensionAPI) {
         if (args.action === 'create') {
           if (index >= 0) throw new Error('Schedule id already exists.');
           const job = validateJob({
-            id: args.id, time: args.time, intervalMinutes: args.intervalMinutes, timezone: args.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-            script: args.script,
+            id: args.id, time: args.time, intervalMinutes: args.intervalMinutes ?? (args.kind === 'projectman' ? 5 : undefined), timezone: args.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+            script: args.script, expiresAt: args.expiresAt, kind: args.kind, projectUid: args.projectUid,
           });
-          await confirm(ctx, '예약 작업 생성', `${job.id} · ${job.time ? `매일 ${job.time}` : `${job.intervalMinutes}분마다`} (${job.timezone}) · ${args.enabled ?? true ? '활성화' : '중지 상태'}\n현재 사용자 권한으로 실행됩니다. 아래 스크립트를 확인하세요.\n\n${job.script}`);
-          await mkdir(scripts, { recursive: true, mode: 0o700 });
-          await writeFile(scriptPath, job.script, { flag: 'wx', mode: 0o700 });
-          jobs.push({ id: job.id, time: job.time, intervalMinutes: job.intervalMinutes, timezone: job.timezone, enabled: args.enabled ?? true });
-          try { await saveJobs(jobs); } catch (error) { await rm(scriptPath, { force: true }); throw error; }
+          await confirm(ctx, '예약 작업 생성', `${job.id} · ${job.time ? `매일 ${job.time}` : `${job.intervalMinutes}분마다`} (${job.timezone}) · ${args.enabled ?? true ? '활성화' : '중지 상태'}\n현재 사용자 권한으로 실행됩니다. ${job.kind === 'projectman' ? `Projectman ${job.projectUid}: 승인된 읽기 전용 워크/서브워크 1건에 프롬프트 1회. 빈 검사에는 알리지 않습니다.` : `아래 스크립트를 확인하세요.\n\n${job.script}`}`);
+          if (job.kind === 'shell') {
+            await mkdir(scripts, { recursive: true, mode: 0o700 });
+            await writeFile(scriptPath, job.script, { flag: 'wx', mode: 0o700 });
+          }
+          const { script: _script, ...metadata } = job;
+          jobs.push({ ...metadata, enabled: args.enabled ?? true });
+          try { await saveJobs(jobs); } catch (error) { if (job.kind === 'shell') await rm(scriptPath, { force: true }); throw error; }
           return { content: [{ type: 'text', text: `Created ${job.id}: ${job.time ?? `${job.intervalMinutes} minute interval`} (${job.timezone})` }], details: undefined };
         }
 
@@ -96,22 +102,30 @@ export default function (pi: ExtensionAPI) {
         }
 
         const current = jobs[index];
-        const script = args.script ?? await readFile(scriptPath, 'utf8');
+        const kind = args.kind ?? current.kind ?? 'shell';
+        const script = kind === 'projectman' ? args.script : args.script ?? await readFile(scriptPath, 'utf8');
         const job = validateJob({
-          id: args.id, time: args.intervalMinutes !== undefined ? undefined : args.time ?? current.time,
-          intervalMinutes: args.time !== undefined ? undefined : args.intervalMinutes ?? current.intervalMinutes,
-          timezone: args.timezone ?? current.timezone, script,
+          id: args.id, kind, projectUid: args.projectUid ?? current.projectUid,
+          time: kind === 'projectman' ? args.time : args.intervalMinutes !== undefined ? undefined : args.time ?? current.time,
+          intervalMinutes: kind === 'projectman' ? args.intervalMinutes ?? 5 : args.time !== undefined ? undefined : args.intervalMinutes ?? current.intervalMinutes,
+          timezone: args.timezone ?? current.timezone, script, expiresAt: args.expiresAt !== undefined ? args.expiresAt : current.expiresAt,
         });
-        await confirm(ctx, '예약 작업 수정', `${job.id} · ${job.time ? `매일 ${job.time}` : `${job.intervalMinutes}분마다`} (${job.timezone}) · ${args.enabled ?? current.enabled ? '활성화' : '중지'}\n${args.script ? `현재 사용자 권한으로 실행될 스크립트를 확인하세요.\n\n${job.script}` : '스크립트 내용은 변경되지 않습니다.'}`);
-        const oldScript = await readFile(scriptPath, 'utf8');
+        await confirm(ctx, '예약 작업 수정', `${job.id} · ${job.time ? `매일 ${job.time}` : `${job.intervalMinutes}분마다`} (${job.timezone}) · ${args.enabled ?? current.enabled ? '활성화' : '중지'}\n${job.kind === 'projectman' ? `Projectman ${job.projectUid}: 승인된 읽기 전용 워크/서브워크 1건에 프롬프트 1회. 빈 검사에는 알리지 않습니다.` : args.script ? `현재 사용자 권한으로 실행될 스크립트를 확인하세요.\n\n${job.script}` : '스크립트 내용은 변경되지 않습니다.'}`);
+        let oldScript;
         const tempScript = `${scriptPath}.${process.pid}.tmp`;
-        await writeFile(tempScript, job.script, { mode: 0o700 });
-        await rename(tempScript, scriptPath);
-        jobs[index] = { ...current, time: job.time, intervalMinutes: job.intervalMinutes, timezone: job.timezone, enabled: args.enabled ?? current.enabled };
+        if (job.kind === 'shell') {
+          oldScript = await readFile(scriptPath, 'utf8').catch(error => { if (error.code !== 'ENOENT') throw error; });
+          await mkdir(scripts, { recursive: true, mode: 0o700 });
+          await writeFile(tempScript, job.script, { mode: 0o700 });
+          await rename(tempScript, scriptPath);
+        }
+        const { script: _script, ...metadata } = job;
+        jobs[index] = { ...current, ...metadata, enabled: args.enabled ?? current.enabled };
         try { await saveJobs(jobs); } catch (error) {
-          const rollback = `${tempScript}.rollback`;
-          await writeFile(rollback, oldScript, { mode: 0o700 });
-          await rename(rollback, scriptPath);
+          if (job.kind === 'shell') {
+            if (oldScript === undefined) await rm(scriptPath, { force: true });
+            else { await writeFile(`${tempScript}.rollback`, oldScript, { mode: 0o700 }); await rename(`${tempScript}.rollback`, scriptPath); }
+          }
           throw error;
         }
         return { content: [{ type: 'text', text: `Updated ${job.id}` }], details: undefined };
