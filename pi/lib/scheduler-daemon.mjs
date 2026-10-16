@@ -222,6 +222,7 @@ export async function runScheduler({ root, cwd = process.cwd(), bash, env = proc
       while (busy) await new Promise(resolve => setTimeout(resolve, 50));
       process.off('SIGINT', stopSignals);
       process.off('SIGTERM', stopSignals);
+      process.off('SIGHUP', stopSignals);
       await lock.close();
       await rm(lockFile, { force: true });
     })();
@@ -230,6 +231,7 @@ export async function runScheduler({ root, cwd = process.cwd(), bash, env = proc
   const stopSignals = () => { void stop().finally(() => process.exit(0)); };
   process.once('SIGINT', stopSignals);
   process.once('SIGTERM', stopSignals);
+  process.once('SIGHUP', stopSignals);
   timer = setInterval(() => void tick(), 10_000);
   void tick();
   return stop;

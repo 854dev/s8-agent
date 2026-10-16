@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
 import { isDue, validateJob } from '../lib/scheduler-store.mjs';
@@ -52,6 +54,44 @@ test('runs a due script once and persists status without retaining its output', 
     assert.equal(JSON.parse(await readFile(path.join(root, 'jobs.json'), 'utf8')).jobs[0].enabled, true);
     await assert.rejects(controlSchedules(root, 'stop', 'morning'), /실행 중/);
   } finally { await rm(temp, { recursive: true, force: true }); }
+});
+
+test('SIGHUP shuts down the scheduler and releases its owner lock', async t => {
+  if (process.platform === 'win32') return t.skip('SIGHUP is unavailable on Windows');
+  const root = await mkdtemp(path.join(os.tmpdir(), 's8-scheduler-hangup-'));
+  const lockFile = path.join(root, 'owner.lock');
+  await writeFile(path.join(root, 'jobs.json'), JSON.stringify({ version: 1, jobs: [] }));
+  const moduleUrl = new URL('../lib/scheduler-daemon.mjs', import.meta.url).href;
+  const child = spawn(process.execPath, [
+    '--input-type=module',
+    '-e',
+    `import { runScheduler } from ${JSON.stringify(moduleUrl)}; await runScheduler({ root: ${JSON.stringify(root)}, env: {} }); console.log('ready');`,
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let stderr = '';
+  child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await rm(root, { recursive: true, force: true });
+  });
+
+  let output = '';
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`scheduler did not start: ${stderr}`)), 5000);
+    child.once('error', reject);
+    child.stdout.setEncoding('utf8').on('data', chunk => {
+      output += chunk;
+      if (output.includes('ready')) {
+        clearTimeout(timeout);
+        resolve();
+      }
+    });
+  });
+  assert.equal((await readFile(lockFile, 'utf8')).split('\n')[0], String(child.pid));
+  child.kill('SIGHUP');
+  const [code, signal] = await once(child, 'exit');
+  assert.equal(code, 0, stderr);
+  assert.equal(signal, null);
+  await assert.rejects(readFile(lockFile), { code: 'ENOENT' });
 });
 
 test('expired jobs never start; a running batch is stopped at the operation deadline', async t => {
