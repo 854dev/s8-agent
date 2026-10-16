@@ -1,6 +1,7 @@
 {
   "name": "s8-pi-environment",
   "private": true,
+  "type": "module",
   "version": "0.1.0",
   "description": "Canonical Pi configuration and package environment for s8",
   "keywords": [
