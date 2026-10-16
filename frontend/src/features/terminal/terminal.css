@@ -44,6 +44,10 @@
 .terminal-topbar button, .terminal-key-row button { min-height: 44px; min-width: 44px; flex-shrink: 0; padding-inline: 9px; }
 .terminal-topbar output { min-width: 32px; text-align: center; font-size: 12px; }
 .terminal-status { flex-shrink: 0; margin: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-session-picker { flex-shrink: 0; }
+.terminal-session-picker > :first-child { flex: 1; min-width: 0; }
+.terminal-session-picker input { font-size: 16px; }
+.terminal-session-picker button { min-height: 44px; }
 .terminal-settings { flex-shrink: 0; font-size: 13px; }
 .terminal-settings summary { cursor: pointer; padding: 6px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-settings-content { max-height: min(260px, 35dvh); overflow: auto; padding: 6px 0; }

@@ -26,6 +26,8 @@ tmux new-session -d -s "$SESSION" -n nginx -c "$AGENT_ROOT"
 tmux new-window -d -t "=$SESSION:" -n phcms -c "$AGENT_ROOT"
 tmux new-window -d -t "=$SESSION:" -n kb-browser -c "$AGENT_ROOT"
 tmux new-window -d -t "=$SESSION:" -n frontend -c "$AGENT_ROOT"
+tmux new-window -d -t "=$SESSION:" -n projectman-console -c "$AGENT_ROOT"
+tmux new-window -d -t "=$SESSION:" -n terminal-gateway -c "$AGENT_ROOT"
 
 compose_file='infra/nginx/docker-compose.yml'
 compose=(docker compose)
@@ -47,6 +49,10 @@ if [[ -n "$phcms_start_command" ]]; then
     tmux send-keys -t "=$SESSION:phcms" -l "$phcms_start_command"
     tmux send-keys -t "=$SESSION:phcms" C-m
 fi
+tmux send-keys -t "=$SESSION:projectman-console" \
+    'node pi/bin/projectman-console.mjs' C-m
+tmux send-keys -t "=$SESSION:terminal-gateway" \
+    'npm start --prefix apps/terminal-gateway' C-m
 tmux send-keys -t "=$SESSION:frontend" \
     'npm run dev --prefix frontend -- --host 127.0.0.1 --port 4178 --strictPort' C-m
 

@@ -13,7 +13,7 @@ vi.mock('@xterm/xterm', () => ({ Terminal: class {
   onData(handler: (data: string) => void) { mock.input = handler; return { dispose() {} } }
 } }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() { mock.fits++ } } }))
-afterEach(() => { vi.unstubAllGlobals(); Reflect.deleteProperty(document, 'fullscreenElement'); Reflect.deleteProperty(document, 'fonts'); mock.sent = []; mock.input = null; mock.instances = 0; mock.fits = 0; mock.refreshes = 0 })
+afterEach(() => { vi.unstubAllGlobals(); Reflect.deleteProperty(document, 'fullscreenElement'); Reflect.deleteProperty(document, 'fonts'); Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView'); mock.sent = []; mock.input = null; mock.instances = 0; mock.fits = 0; mock.refreshes = 0 })
 it('defaults to host shell and sends mobile keys, Ctrl chords, and paste without an appended Enter', async () => {
   class Socket {
     static OPEN = 1
@@ -96,4 +96,39 @@ it('defaults to host shell and sends mobile keys, Ctrl chords, and paste without
   await screen.findByText('연결됨')
   expect(mock.instances).toBe(3)
   fallback.unmount()
+})
+
+it('shows the session picker outside settings and switches between main and infra', async () => {
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
+  const sockets: Socket[] = []
+  class Socket {
+    static OPEN = 1
+    readyState = 1
+    onopen: null | (() => void) = null
+    onclose = null; onmessage = null; onerror = null
+    close = vi.fn()
+    send() {}
+    url: URL
+    constructor(url: URL) { this.url = url; sockets.push(this); queueMicrotask(() => this.onopen?.()) }
+  }
+  vi.stubGlobal('WebSocket', Socket)
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ sessions: ['s8-host-shell', 's8-infra', 's8-main'] }) })))
+  render(<MantineProvider env="test"><TerminalPage onBack={() => {}} /></MantineProvider>)
+  const picker = screen.getByRole('combobox', { name: '터미널 세션' })
+  expect(picker).toBeVisible()
+  expect(picker.closest('details')).toBeNull()
+  await screen.findByText('연결됨')
+  await waitFor(() => expect(fetch).toHaveBeenCalled())
+  fireEvent.click(picker)
+  const options = await screen.findAllByRole('option')
+  expect(options.map(option => option.textContent)).toEqual(['s8-main', 's8-infra', '호스트 셸'])
+  fireEvent.click(screen.getByRole('option', { name: 's8-main' }))
+  await waitFor(() => expect(sockets.at(-1)?.url.searchParams.get('session')).toBe('s8-main'))
+  expect(sockets[0].close).toHaveBeenCalledOnce()
+  fireEvent.click(picker)
+  fireEvent.click(await screen.findByRole('option', { name: 's8-infra' }))
+  await waitFor(() => expect(sockets.at(-1)?.url.searchParams.get('session')).toBe('s8-infra'))
+  expect(sockets[1].close).toHaveBeenCalledOnce()
+  fireEvent.click(screen.getByRole('button', { name: '목록 새로고침' }))
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
 })

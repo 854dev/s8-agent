@@ -8,6 +8,7 @@ import './terminal.css'
 
 const terminalFontFamily = '"S8 Nerd Symbols", Menlo, Consolas, "Liberation Mono", "Noto Sans Mono CJK KR", "Apple SD Gothic Neo", "Malgun Gothic", monospace'
 const shellSession = 's8-host-shell'
+const preferredSessions = ['s8-main', 's8-infra']
 const primaryKeys = terminalKeys.filter(([label]) => ['Esc', 'Tab', 'Ctrl+C', '↑', '↓', '←', '→'].includes(label))
 const secondaryKeys = terminalKeys.filter(key => !primaryKeys.includes(key))
 export default function TerminalPage({ onBack }: { onBack: () => void }) {
@@ -152,14 +153,18 @@ export default function TerminalPage({ onBack }: { onBack: () => void }) {
       <Button size="xs" variant="light" aria-pressed={expanded} onClick={() => void toggleFullscreen()}>{expanded ? '전체화면 해제' : '전체화면'}</Button>
       {!expanded && <Button size="xs" variant="light" onClick={onBack}>뒤로</Button>}
     </header>
+    <Group gap="xs" className="terminal-session-picker" wrap="nowrap">
+      <Select aria-label="터미널 세션" placeholder="세션 선택" comboboxProps={{ withinPortal: false }}
+        data={[...preferredSessions.filter(name => sessions.includes(name)), ...sessions.filter(name => !preferredSessions.includes(name))].map(name => ({ value: name, label: name === shellSession ? '호스트 셸' : name }))}
+        value={session} onChange={setSession} />
+      <Button size="xs" variant="light" onClick={() => void refresh()}>목록 새로고침</Button>
+    </Group>
     <details className="terminal-settings" onToggle={() => resizeRef.current?.()}>
       <summary>세션·연결 설정 · {session === shellSession ? '호스트 셸' : session ?? '연결 해제'}</summary>
       <Stack gap="xs" className="terminal-settings-content">
         <Text size="xs">PHCMS·S8 서비스 등 호스트의 모든 tmux 세션에 접속합니다. 호스트 셸에서 서비스 명령을 실행할 수 있습니다. 입력·화면 크기는 다른 접속자와 공유됩니다.</Text>
         <Group gap="xs">
-          <Select aria-label="터미널 세션" placeholder="세션 선택" comboboxProps={{ withinPortal: false }} data={sessions.map(name => ({ value: name, label: name === shellSession ? '호스트 셸' : name }))} value={session} onChange={setSession} />
           <Button size="xs" onClick={() => void openShell()}>셸 열기</Button>
-          <Button size="xs" variant="light" onClick={() => void refresh()}>목록 새로고침</Button>
           <Button size="xs" disabled={!session} onClick={() => setRevision(value => value + 1)}>재연결</Button>
           <Button size="xs" disabled={!session} variant="light" onClick={() => { setSession(null); setConnected(false); setControl(false); setStatus('연결 해제됨. tmux 세션은 유지됩니다.') }}>연결 해제</Button>
           <Button size="xs" variant="light" onClick={() => setFontSize(12)}>기본 글자 크기</Button>
