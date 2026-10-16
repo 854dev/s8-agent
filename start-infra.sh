@@ -14,62 +14,48 @@ command -v docker >/dev/null 2>&1 || {
     exit 1
 }
 
-if ! tmux has-session -t "=$SESSION" 2>/dev/null; then
-    tmux new-session -d -s "$SESSION" -n nginx -c "$AGENT_ROOT" || {
-        tmux has-session -t "=$SESSION" 2>/dev/null || exit 1
-    }
+if tmux has-session -t "=$SESSION" 2>/dev/null; then
+    while IFS= read -r pane; do
+        tmux send-keys -t "$pane" C-c
+    done < <(tmux list-panes -s -t "=$SESSION" -F '#{pane_id}')
+    sleep 1
+    tmux kill-session -t "=$SESSION"
 fi
 
-ensure_window() {
-    local name="$1"
-    local windows
-    windows="$(tmux list-windows -t "=$SESSION" -F '#W')"
-    if printf '%s\n' "$windows" | grep -Fqx -- "$name"; then
-        WINDOW_CREATED=false
-    else
-        tmux new-window -d -t "=$SESSION:" -n "$name" -c "$AGENT_ROOT"
-        WINDOW_CREATED=true
-    fi
-}
-
-ensure_window nginx
-nginx_created="$WINDOW_CREATED"
-ensure_window phcms
-ensure_window kb-browser
-kb_browser_created="$WINDOW_CREATED"
-ensure_window frontend
-frontend_created="$WINDOW_CREATED"
+tmux new-session -d -s "$SESSION" -n nginx -c "$AGENT_ROOT"
+tmux new-window -d -t "=$SESSION:" -n phcms -c "$AGENT_ROOT"
+tmux new-window -d -t "=$SESSION:" -n kb-browser -c "$AGENT_ROOT"
+tmux new-window -d -t "=$SESSION:" -n frontend -c "$AGENT_ROOT"
 
 compose_file='infra/nginx/docker-compose.yml'
-running_services="$(docker compose -f "$compose_file" ps --status running --services)"
-if printf '%s\n' "$running_services" | grep -Fqx nginx &&
-   printf '%s\n' "$running_services" | grep -Fqx kb-browser; then
-    printf '%s\n' 'Nginx와 KB Browser가 이미 실행 중입니다. 기존 컨테이너를 유지합니다.'
-else
-    docker compose -f "$compose_file" up --build -d
+compose=(docker compose)
+if [[ -f "$AGENT_ROOT/.env" ]]; then
+    compose+=(--env-file "$AGENT_ROOT/.env")
 fi
+phcms_start_command="${PHCMS_START_COMMAND:-}"
+if [[ -f "$AGENT_ROOT/.env" ]]; then
+    phcms_start_command="$(node --env-file="$AGENT_ROOT/.env" \
+        -e 'process.stdout.write(process.env.PHCMS_START_COMMAND ?? "")')"
+fi
+"${compose[@]}" -f "$compose_file" up --build --force-recreate -d
 
-if $nginx_created; then
-    tmux send-keys -t "=$SESSION:nginx" \
-        "docker compose -f $compose_file logs --follow nginx" C-m
+nginx_logs_command="$(printf '%q ' "${compose[@]}" -f "$compose_file" logs --follow nginx)"
+tmux send-keys -t "=$SESSION:nginx" "$nginx_logs_command" C-m
+kb_browser_logs_command="$(printf '%q ' "${compose[@]}" -f "$compose_file" logs --follow kb-browser)"
+tmux send-keys -t "=$SESSION:kb-browser" "$kb_browser_logs_command" C-m
+if [[ -n "$phcms_start_command" ]]; then
+    tmux send-keys -t "=$SESSION:phcms" -l "$phcms_start_command"
+    tmux send-keys -t "=$SESSION:phcms" C-m
 fi
-if $kb_browser_created; then
-    tmux send-keys -t "=$SESSION:kb-browser" \
-        "docker compose -f $compose_file logs --follow kb-browser" C-m
-fi
-if $frontend_created; then
-    if curl --silent --show-error --fail --max-time 2 \
-        --output /dev/null http://127.0.0.1:4178/s8/ 2>/dev/null; then
-        tmux send-keys -t "=$SESSION:frontend" \
-            'printf "%s\n" "frontend가 이미 127.0.0.1:4178에서 응답 중입니다. 기존 서버를 유지합니다."' C-m
-    else
-        tmux send-keys -t "=$SESSION:frontend" \
-            'npm run dev --prefix frontend -- --host 127.0.0.1 --port 4178 --strictPort' C-m
-    fi
-fi
+tmux send-keys -t "=$SESSION:frontend" \
+    'npm run dev --prefix frontend -- --host 127.0.0.1 --port 4178 --strictPort' C-m
 
 printf '%s\n' \
-    "tmux 세션을 준비했습니다: $SESSION" \
-    '기존 창과 실행 중인 서비스는 유지하고, 없는 창과 서비스를 준비했습니다.' \
-    'phcms 창은 비워 두었습니다.' \
-    "웹 터미널의 세션 목록에서 $SESSION 을 선택하세요."
+    "tmux 세션을 새로 시작했습니다: $SESSION" \
+    '기존 세션 창과 인프라 컨테이너를 교체했습니다.'
+if [[ -n "$phcms_start_command" ]]; then
+    printf '%s\n' 'PHCMS_START_COMMAND를 phcms 창에서 실행했습니다.'
+else
+    printf '%s\n' 'PHCMS_START_COMMAND가 없어 phcms 창은 비워 두었습니다.'
+fi
+printf '웹 터미널의 세션 목록에서 %s 을 선택하세요.\n' "$SESSION"

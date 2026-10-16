@@ -21,7 +21,7 @@ npm start --prefix apps/terminal-gateway
 npm ci --ignore-scripts --prefix frontend
 npm run build --prefix frontend
 npm run preview --prefix frontend -- --host 127.0.0.1 --port 4178
-NGINX_BIND_IP=100.120.50.80 docker compose --env-file /dev/null -f infra/nginx/docker-compose.yml up -d --build
+NGINX_BIND_IP=100.120.50.80 docker compose --env-file .env -f infra/nginx/docker-compose.yml up -d --build
 ```
 
 - 실행 명령은 `s8-agent` 루트 기준이다. Nginx IP는 실제 장비의 Tailscale IPv4로 바꾼다.

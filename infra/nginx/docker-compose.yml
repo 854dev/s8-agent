@@ -35,7 +35,6 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - "./conf.d:/etc/nginx/conf.d:ro"
-      - "${S8_KB_ROOT:-../../../854_md}/p3 - 프리랜서외주/개인홈페이지-기획안-2026/샘플 홈페이지:/usr/share/nginx/html/homepage:ro"
     depends_on:
       kb-browser:
         condition: service_healthy

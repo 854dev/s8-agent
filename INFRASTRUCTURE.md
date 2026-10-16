@@ -58,7 +58,7 @@ Tailscale 장치
 ## 네트워크 정책
 
 ```bash
-NGINX_BIND_IP=100.120.50.80 docker compose -f infra/nginx/docker-compose.yml up -d --build
+NGINX_BIND_IP=100.120.50.80 docker compose --env-file .env -f infra/nginx/docker-compose.yml up -d --build
 ```
 
 - Tailscale 전용 운영에서는 실제 Tailscale IPv4를 명시한다.

@@ -117,13 +117,13 @@ curl -fsS http://127.0.0.1:4178/s8/
 
 ## Docker Compose와 Nginx
 
-`./start-infra.sh`는 `s8-infra` 세션을 재사용하고 빠진 창만 만든다. 기존 창의 작업은 건드리지 않는다. Compose의 Nginx·KB Browser가 모두 실행 중이면 그대로 두고, 누락된 서비스가 있을 때만 `up --build -d`로 보정한다. frontend가 `127.0.0.1:4178/s8/`에서 응답하면 기존 서버를 유지한다. `NGINX_BIND_IP`는 `.env` 값 또는 shell 환경변수를 사용하며, 둘 다 없으면 localhost(`127.0.0.1`)에만 바인딩한다. PHCMS 창은 비워 두며, 웹 터미널 세션 목록에서 `s8-infra`를 선택할 수 있다.
+`./start-infra.sh`는 저장소 루트 `.env`를 Compose에 명시 전달한다. 매번 기존 `s8-infra` 세션의 모든 창을 종료하고 새 창을 만든 뒤 Compose에 `up --build --force-recreate -d`를 실행해 Nginx·KB Browser 컨테이너를 교체한다. 실행 중이던 창 프로세스도 종료되므로 필요한 작업은 먼저 저장한다. frontend도 새 창에서 다시 시작한다. PHCMS 로직은 S8 실행 코드에 포함하지 않는다. 필요하면 `.env`의 `PHCMS_START_COMMAND`에 `cd /home/dev_854/ph-cms && pnpm build && pnpm dev`처럼 실행 명령을 지정하고, 새 `phcms` 창에서 실행한다. 미설정 시 해당 창은 비워 둔다. `NGINX_BIND_IP`는 셸 환경변수가 `.env`보다 우선하며 둘 다 없으면 localhost(`127.0.0.1`)에만 바인딩한다. 웹 터미널 세션 목록에서 `s8-infra`를 선택할 수 있다.
 
 로컬 전용 실행:
 
 ```bash
 NGINX_BIND_IP=127.0.0.1 \
-  docker compose -f infra/nginx/docker-compose.yml up -d --build
+  docker compose --env-file .env -f infra/nginx/docker-compose.yml up -d --build
 ```
 
 Tailscale 전용 실행:
@@ -131,27 +131,27 @@ Tailscale 전용 실행:
 ```bash
 tailscale ip -4
 NGINX_BIND_IP=<TAILSCALE_IP> \
-  docker compose -f infra/nginx/docker-compose.yml up -d --build
+  docker compose --env-file .env -f infra/nginx/docker-compose.yml up -d --build
 ```
 
 상태와 로그:
 
 ```bash
-docker compose -f infra/nginx/docker-compose.yml ps
-docker compose -f infra/nginx/docker-compose.yml logs --tail 100 nginx kb-browser
+docker compose --env-file .env -f infra/nginx/docker-compose.yml ps
+docker compose --env-file .env -f infra/nginx/docker-compose.yml logs --tail 100 nginx kb-browser
 ```
 
 Nginx 설정 검사:
 
 ```bash
-docker compose -f infra/nginx/docker-compose.yml \
+docker compose --env-file .env -f infra/nginx/docker-compose.yml \
   run --rm --no-deps nginx nginx -t
 ```
 
 중지:
 
 ```bash
-docker compose -f infra/nginx/docker-compose.yml down
+docker compose --env-file .env -f infra/nginx/docker-compose.yml down
 ```
 
 `down`은 서비스를 중단하므로 사용자의 명시적 요청이나 승인 후 실행한다.
@@ -162,7 +162,7 @@ docker compose -f infra/nginx/docker-compose.yml down
 ./start-pi.sh --version
 tmux has-session -t s8-main
 curl -fsS http://127.0.0.1:4178/s8/
-docker compose -f infra/nginx/docker-compose.yml ps
+docker compose --env-file .env -f infra/nginx/docker-compose.yml ps
 curl -fsS http://<BIND_IP>/health
 curl -fsS http://<BIND_IP>/api/docs/health
 curl -fsS -H 'Accept: text/html' http://<BIND_IP>/s8/knowledge-base

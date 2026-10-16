@@ -89,12 +89,12 @@ cp -n .env.example .env
 ```
 
 ```dotenv
-S8_KB_ROOT=/path/to/854_md
+S8_KB_ROOT=/home/user/kb_root
 PHCMS_API_URL=http://127.0.0.1:8000/api/v2
 # PHCMS_ACCESS_TOKEN에는 직접 발급한 에이전트 서비스 키를 설정한다.
 ```
 
-상대 경로는 `s8-agent` 루트 기준이며 `.env`는 Git에 포함되지 않는다.
+`S8_KB_ROOT`에는 실제 지식베이스의 절대 경로를 지정한다. `.env`는 Git에 포함되지 않는다.
 
 ## 실행 스크립트
 
@@ -103,7 +103,7 @@ PHCMS_API_URL=http://127.0.0.1:8000/api/v2
 | 스크립트 | 역할 | 실행 예 |
 | --- | --- | --- |
 | `start-pi.sh` | 매니저 실행 + 스케줄러·개발 감독 기본 시작 | `./start-pi.sh --session manager` |
-| `start-infra.sh` | Nginx·KB Browser, frontend 실행용 `s8-infra` tmux 세션 준비 (PHCMS 창은 비워 둠) | `./start-infra.sh` |
+| `start-infra.sh` | 기존 `s8-infra` 창과 Nginx·KB Browser 컨테이너를 교체하고 frontend를 재시작 (PHCMS 명령은 선택 설정) | `./start-infra.sh` |
 | `start-pi.sh --service supervisor` | 통합 실행에서 사용하는 개발 감독 진입점. 단독 실행·진단도 지원 | `./start-pi.sh --service supervisor` |
 | `start-pi.sh --service scheduler` | 통합 실행에서 사용하는 예약 데몬 진입점. 단독 실행도 지원 | `./start-pi.sh --service scheduler` |
 
@@ -154,7 +154,7 @@ npm --prefix frontend run preview -- --host 127.0.0.1 --port 4178 --strictPort
 ## 웹 터미널
 
 - `/s8/terminal`은 기본으로 호스트 셸에 접속한다. 세션 선택에서 같은 호스트 사용자·tmux 서버의 PHCMS, S8 스케줄러·개발 감독, Pi 등 모든 실행 세션을 제어한다. Pi 관리 표시가 없어도 접속할 수 있으며, tmux 밖의 서비스는 호스트 셸에서 운영 명령으로 제어한다.
-- `./start-infra.sh`는 `s8-infra` tmux 세션의 기존 창과 실행 중인 인프라를 유지하고 누락된 창/서비스만 준비한다. 이미 응답 중인 frontend는 다시 띄우지 않으며, PHCMS용 빈 창을 둔다. 웹 터미널 세션 목록에서 `s8-infra`를 선택해 접속한다. `NGINX_BIND_IP`가 없으면 Compose의 `.env` 설정을 사용하고, 해당 설정도 없으면 localhost(`127.0.0.1`)에만 바인딩한다.
+- `./start-infra.sh`는 저장소 루트 `.env`를 Compose에 명시 전달하고, 실행할 때마다 기존 `s8-infra` 창 전체(PHCMS 포함)와 Nginx·KB Browser 컨테이너를 교체한 뒤 frontend를 재시작한다. PHCMS 실행은 선택 사항이며 `.env`의 `PHCMS_START_COMMAND`에 명령을 지정하면 새 `phcms` 창에서 실행한다. 기본값은 미설정으로, PHCMS 창은 비워 둔다. 실행 중인 창의 프로세스는 종료되므로 필요한 작업은 먼저 저장한다. 웹 터미널 세션 목록에서 `s8-infra`를 선택해 접속한다. `NGINX_BIND_IP`가 셸 환경변수나 `.env`에 없으면 localhost(`127.0.0.1`)에만 바인딩한다.
 - `./start-pi.sh --sessions`로 목록, `./start-pi.sh --session main`으로 생성·재사용한 뒤 창 목록을 출력한다. 접속은 웹 터미널이나 `tmux attach -t s8-main`을 사용한다.
 - `./start-pi.sh --session main --telegram`으로 실행 중인 세션에 Telegram 연결을 이전한다.
 - backend 설치·실행, Tailscale 전용 노출 및 복구는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.

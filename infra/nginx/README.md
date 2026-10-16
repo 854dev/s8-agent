@@ -11,9 +11,11 @@
 
 ## 직접 실행
 
+저장소 루트에서 실행한다. `.env.example`을 `.env`로 복사하고 `S8_KB_ROOT`에 실제 지식베이스의 절대 경로를 지정한다. Compose에는 루트 `.env`를 명시적으로 전달한다.
+
 ```bash
 NGINX_BIND_IP=127.0.0.1 \
-  docker compose -f infra/nginx/docker-compose.yml up -d --build
+  docker compose --env-file .env -f infra/nginx/docker-compose.yml up -d --build
 ```
 
 Tailscale 전용으로 사용할 때는 실제 Tailscale IPv4를 `NGINX_BIND_IP`로 지정한다. `0.0.0.0`은 모든 인터페이스에 열릴 수 있다.
@@ -21,20 +23,20 @@ Tailscale 전용으로 사용할 때는 실제 Tailscale IPv4를 `NGINX_BIND_IP`
 상태 확인:
 
 ```bash
-docker compose -f infra/nginx/docker-compose.yml ps
+docker compose --env-file .env -f infra/nginx/docker-compose.yml ps
 ```
 
 설정 검사:
 
 ```bash
-docker compose -f infra/nginx/docker-compose.yml \
+docker compose --env-file .env -f infra/nginx/docker-compose.yml \
   run --rm --no-deps nginx nginx -t
 ```
 
 중지:
 
 ```bash
-docker compose -f infra/nginx/docker-compose.yml down
+docker compose --env-file .env -f infra/nginx/docker-compose.yml down
 ```
 
 ## 공개 경계
@@ -47,7 +49,7 @@ docker compose -f infra/nginx/docker-compose.yml down
 ## Verify
 
 ```bash
-docker compose -f infra/nginx/docker-compose.yml config
-docker compose -f infra/nginx/docker-compose.yml \
+docker compose --env-file .env -f infra/nginx/docker-compose.yml config
+docker compose --env-file .env -f infra/nginx/docker-compose.yml \
   run --rm --no-deps nginx nginx -t
 ```
