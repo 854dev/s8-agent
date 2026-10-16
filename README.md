@@ -154,7 +154,7 @@ npm --prefix frontend run preview -- --host 127.0.0.1 --port 4178 --strictPort
 
 ## 웹 터미널
 
-- `/s8/terminal`은 기본으로 호스트 셸에 접속한다. 설정 편집·명령 실행과 모바일 보조 키를 지원하며 S8 Pi 세션도 선택할 수 있다.
+- `/s8/terminal`은 기본으로 호스트 셸에 접속한다. 세션 선택에서 같은 호스트 사용자·tmux 서버의 PHCMS, S8 스케줄러·개발 감독, Pi 등 모든 실행 세션을 제어한다. Pi 관리 표시가 없어도 접속할 수 있으며, tmux 밖의 서비스는 호스트 셸에서 운영 명령으로 제어한다.
 - `./start-pi.sh --sessions`로 목록, `./start-pi.sh --session main`으로 생성·접속한다.
 - `./start-pi.sh --session main --telegram`으로 실행 중인 세션에 Telegram 연결을 이전한다.
 - backend 설치·실행, Tailscale 전용 노출 및 복구는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.

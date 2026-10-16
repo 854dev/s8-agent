@@ -2,8 +2,7 @@ import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as pty from 'node-pty';
-import { validSession } from '../../pi/lib/managed-sessions.mjs';
-import { listTerminalSessions, ensureShell } from './sessions.mjs';
+import { listTerminalSessions, ensureShell, validTerminalSession } from './sessions.mjs';
 
 export function sameOrigin(req, required = false) {
   let hostname;
@@ -48,7 +47,7 @@ export function createGateway({ sessions = listTerminalSessions, shell = ensureS
     try {
       const url = new URL(req.url, 'http://localhost');
       const session = url.searchParams.get('session');
-      if (url.pathname !== '/api/terminal/ws' || !validSession(session ?? '') || !(await sessions()).includes(session)) return reject('404 Not Found');
+      if (url.pathname !== '/api/terminal/ws' || !validTerminalSession(session) || !(await sessions()).includes(session)) return reject('404 Not Found');
       if (socket.destroyed) return;
       ws.handleUpgrade(req, socket, head, client => ws.emit('connection', client, session));
     } catch { reject('503 Service Unavailable'); }

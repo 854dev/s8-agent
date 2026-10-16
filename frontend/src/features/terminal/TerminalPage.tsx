@@ -155,7 +155,7 @@ export default function TerminalPage({ onBack }: { onBack: () => void }) {
     <details className="terminal-settings" onToggle={() => resizeRef.current?.()}>
       <summary>세션·연결 설정 · {session === shellSession ? '호스트 셸' : session ?? '연결 해제'}</summary>
       <Stack gap="xs" className="terminal-settings-content">
-        <Text size="xs">호스트 셸에서 설정과 명령을 직접 조작합니다. 입력·화면 크기는 다른 접속자와 공유됩니다.</Text>
+        <Text size="xs">PHCMS·S8 서비스 등 호스트의 모든 tmux 세션에 접속합니다. 호스트 셸에서 서비스 명령을 실행할 수 있습니다. 입력·화면 크기는 다른 접속자와 공유됩니다.</Text>
         <Group gap="xs">
           <Select aria-label="터미널 세션" placeholder="세션 선택" comboboxProps={{ withinPortal: false }} data={sessions.map(name => ({ value: name, label: name === shellSession ? '호스트 셸' : name }))} value={session} onChange={setSession} />
           <Button size="xs" onClick={() => void openShell()}>셸 열기</Button>
