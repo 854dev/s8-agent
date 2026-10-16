@@ -18,6 +18,10 @@ const parameters = Type.Object({
 });
 
 export default function (pi: ExtensionAPI) {
+  registerScheduler(pi);
+}
+
+export function registerScheduler(pi: ExtensionAPI, { projectmanOnly = false } = {}) {
   if (!process.env.S8_PI_CONFIG_ROOT) throw new Error('Run S8 through start-pi.sh to use the scheduler.');
   const agentRoot = path.resolve(process.env.S8_PI_CONFIG_ROOT, '..');
   const root = scheduleRoot(agentRoot);
@@ -76,6 +80,7 @@ export default function (pi: ExtensionAPI) {
         const scriptPath = path.join(scripts, `${args.id}.sh`);
 
         if (args.action === 'create') {
+          if (projectmanOnly && (args.kind !== 'projectman' || args.script !== undefined)) throw new Error('Manager scheduler only permits Projectman jobs');
           if (index >= 0) throw new Error('Schedule id already exists.');
           const job = validateJob({
             id: args.id, time: args.time, intervalMinutes: args.intervalMinutes ?? (args.kind === 'projectman' ? 5 : undefined), timezone: args.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -93,6 +98,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         if (index < 0) throw new Error('Schedule not found.');
+        if (projectmanOnly && (jobs[index].kind !== 'projectman' || args.script !== undefined || (args.kind !== undefined && args.kind !== 'projectman'))) throw new Error('Manager cannot change shell jobs');
         if (args.action === 'delete') {
           await confirm(ctx, '예약 작업 삭제', `${args.id} 예약과 스크립트를 삭제할까요?`);
           jobs.splice(index, 1);
@@ -103,6 +109,7 @@ export default function (pi: ExtensionAPI) {
 
         const current = jobs[index];
         const kind = args.kind ?? current.kind ?? 'shell';
+        if (projectmanOnly && (current.kind !== 'projectman' || kind !== 'projectman' || args.script !== undefined)) throw new Error('Manager cannot change shell jobs');
         const script = kind === 'projectman' ? args.script : args.script ?? await readFile(scriptPath, 'utf8');
         const job = validateJob({
           id: args.id, kind, projectUid: args.projectUid ?? current.projectUid,

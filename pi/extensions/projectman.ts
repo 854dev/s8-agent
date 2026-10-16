@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { Type } from 'typebox';
 import { runProjectmanResearch } from '../lib/projectman-run.ts';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
@@ -6,7 +7,13 @@ import { IntakeDraftSchema, captureIntakeSource, checkIntakeSource, previewIntak
 import { projectmanFromEnv, projectmanJson, type ProjectmanClient } from '../lib/projectman-client.ts';
 
 const fields = Type.Object({
-  action: Type.Union([Type.Literal('list'), Type.Literal('get'), Type.Literal('create'), Type.Literal('transition'), Type.Literal('resume'), Type.Literal('schedule'), Type.Literal('intake_source'), Type.Literal('intake_preview'), Type.Literal('intake_register'), Type.Literal('intake_get')]),
+  action: Type.Union([Type.Literal('list'), Type.Literal('get'), Type.Literal('create'), Type.Literal('transition'), Type.Literal('resume'), Type.Literal('schedule'), Type.Literal('intake_source'), Type.Literal('intake_preview'), Type.Literal('intake_register'), Type.Literal('intake_get'), Type.Literal('workflow_get'), Type.Literal('delegate'), Type.Literal('request_review'), Type.Literal('followup'), Type.Literal('review_result'), Type.Literal('answer'), Type.Literal('escalate')]),
+  answer: Type.Optional(Type.String()),
+  sourceRefs: Type.Optional(Type.Array(Type.String())),
+  expectedRevision: Type.Optional(Type.Integer({ minimum: 0 })),
+  spec: Type.Optional(Type.Object({ repoPath: Type.String(), completionCriteria: Type.Array(Type.String()), allowedPaths: Type.Array(Type.String()), commandNames: Type.Array(Type.String()), dependsOn: Type.Optional(Type.Array(Type.String())), timeBudgetMinutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })) })),
+  question: Type.Optional(Type.Object({ question: Type.String(), reason: Type.String(), audience: Type.Union([Type.Literal('human'), Type.Literal('manager')]), options: Type.Array(Type.String()), impact: Type.String(), recommendation: Type.String() })),
+  reviewId: Type.Optional(Type.String()),
   uid: Type.Optional(Type.String()),
   parentUid: Type.Optional(Type.String()),
   type: Type.Optional(Type.String()),
@@ -105,7 +112,20 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, args, signal, _onUpdate, ctx) {
       const client = projectmanFromEnv(signal);
       let result: unknown;
-      if (args.action === 'intake_source') {
+      if (args.action === 'workflow_get') {
+        if (!args.uid) throw new Error('uid required');
+        result = await client.getWorkflow(args.uid);
+      } else if (['delegate', 'request_review', 'followup', 'review_result', 'answer', 'escalate'].includes(args.action)) {
+        if (!args.uid || args.expectedRevision === undefined) throw new Error('uid and expectedRevision required; read workflow_get first');
+        const operation: Record<string, unknown> = { action: args.action, expectedRevision: args.expectedRevision, requestId: args.requestId ?? randomUUID() };
+        if (args.action === 'delegate') operation.spec = args.spec;
+        if (args.action === 'request_review') operation.question = args.question;
+        if (args.action === 'followup') { operation.reviewId = args.reviewId; operation.message = args.message; }
+        if (args.action === 'review_result') operation.message = args.message;
+        if (['answer', 'escalate'].includes(args.action)) operation.reviewId = args.reviewId;
+        if (args.action === 'answer') { operation.answer = args.answer; operation.sourceRefs = args.sourceRefs; }
+        result = await client.workflow(args.uid, operation);
+      } else if (args.action === 'intake_source') {
         if (args.sourceId && (args.sourcePath || args.sourceEntryIds || args.sourceLabel)) throw new Error('Read an existing sourceId or capture a new source, not both');
         const source = args.sourceId ? checkIntakeSource(sources.get(args.sourceId)!) : await captureIntakeSource(ctx.cwd, ctx.sessionManager.getBranch(), args.sourcePath, args.sourceEntryIds, args.sourceLabel);
         if (!args.sourceId) {
@@ -149,8 +169,11 @@ export default function (pi: ExtensionAPI) {
         if (!args.uid) throw new Error('uid required');
         result = await client.resume(args.uid);
       } else if (args.action === 'create') {
-        if (!args.parentUid || !args.title?.trim() || !args.type || !['task', 'subtask'].includes(args.type)) throw new Error('parentUid, type=task|subtask and title required');
-        result = await client.create(args.parentUid, args.type as 'task' | 'subtask', args.title, args.text ?? '', args.tags, args.phase);
+        if (!args.title?.trim() || !args.type || !['workspace', 'project', 'task', 'subtask'].includes(args.type)) throw new Error('type and title required');
+        if (['workspace', 'project'].includes(args.type)) {
+          if (!ctx.hasUI || !await ctx.ui.confirm('Projectman 컨테이너 생성', `${args.type}: ${args.title}\n상위: ${args.parentUid ?? '(루트)'}\n작업 실행은 승인하지 않습니다.`)) throw new Error('Interactive confirmation required for workspace/project creation');
+        }
+        result = await client.create(args.parentUid, args.type as 'workspace' | 'project' | 'task' | 'subtask', args.title, args.text ?? '', args.tags, args.phase);
       } else {
         if (!args.uid || !args.expectedState || !args.nextState || !args.event || !args.message?.trim()) throw new Error('uid, expectedState, nextState, event and message required');
         if (args.nextState === 'doing') {
@@ -207,7 +230,7 @@ export default function (pi: ExtensionAPI) {
       const promise = runProjectmanResearch(parts[1], minutes, controller.signal, {
         cwd: ctx.cwd, binary, guard: path.join(config, 'extensions/s8-guard.ts'),
         scopeExtension: path.join(config, 'extensions/projectman-read-scope.ts'),
-        systemPrompt: path.join(config, 'APPEND_SYSTEM.md'),
+        systemPrompt: path.resolve(config, '../agents/developer/SYSTEM.md'),
       }).then(result => {
         if (ctx.hasUI) ctx.ui.notify(`${result.status}: ${result.message}`, result.status === 'review' ? 'info' : 'warning');
       }).catch(error => {

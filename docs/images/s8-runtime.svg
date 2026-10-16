@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1280" viewBox="0 0 1600 1280" role="img" aria-labelledby="title desc">
+<title id="title">S8 실행 구조와 개발 작업 흐름</title><desc id="desc">start-pi가 매니저와 두 tmux 서비스를 시작한다. 매니저는 Projectman으로 위임하고 슈퍼바이저는 승인된 작업마다 개발 CLI를 병렬 실행한다. 인간 질문은 콘솔에서 확정한 뒤 매니저의 후속 지시로 재개한다.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8Z" fill="#393939"/></marker></defs>
+<style>text{font-family:'Noto Sans CJK KR',sans-serif;fill:#161616}.title{font-size:42px;font-weight:700}.heading{font-size:23px;font-weight:700}.body{font-size:20px}.small{font-size:17px;fill:#525252}.mono{font-family:'DejaVu Sans Mono',monospace;font-size:18px}.white{fill:#fff}.rule{stroke:#d0d0d0;stroke-width:1}.arrow{fill:none;stroke:#393939;stroke-width:2;marker-end:url(#arrow)}.dash{stroke-dasharray:7 6}</style>
+<rect width="1600" height="1280" fill="#fff"/>
+
+<text x="56" y="70" class="title">S8 실행 구조</text>
+<text x="57" y="108" class="body">한 번 실행하고 · Projectman으로 위임하고 · 사람의 결정으로 이어가기</text>
+<rect x="56" y="142" width="1488" height="286" fill="#f4f4f4" stroke="none"/>
+<text x="80" y="177" class="heading">01  시작</text>
+<rect x="80" y="198" width="1440" height="54" fill="#161616" stroke="none"/>
+<text x="102" y="233" class="mono white">./start-pi.sh</text>
+<text x="440" y="233" class="body white">기본 실행 = 매니저 + 스케줄러 + 슈퍼바이저</text>
+<path d="M312 252 V276" class="arrow"/>
+<path d="M800 252 V276" class="arrow"/>
+<path d="M1288 252 V276" class="arrow"/>
+<rect x="80" y="282" width="464" height="92" fill="#fff" stroke="none"/>
+<text x="98" y="310" class="heading">매니저 에이전트</text>
+<text x="98" y="337" class="small">현재 터미널에서 대화</text>
+<text x="98" y="362" class="small">--session 이름 → tmux 유지</text>
+<rect x="568" y="282" width="464" height="92" fill="#fff" stroke="none"/>
+<text x="586" y="310" class="heading">스케줄러</text>
+<text x="586" y="337" class="small">tmux: s8-scheduler</text>
+<text x="586" y="362" class="small">예약 시각에 Projectman 작업 확인</text>
+<rect x="1056" y="282" width="464" height="92" fill="#fff" stroke="none"/>
+<text x="1074" y="310" class="heading">개발 슈퍼바이저</text>
+<text x="1074" y="337" class="small">tmux: s8-development-supervisor</text>
+<text x="1074" y="362" class="small">승인된 작업 조회 · 개발 CLI 실행</text>
+<text x="80" y="405" class="small">자동 시작 제외: --no-scheduler / --no-supervisor   ·   기존 서비스 재사용, 매니저가 끝나도 두 서비스는 유지</text>
+<text x="56" y="478" class="heading">02  개발 작업 흐름</text>
+<text x="56" y="512" class="body">사용자 요청 → 매니저가 작업 정의 → 사람이 범위 승인 → 감독이 개발 실행 → 매니저가 결과 검토</text>
+<rect x="56" y="550" width="342" height="180" fill="#fff" stroke="#b8b8b8"/>
+<rect x="56" y="550" width="342" height="8" fill="#161616" stroke="none"/>
+<text x="74" y="594" class="heading">매니저</text>
+<text x="74" y="630" class="body">작업 정의 · 위임 · 결과 검토</text>
+<text x="74" y="672" class="small">도구: projectman · kb · scheduler</text>
+<text x="74" y="702" class="small">코드 수정과 Bash 실행은 위임</text>
+<rect x="438" y="550" width="342" height="180" fill="#fff" stroke="#b8b8b8"/>
+<rect x="438" y="550" width="342" height="8" fill="#161616" stroke="none"/>
+<text x="456" y="594" class="heading">Projectman</text>
+<text x="456" y="630" class="body">작업 · 승인 · 질문 · 결과</text>
+<text x="456" y="672" class="small">PH-CMS API + DB</text>
+<text x="456" y="702" class="small">에이전트 간 전달과 상태의 기준</text>
+<rect x="820" y="550" width="342" height="180" fill="#fff" stroke="#b8b8b8"/>
+<rect x="820" y="550" width="342" height="8" fill="#161616" stroke="none"/>
+<text x="838" y="594" class="heading">슈퍼바이저</text>
+<text x="838" y="630" class="body">승인된 작업 조회 · 선점</text>
+<text x="838" y="672" class="small">정책 · 병렬 한도 · 실행 복구</text>
+<text x="838" y="702" class="small">작업마다 개발 CLI 생성</text>
+<rect x="1202" y="550" width="342" height="180" fill="#fff" stroke="#b8b8b8"/>
+<rect x="1202" y="550" width="342" height="8" fill="#161616" stroke="none"/>
+<text x="1220" y="594" class="heading">개발 에이전트 × N</text>
+<text x="1220" y="630" class="body">구현 · 테스트 · 결과 보고</text>
+<text x="1220" y="672" class="small">작업별 독립 git worktree</text>
+<text x="1220" y="702" class="small">CLI 실행 후 종료</text>
+<path d="M398 625 H432" class="arrow"/>
+<path d="M780 625 H814" class="arrow"/>
+<path d="M1162 625 H1196" class="arrow"/>
+<path d="M1373 730 V770 H609 V730" class="arrow dash"/>
+<text x="850" y="797" class="small">결과 · 검증 · 질문을 Projectman에 기록</text>
+<path d="M609 730 V762 H227 V730" class="arrow dash"/>
+<text x="59" y="798" class="small">매니저는 Projectman에서 결과 확인</text>
+<text x="56" y="832" class="small">KB: ../854_md   |   실행 기록: .s8-runtime/runs/&lt;run-id&gt;/   |   병렬 한도 기본값: 전체 2 / 저장소별 2</text>
+<rect x="56" y="862" width="1488" height="226" fill="#f4f4f4" stroke="none"/>
+<text x="80" y="900" class="heading">03  사람의 결정이 필요하면 — HITL</text>
+<rect x="80" y="924" width="342" height="125" fill="#fff" stroke="none"/>
+<text x="94" y="955" class="heading">1  질문 기록</text>
+<text x="94" y="989" class="small">개발 → Projectman</text>
+<text x="94" y="1019" class="small">해당 작업은 대기</text>
+<path d="M422 987 H439" class="arrow"/>
+<rect x="444" y="924" width="342" height="125" fill="#fff" stroke="none"/>
+<text x="458" y="955" class="heading">2  콘솔에서 확인</text>
+<text x="458" y="989" class="small">사람이 맥락 · 선택지 확인</text>
+<text x="458" y="1019" class="small">답변 저장 → 명시적 확정</text>
+<path d="M786 987 H803" class="arrow"/>
+<rect x="808" y="924" width="342" height="125" fill="#fff" stroke="none"/>
+<text x="822" y="955" class="heading">3  매니저 후속 지시</text>
+<text x="822" y="989" class="small">확정 답변 · 승인 범위 확인</text>
+<text x="822" y="1019" class="small">Projectman에 followup 기록</text>
+<path d="M1150 987 H1167" class="arrow"/>
+<rect x="1172" y="924" width="342" height="125" fill="#fff" stroke="none"/>
+<text x="1186" y="955" class="heading">4  개발 재개</text>
+<text x="1186" y="989" class="small">슈퍼바이저가 새 실행 시작</text>
+<text x="1186" y="1019" class="small">기존 승인 범위 안에서 진행</text>
+<text x="80" y="1073" class="small">답변 초안 저장만으로는 재개되지 않음 · 답변 확정 → 매니저의 후속 지시가 필요</text>
+<text x="56" y="1138" class="heading">별도 실행</text>
+<text x="238" y="1138" class="body">웹 콘솔 (React) → 콘솔 API → PH-CMS / DB</text>
+<text x="238" y="1172" class="small">화면: 작업 현황 · 실행 범위 승인 · 인간 질문 답변 · 로그 / 패치 조회</text>
+<line x1="56" y1="1207" x2="1544" y2="1207" class="rule"/>
+<text x="56" y="1241" class="small">실선: 시작 / 작업 전달     점선: 결과 조회 / 기록     ·     Projectman은 상태를 공유하는 중심 저장소</text>
+</svg>

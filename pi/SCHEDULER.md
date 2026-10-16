@@ -1,14 +1,18 @@
 # S8 스케줄러
 
-S8 Pi 대화에서 `scheduler` 도구로 쉘 잡 또는 Projectman 지시 잡을 CRUD하고, 별도 Node 프로세스가 예약 시각에 실행한다. Projectman 잡은 5분마다 조회하되 실행 가능한 워크·서브워크가 없으면 모델을 호출하거나 Telegram에 알리지 않는다. 운영체제별 cron 문법이나 패키지 없이 같은 스케줄러 코드를 사용한다.
+S8 관리 대화의 `scheduler` 도구로 Projectman 예약을 관리하고, 별도 Node 프로세스가 예약 시각에 실행한다. 기존 셸 예약 실행은 유지하지만 관리 역할에서 셸 예약 생성·변경·삭제는 차단한다. Projectman 잡은 5분마다 조회하되 실행 가능한 워크·서브워크가 없으면 모델을 호출하거나 Telegram에 알리지 않는다. 운영체제별 cron 문법이나 패키지 없이 같은 스케줄러 코드를 사용한다.
 
 ## 실행
 
 ```bash
-./start-scheduler.sh
+./start-pi.sh                    # 매니저 + 스케줄러 + 개발 슈퍼바이저
+./start-pi.sh --no-scheduler     # 스케줄러 자동 시작 제외
+./start-pi.sh --service scheduler            # 예약 데몬만 전경에서 실행
 ```
 
-이 명령은 포그라운드 서비스다. 예약 실행을 유지하려면 macOS `launchd`, Linux `systemd --user`, Windows 작업 스케줄러 등 해당 OS의 서비스 관리자에 시작 명령을 등록한다. 여러 인스턴스가 동시에 시작되면 하나만 소유권을 얻고 나머지는 종료한다. 비정상 종료 후 `.s8-runtime/scheduler/owner.lock`이 남으면 다른 인스턴스가 시작되지 않는다. 스케줄러가 실행 중이지 않은 것을 확인한 뒤 해당 잠금 파일만 제거한다.
+통합 실행은 `s8-scheduler` tmux 세션을 만들거나 재사용한다. 매니저가 끝나도 예약 데몬은 유지된다. 제외 옵션은 이미 실행 중인 데몬을 종료하지 않는다.
+
+`start-pi.sh --service scheduler` 단독 실행은 포그라운드 서비스다. 예약 실행을 유지하려면 macOS `launchd`, Linux `systemd --user`, Windows 작업 스케줄러 등 해당 OS의 서비스 관리자에 시작 명령을 등록한다. 여러 인스턴스가 동시에 시작되면 하나만 소유권을 얻고 나머지는 종료한다. 비정상 종료 후 `.s8-runtime/scheduler/owner.lock`이 남으면 다른 인스턴스가 시작되지 않는다. 스케줄러가 실행 중이지 않은 것을 확인한 뒤 해당 잠금 파일만 제거한다.
 
 Pi CLI와 인증정보는 `start-pi.sh`와 같은 `.pi-runtime`을 사용한다. `.env`는 시작 시 읽되 출력하거나 기록하지 않는다.
 
@@ -113,7 +117,7 @@ node --env-file=.env pi/bin/count-test.mjs schedule <task-uid> '2026-10-14T09:00
 node pi/bin/count-test.mjs away <project-uid> 60
 ```
 
-- S8이 로드한 환경과 최신 `start-scheduler.sh` 데몬이 필요하다. 종료 시각을 지원하지 않는 이전 데몬이면 먼저 재시작한다.
+- S8이 로드한 환경과 최신 `start-pi.sh --service scheduler` 데몬이 필요하다. 종료 시각을 지원하지 않는 이전 데몬이면 먼저 재시작한다.
 - 환경의 `TELEGRAM_BOT_TOKEN`과 공통 설정의 명시적 `telegram.scheduleChatId`로 실제 알림을 보내 확인한다. 알림 대상이 없거나 전달에 실패하면 운영을 시작하지 않는다. 일반 사용자 셸에서는 직접 환경을 준비해야 하며 에이전트가 환경 파일이나 키를 읽어 해결하지 않는다.
 - `ready` 작업의 예정 시각을 운영 시작 시각으로 지정하고, 기존 `projectman-count` 예약을 5분 주기·활성 상태·시작 후 60분 종료로 설정한다. 한 검사에 작업 하나를 처리하며 검사는 매시 :00·:05·:10 등에 수행한다. 최대 대기 시간은 약 5분이며 즉시 첫 작업을 실행하는 명령은 아니다.
 - `blocked`에서는 멈추고 질문을 알린다. 사용자 답변은 에이전트나 수동 `reject` 명령이 Projectman에 결정으로 기록해야 한다. 저장된 취소는 다음 5분 검사에서 반영하며 답변이 없다고 실행 허가로 간주하지 않는다.

@@ -11,6 +11,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      '/api/projectman': { target: 'http://127.0.0.1:8791', changeOrigin: false },
       '/api/terminal': { target: 'http://127.0.0.1:8790', ws: true, changeOrigin: false },
       '/api': apiProxy,
     },
@@ -18,6 +19,7 @@ export default defineConfig({
   },
   preview: {
     proxy: {
+      '/api/projectman': { target: 'http://127.0.0.1:8791', changeOrigin: false },
       '/api/terminal': { target: 'http://127.0.0.1:8790', ws: true, changeOrigin: false },
       '/api': apiProxy,
     },

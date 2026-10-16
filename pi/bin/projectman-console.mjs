@@ -1,0 +1,10 @@
+import { fileURLToPath } from 'node:url';
+import { isIP } from 'node:net';
+import { createProjectmanConsole } from '../lib/projectman-console.mjs';
+const root = fileURLToPath(new URL('../..', import.meta.url));
+const server = createProjectmanConsole({ root });
+const index = process.argv.indexOf('--host');
+const host = index < 0 ? '127.0.0.1' : process.argv[index + 1];
+if (!host || isIP(host) !== 4 || host === '0.0.0.0') throw new Error('Bind the console API to a specific local/Tailscale IPv4 only');
+server.listen(8791, host, () => console.log(`Projectman console API: http://${host}:8791/api/projectman`));
+for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { server.close(); server.closeAllConnections(); });

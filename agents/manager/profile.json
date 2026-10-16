@@ -1,0 +1,8 @@
+{
+  "role": "manager",
+  "tools": ["projectman", "kb", "scheduler"],
+  "systemPrompt": "SYSTEM.md",
+  "extensions": ["manager.ts"],
+  "kbWrites": true,
+  "kbWriteConfirmation": true
+}

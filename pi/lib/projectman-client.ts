@@ -51,7 +51,7 @@ export class ProjectmanClient {
   async list(type: string, parentUid?: string, filters?: Record<string, string | boolean>): Promise<ProjectmanContent[]> {
     const items: ProjectmanContent[] = [];
     for (let page = 1; page <= 100; page++) {
-      const query = new URLSearchParams({ channelSlug: 'ph-projectman', type, withDetail: 'true', page: String(page), limit: '100' });
+      const query = new URLSearchParams({ channelSlug: 'ph-projectman', type, withDetail: 'true', withParent: 'true', page: String(page), limit: '100' });
       if (parentUid) query.set('parentUid', parentUid);
       if (filters) query.set('attributeFilters', JSON.stringify(filters));
       const result = await this.request<Page>(`contents?${query}`);
@@ -74,6 +74,18 @@ export class ProjectmanClient {
     return this.request('projectman/intakes/preview', { method: 'POST', body: JSON.stringify(plan) }, 60000);
   }
 
+  async getWorkflow(uid: string) {
+    return this.request<any>(`projectman/items/${encodeURIComponent(uid)}/workflow`);
+  }
+
+  async capabilities() {
+    return this.request<{ workflowVersion: number; humanDecisions: boolean; atomicClaims: boolean; idempotentReports: boolean; actorType?: string }>('projectman/capabilities');
+  }
+
+  async workflow(uid: string, operation: Record<string, unknown>) {
+    return this.request<any>(`projectman/items/${encodeURIComponent(uid)}/workflow`, { method: 'POST', body: JSON.stringify(operation) });
+  }
+
   async registerIntake(plan: IntakePlan, hash: string): Promise<IntakeResult> {
     return this.request('projectman/intakes', { method: 'POST', body: JSON.stringify({ plan, hash }) }, 60000);
   }
@@ -89,13 +101,14 @@ export class ProjectmanClient {
     return this.request(`projectman/intakes/${requestId}`);
   }
 
-  async create(parentUid: string, type: 'task' | 'subtask', title: string, text: string, tags: string[] = [], phase?: string) {
+  async create(parentUid: string | undefined, type: 'workspace' | 'project' | 'task' | 'subtask', title: string, text: string, tags: string[] = [], phase?: string) {
+    if (type === 'workspace' ? Boolean(parentUid) : !parentUid) throw new Error('Workspace is a root; other content requires a parent UID');
     if (phase && (type !== 'subtask' || !['inspect', 'plan', 'implement', 'verify', 'review_blockers', 'report'].includes(phase))) {
       throw new Error('Invalid subtask phase');
     }
     return this.request<ProjectmanContent>('contents', { method: 'POST', body: JSON.stringify({
       channelSlug: 'ph-projectman', parentUid, type, title, text, tags, status: 'published',
-      attributes: { state: 'todo', autorun: false, ...(type === 'subtask' ? { timeBudgetMinutes: 20 } : {}), ...(phase ? { phase } : {}) },
+      attributes: ['task', 'subtask'].includes(type) ? { state: 'todo', autorun: false, ...(type === 'subtask' ? { timeBudgetMinutes: 20 } : {}), ...(phase ? { phase } : {}) } : {},
     }) });
   }
 

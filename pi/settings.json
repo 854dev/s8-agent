@@ -11,7 +11,7 @@
     "npm:pi-mcp-extension@1.5.0"
   ],
   "lastChangelogVersion": "0.87.1",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-6-sol",
+  "defaultProvider": "openrouter",
+  "defaultModel": "moonshotai/kimi-k2.6",
   "theme": "dark"
 }

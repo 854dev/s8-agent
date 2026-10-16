@@ -15,7 +15,7 @@
   height: var(--terminal-viewport-height, 100dvh);
   padding: 8px;
   overflow: hidden;
-  background: light-dark(#f4f4f1, #121212);
+  background: light-dark(#f4f4f4, #121212);
 }
 
 .terminal-page--fullscreen {
@@ -48,7 +48,7 @@
 .terminal-settings summary { cursor: pointer; padding: 6px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-settings-content { max-height: min(260px, 35dvh); overflow: auto; padding: 6px 0; }
 .terminal-settings-content input, .terminal-paste textarea { font-size: 16px; }
-.terminal-screen { flex: 1; min-height: 40px; overflow: hidden; padding: 4px; background: #000; border-radius: 6px; }
+.terminal-screen { flex: 1; min-height: 40px; overflow: hidden; padding: 4px; background: #000; border-radius: 0; }
 .terminal-shortcuts { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
 .terminal-key-row { overflow-x: auto; scrollbar-width: thin; overscroll-behavior-x: contain; }
 .terminal-paste { flex-shrink: 0; max-height: 40%; overflow: auto; }

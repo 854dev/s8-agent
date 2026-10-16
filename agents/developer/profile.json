@@ -1,0 +1,9 @@
+{
+  "role": "developer",
+  "systemPrompt": "SYSTEM.md",
+  "readOnlyTools": ["read", "grep", "find", "ls"],
+  "writeExecutionEnabled": true,
+  "workerSystemPrompt": "WORKER_SYSTEM.md",
+  "workerTools": ["workspace", "command", "request_decision", "finish"],
+  "policy": "policy.json"
+}

@@ -1,4 +1,23 @@
-# s8-agent (scheduler 854)
+# S8 Agent — Projectman 작업 관리
+
+## 실행 구조 한눈에 보기
+
+![S8 실행 구조: 통합 시작, Projectman을 통한 개발 위임, 인간 검토 후 재개](docs/images/s8-runtime.png)
+
+[크게 보기](docs/images/s8-runtime.png) · [SVG 원본](docs/images/s8-runtime.svg)
+
+## 관리·개발 역할 분리
+
+`./start-pi.sh`는 관리 역할과 스케줄러·개발 슈퍼바이저를 함께 시작한다. 매니저에는 `projectman`, `kb`, `scheduler`만 제공하며, 코드 구현은 별도 감독 프로세스가 작업별 개발 CLI에 위임한다.
+
+- 매니저: 사용자 대화·작업 위임·근거 확인·결과 검토. 범용 파일·Bash와 `/autopilot`은 차단한다.
+- KB: Markdown 검색·조회와 정책 확인, 버전 충돌 검사를 거친 문서 쓰기·삭제. 변경은 대화형 확인이 필요하다.
+- Scheduler: Projectman 예약만 관리한다. 임의 셸 예약은 관리 도구에서 변경할 수 없다.
+- 개발: 승인된 파일 범위의 독립 git worktree, 작업별 CLI, 신뢰된 이름의 Docker 명령. 기본 전체 동시성·저장소별 동시성은 각각 2다.
+- 인간 결정: 콘솔의 답변 저장과 답변 확정을 구분한다. 확정 후 매니저가 후속 지시를 기록해야 새 개발 실행이 시작된다.
+- 기록: `.s8-runtime/runs/<run-id>/`의 전달 프롬프트·공개 응답·도구 이벤트·결과·검증·패치와 Projectman 작업 이력을 연결한다. 모델 내부 추론과 인증정보는 기록 대상이 아니다.
+
+역할별 기준은 [관리 지침](agents/manager/SYSTEM.md), [개발 지침](agents/developer/WORKER_SYSTEM.md), [개발 실행 정책](agents/developer/policy.json)에 있다. 실행 방법은 아래 안내를, 화면·프록시 구성은 [프런트엔드 README](frontend/README.md)를 따른다.
 
 `854_md` 지식베이스를 사용하는 개인용 AI 작업 오케스트레이터와 운영 콘솔이다. 지식과 에이전트 설정을 각각 `854_md`, `s8-agent` 저장소로 분리한다.
 
@@ -8,20 +27,22 @@
 dev_854/
 ├── 854_md/       # 지식베이스
 ├── s8-agent/     # 에이전트 설정·실행 코드
-└── ph-cms/       # 선택: Projectman API·MCP 서버
+└── ph-cms/       # Projectman 사용에 필요한 API·MCP 서버
 ```
 
 ## 구성
 
 - 재사용 Pi 설정과 npm 패키지: `pi/`
 - Pi 장비별 런타임: `.pi-runtime/`
-- Pi 실행 진입점: `start-pi.sh`
+- 관리 에이전트 실행 진입점: `start-pi.sh`
+- 개발 감독 실행 진입점: `start-pi.sh --service supervisor`
+- 역할 지침·개발 실행 정책: `agents/manager/`, `agents/developer/`
 - 비공개 로컬 상태: `.s8-runtime/`
 - 비인증 Telegram ID·알림 대상 설정: `s8-config.yml` (예시: `s8-config.example.yml`)
 - 웹 콘솔·업로드·xterm.js 터미널: `frontend/`
 - 호스트 PTY·tmux 웹 터미널 게이트웨이: `apps/terminal-gateway/`
 - Telegram 명령·알림: `apps/telegram-gateway/`
-- 예약 작업 실행 진입점: `start-scheduler.sh`
+- 예약 작업 실행 진입점: `start-pi.sh --service scheduler`
 - 예약 CRUD·실행·배치 제어: `pi/extensions/scheduler.ts`, `pi/lib/scheduler-*.mjs`
 - 지식베이스·업로드 API: `apps/kb-browser/`
 - MCP 허브: `apps/mcp-hub/`
@@ -32,9 +53,11 @@ dev_854/
 요구 사항:
 
 - Node.js 22.19.0 이상과 npm
-- Pi의 지속 실행·웹 터미널에는 tmux
+- 기본 통합 실행·지속 실행·웹 터미널에는 tmux. 두 서비스의 자동 시작을 모두 제외하면 매니저 단독 실행 가능
 - 예약 쉘 스크립트에는 Bash. Windows에서는 Git Bash 등으로 제공
-- 웹 인프라 배포에는 Docker와 Tailscale. Pi CLI만 사용할 때 Docker는 필요 없음
+- 개발 작업의 테스트·빌드와 웹 인프라에는 Docker
+- Projectman에는 실행 중인 PH-CMS와 DB, 에이전트 서비스 키
+- 다른 장치에 웹 콘솔을 노출할 때는 Tailscale과 Nginx
 
 ```bash
 cd /path/to/s8-agent
@@ -42,7 +65,7 @@ npm ci --ignore-scripts --prefix pi
 ./start-pi.sh
 ```
 
-Pi가 열리면 `/login`으로 이 장비의 모델 인증을 설정한다. 인증정보와 세션은 `.pi-runtime/`에 저장되며 Git과 에이전트 도구의 접근 대상에서 제외한다. 공유 설정의 원본은 `pi/settings.json`이며 런타임에서 이 파일을 링크로 참조한다. 현재 기본 provider/model은 `openai-codex` / `gpt-6-sol`이다.
+Pi가 열리면 `/login`으로 이 장비의 모델 인증을 설정한다. 인증정보와 세션은 `.pi-runtime/`에 저장되며 Git과 에이전트 도구의 접근 대상에서 제외한다. 공유 설정의 원본은 `pi/settings.json`이며 런타임에서 이 파일을 링크로 참조한다. 관리 세션의 provider/model은 `pi/settings.json`을 기준으로 하며 Pi에서 변경할 수 있다. 개발 CLI는 현재 기존 홈 Pi 인증(`~/.pi/agent/auth.json`)을 사용한다. 관리 세션과 개발 인증 경로는 다르므로 개발 실행 전 두 환경의 인증을 확인한다. 인증 파일을 자동 복사하거나 링크하지 않는다.
 
 이후 실행:
 
@@ -51,6 +74,9 @@ Pi가 열리면 `/login`으로 이 장비의 모델 인증을 설정한다. 인�
 ./start-pi.sh --continue
 ./start-pi.sh --telegram              # Telegram을 연결할 때만 명시
 ./start-pi.sh --telegram --continue
+./start-pi.sh --no-scheduler           # 스케줄러 자동 시작 제외
+./start-pi.sh --no-supervisor          # 개발 슈퍼바이저 자동 시작 제외
+./start-pi.sh --no-scheduler --no-supervisor  # 매니저만 실행
 ```
 
 tmux에서 Pi를 유지하려면 저장소 루트에서 다음을 사용한다.
@@ -59,17 +85,72 @@ tmux에서 Pi를 유지하려면 저장소 루트에서 다음을 사용한다.
 tmux new-session -s pi-854-md -c "$PWD" "./start-pi.sh"
 ```
 
-`start-pi.sh`는 저장소 루트의 `.env`를 항상 읽는다. 기본 설정을 복사한 뒤 지식베이스 경로를 바꾸면 된다.
+실행 스크립트는 시작할 때 저장소 루트의 `.env`를 로드한다(관리·감독의 도움말 조회는 제외). 처음 설정하는 장비에서만 예시를 복사하고, 이미 있는 설정은 덮어쓰지 않는다.
 
 ```bash
-cp .env.example .env
+cp -n .env.example .env
 ```
 
 ```dotenv
-S8_KB_ROOT=/path/to/workspace
+S8_KB_ROOT=/path/to/854_md
+PHCMS_API_URL=http://127.0.0.1:8000/api/v2
+# PHCMS_ACCESS_TOKEN에는 직접 발급한 에이전트 서비스 키를 설정한다.
 ```
 
 상대 경로는 `s8-agent` 루트 기준이며 `.env`는 Git에 포함되지 않는다.
+
+## 실행 스크립트
+
+실행 진입점은 `start-pi.sh` 하나다. 경로는 스크립트 위치를 기준으로 계산하므로 다른 디렉터리에서도 실행할 수 있다.
+
+| 스크립트 | 역할 | 실행 예 |
+| --- | --- | --- |
+| `start-pi.sh` | 매니저 실행 + 스케줄러·개발 감독 기본 시작 | `./start-pi.sh --session manager` |
+| `start-pi.sh --service supervisor` | 통합 실행에서 사용하는 개발 감독 진입점. 단독 실행·진단도 지원 | `./start-pi.sh --service supervisor` |
+| `start-pi.sh --service scheduler` | 통합 실행에서 사용하는 예약 데몬 진입점. 단독 실행도 지원 | `./start-pi.sh --service scheduler` |
+
+- 관리 세션은 `--continue`로 최근 대화를 이어간다. `--session 이름`은 관리 tmux 세션을 생성하거나 접속하고, `--sessions`는 목록을 표시한다.
+- 감독 `--check`는 연결·API 기능을 확인한다. `--once`는 승인된 작업을 **실제 실행할 수 있는** 1회 감독 주기다. 인자 없이 실행하면 계속 대기한다.
+- 기본 실행은 스케줄러를 `s8-scheduler`, 개발 감독을 `s8-development-supervisor` tmux 세션에 준비한다. 같은 저장소의 기존 서비스는 재사용하며, 매니저 종료·재시작에도 유지한다.
+- `--no-scheduler`, `--no-supervisor`는 해당 호출의 자동 시작만 제외한다. 이미 실행 중인 공유 서비스를 종료하지 않는다. 옵션은 `--session manager`와 함께 사용할 수 있으며, 기존 관리 세션의 실행 옵션을 바꾸지는 않는다.
+- 도움말·버전·세션 목록·패키지 관리 명령은 서비스를 시작하지 않는다. 서비스 시작에 실패하면 오류를 표시하며, 해당 제외 옵션으로 매니저를 따로 실행할 수 있다.
+- 자동 시작한 서비스를 종료하려면 `tmux attach -t s8-scheduler` 또는 `tmux attach -t s8-development-supervisor`로 접속해 `Ctrl+C`를 누른다. 강제 종료 후 잠금이 남으면 실제 프로세스 종료를 확인한 뒤 정리한다.
+- 개발 에이전트를 직접 상시 띄우지 않는다. 감독이 작업마다 CLI를 실행하고 종료한다. 기본 전체·저장소별 병렬 한도는 각각 2다.
+- 전경 프로세스는 `Ctrl+C`로 종료한다. tmux에서는 `Ctrl+B`, `D`로 접속만 해제하면 실행이 유지된다.
+
+## Projectman 콘솔 실행
+
+PH-CMS 서버와 DB를 먼저 실행한다. 신규 채널은 PH-CMS 루트에서 `pnpm db:setup:projectman <ownerUid> [agentUid]`로 초기화한다. S8의 `.env`에 API 주소와 에이전트 서비스 키를 직접 설정한 뒤 확인한다.
+
+```bash
+# S8 루트: 연결 확인
+./start-pi.sh --service supervisor --check
+
+# 매니저와 두 서비스 통합 시작
+./start-pi.sh --session manager
+
+# 콘솔 API는 별도 터미널에서 유지
+node pi/bin/projectman-console.mjs
+```
+
+프런트엔드는 별도 터미널에서 실행한다.
+
+```bash
+npm ci --prefix frontend
+npm --prefix frontend run build
+npm --prefix frontend run preview -- --host 127.0.0.1 --port 4178 --strictPort
+```
+
+`http://127.0.0.1:4178/s8/`에서 PH-CMS **사용자 계정**으로 로그인한다. 콘솔 API는 기본 `127.0.0.1:8791`에서 실행하며, 사용자 결정에 에이전트 서비스 키를 사용하지 않는다. 로그인·토큰 갱신은 콘솔 서버의 PH-CMS client-sdk가 처리한다. 15분짜리 액세스 토큰이 만료되면 HttpOnly 리프레시 쿠키로 자동 갱신하며, 갱신 토큰은 마지막 발급부터 7일 유효하다. 다른 PH-CMS 주소를 사용하면 콘솔 프로세스에도 기존 `PHCMS_API_URL`을 제공한다.
+
+- 워크스페이스 버튼 한 번으로 소속 프로젝트 전체와 승인 전·실행 대기·실행 중·대기·결과 검토·완료·취소 보드를 확인한다.
+- 하위 작업은 해당 프로젝트에 함께 표시한다. 프로젝트가 비어 있어도 목록에 남는다.
+- 인간 결정 대기 카드를 눌러 미해결 질문만 모아보고, 작업 카드를 눌러 원래 요청·이유·영향·실행 범위와 기록을 확인한다.
+- 답변 저장은 초안이다. **답변 확정 · 재개 요청** 후 매니저가 후속 지시를 기록해야 새 개발 실행이 시작된다.
+- 개발 산출물은 별도 worktree와 검토용 패치로 남는다. 원래 브랜치에 자동 병합·커밋하지 않는다.
+- 화면은 흰색·검은색·중성 회색과 IBM Plex Sans KR을 사용하는 밝은 테마로 통일한다. 모바일에서는 상태 보드를 가로로 스크롤한다.
+
+첫 작업에서는 매니저와 워크스페이스·프로젝트를 등록하고 콘솔에서 개발 범위를 승인한다. 실행 명령은 이 문서의 콘솔 실행 절을, 화면·프록시는 [프런트엔드 README](frontend/README.md)를 따른다. 기존 예약·MCP·요청 등록의 상세 절차는 [운영 문서](OPERATIONS.md)를 참고한다.
 
 ## 웹 터미널
 
@@ -79,7 +160,7 @@ S8_KB_ROOT=/path/to/workspace
 - backend 설치·실행, Tailscale 전용 노출 및 복구는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.
 - 별도 웹 인증은 없으므로 Tailscale IP와 ACL을 접근 권한 경계로 유지한다. 셸은 호스트 사용자 권한으로 실행되며 Pi의 파일 보호 확장은 직접 터미널 입력을 제한하지 않는다.
 - 글자 크기·전체화면·모바일 붙여넣기를 지원한다. Nerd Font 아이콘은 웹폰트로 제공하고 한글·다른 언어는 클라이언트의 시스템 폰트로 대체한다.
-- 웹 대시보드의 작업 카드와 로그는 아직 샘플 데이터이며 실제 예약 상태 화면이 아니다. 화면별 연결 상태는 [`frontend/README.md`](frontend/README.md)를 참고한다.
+- 기본 화면은 실제 Projectman 작업·인간 결정·개발 실행 기록을 조회한다. PH-CMS 사용자 로그인이 필요하며 서비스 키는 브라우저에 전달하지 않는다.
 
 ## Telegram 연동 (Pi 터미널 세션 공유)
 
@@ -128,9 +209,9 @@ npm ci --ignore-scripts --prefix pi
 - `.pi-runtime/`은 각 장비의 인증정보, 세션, 캐시, 설치 패키지를 보관한다. 공유 설정은 복사하지 않는다.
 - 모델 인증, 세션, 로그, 업로드는 장비마다 별도로 유지한다.
 
-## Pi 패키지
+## 선택 Pi 패키지
 
-s8에서 사용하는 Pi 패키지는 다음 목록을 기준으로 설치한다.
+기존 선택 패키지의 설치 명령이다. 관리 역할은 확장·스킬 자동 발견을 끄므로, 패키지를 설치해도 관리 도구가 자동으로 늘어나지 않는다. 기본 매니저에는 Projectman·KB·Scheduler만 노출한다.
 
 ```bash
 ./start-pi.sh install npm:@calesennett/pi-codex-usage@0.1.14
@@ -149,16 +230,18 @@ s8에서 사용하는 Pi 패키지는 다음 목록을 기준으로 설치한다
 - 작업 전 루트 `AGENTS.md`와 관련 프로젝트 문서를 확인한다.
 - 사용자 승인 없이 외부 전송, 배포, 삭제 또는 중요한 방향 확정을 수행하지 않는다.
 - 작업 메모 폴더와 진행 이력 Markdown은 만들지 않고 작업 맥락은 Pi 세션에 유지한다.
-- 예약·최근 실행 상태는 스케줄러의 비공개 로컬 런타임에 저장하며, Projectman 상태·작업 로그는 PH-CMS가 관리한다. 웹 대시보드에 이 상태가 자동 연결되지는 않는다.
-- 비밀정보와 `.pi/`, `.pi-runtime/`, `.s8-runtime/` 내용을 읽거나 문서화하지 않는다.
+- 예약·최근 실행 상태는 스케줄러의 비공개 로컬 런타임에 저장하며, Projectman 상태·작업 로그는 PH-CMS가 관리하고 콘솔에서 조회한다. 기존 스케줄러의 예약 목록은 Telegram `/jobs` 또는 관리 도구로 확인한다.
+- 실제 `.env` 값과 인증정보는 에이전트가 읽거나 기록하지 않는다. 런타임 경로를 범용 파일 도구로 공개하지 않으며 실행 기록은 권한 검사가 있는 전용 콘솔을 통해 조회한다.
 - Pi extension은 전체 시스템 권한으로 실행되므로 저장소에서 검토한 코드만 사용한다.
 
 ## 스케줄러
 
-S8 대화의 `scheduler` 도구로 승인한 쉘 잡 또는 Projectman 지시 잡을 CRUD하고 별도 Node 데몬으로 실행한다.
+관리 대화의 `scheduler` 도구는 Projectman 예약을 관리하고 별도 Node 데몬이 실행한다. 기존 셸 잡의 실행 기능은 보존하지만 관리 에이전트가 셸 잡을 생성·수정·삭제하지는 못한다.
+
+기본 `./start-pi.sh` 실행에 포함된다. 매니저 없이 예약 데몬만 운영할 때는 다음을 사용한다.
 
 ```bash
-./start-scheduler.sh
+./start-pi.sh --service scheduler
 ```
 
 - 매일 `HH:mm` 또는 1~60분 중 60을 나누는 주기를 지원한다. 30분 예약은 매시 :00·:30에 검사한다.
@@ -166,7 +249,7 @@ S8 대화의 `scheduler` 도구로 승인한 쉘 잡 또는 Projectman 지시 �
 - Telegram의 `/jobs`, `/jobs pause ID`, `/jobs resume ID`, `/jobs stop ID`로 예약과 현재 배치를 관리한다. 중단은 이미 수행한 변경을 롤백하지 않는다.
 - OS 자동 시작 등록은 별도다. 비정상 종료 후 남은 잠금은 프로세스 종료를 확인한 뒤 수동 복구한다.
 - `kind=projectman` 잡은 지정 프로젝트를 5분마다 확인하고, 승인된 읽기 전용 워크·서브워크 1건에 정해진 프롬프트를 한 번 보낸다. 빈 조회·승인 대기에는 무알림이고 실제 지시 시작·결과만 Telegram에 보고한다.
-- 미완료 결과는 Projectman 로그에 남기고 다음 프롬프트에서 재개한다. 완료 결과는 `review`, 수동 중단·사용자 판단 필요는 `blocked`로 남기며 승인·쓰기 권한은 확대하지 않는다. 병렬 실행은 아직 없다.
+- 미완료 결과는 Projectman 로그에 남기고 다음 프롬프트에서 재개한다. 완료 결과는 `review`, 수동 중단·사용자 판단 필요는 `blocked`로 남기며 승인·쓰기 권한은 확대하지 않는다. 이 항목은 기존 읽기 전용 예약 실행기이며, 개발 쓰기·병렬 실행은 별도의 `start-pi.sh --service supervisor`가 담당한다.
 - 기존 잡은 최신 데몬에서 `node pi/bin/projectman-job.mjs JOB_ID PROJECT_UID`로 명시적으로 전환한다. 작업 상태·결과·운영 종료 시각은 초기화하지 않는다. 새 CRUD 필드는 S8 재시작 후 사용한다.
 - 기존 쉘 방식의 Projectman 카운트 테스트는 예정 시각·순서·결과 UID 기록으로 중복 차감을 막는다. 지시 잡으로 전환한 뒤에는 쉘 결과를 매번 알리지 않는다.
 
@@ -178,17 +261,17 @@ S8 대화의 `scheduler` 도구로 승인한 쉘 잡 또는 Projectman 지시 �
 - Projectman 도구는 `PHCMS_API_URL`의 API를 직접 사용하며, 카운트 테스트 실행기는 MCP 요청에 `Authorization: Bearer <서비스 키>`를 보낸다.
 - MCP는 그 요청의 헤더를 PH-CMS API에 전달할 뿐 키를 저장하거나 S8 환경 파일을 읽지 않는다. MCP의 JSON 설정 파일은 사용하지 않는다.
 - `start-pi.sh`가 시작 시 로드한 환경을 도구에 전달한다. 기본 허용 목록에 `projectman`·`scheduler`를 포함하므로 데이터·예약 조회는 이 도구로 요청한다. 도구가 인증에 환경변수를 사용하며 에이전트는 키 원문이나 환경 파일을 조회하지 않는다.
-- 실행 중인 Pi에는 실행 인자 변경이 즉시 반영되지 않는다. 종료 후 `./start-pi.sh --continue`로 재개하거나 Telegram `/restart`로 재시작한다. 별도 `--tools` 옵션을 지정하면 해당 허용 목록을 우선한다.
+- 실행 중인 Pi에는 실행 인자 변경이 즉시 반영되지 않는다. 종료 후 `./start-pi.sh --continue`로 재개하거나 Telegram `/restart`로 재시작한다. 관리 진입점에서는 `--tools`, 임의 확장·세션 파일·파일 첨부 옵션으로 허용 목록을 바꿀 수 없다.
 - PH-CMS 루트에서 `pnpm dev -- --server --mcp`로 API·MCP를 실행한다. 서버·관리자 UI·MCP의 API prefix를 같은 값으로 맞춘다. 현재 카운트 테스트 CLI의 MCP URL은 장비별 소스 설정이므로 다른 장비에서는 변경해야 한다.
 - Nginx의 `/api/v2/`는 PH-CMS API·관리자 UI로 프록시하며, MCP는 별도의 `/mcp` 엔드포인트를 사용한다.
 - 인증정보는 읽어 자동 이관하거나 로그·Git에 기록하지 않는다. 설정·재시작 안내는 [`OPERATIONS.md`](OPERATIONS.md)의 PH-CMS MCP 절을 참고한다.
 
 ## 작업요청 → Projectman 등록
 
-S8에 “이 Markdown(또는 아래 요청문)을 Projectman에 등록해줘”라고 요청한다. S8이 기존 워크스페이스·프로젝트·워크를 조회하고 원문의 목표·제약·완료 조건을 실행 단위로 정리한 뒤 생성안을 제시한다. 별도 분류 모델이나 작업 실행 데몬을 추가하지 않는다.
+S8에 원문을 사용자 메시지로 전달하고 “이 요청문을 Projectman에 등록해줘”라고 요청한다. 관리 역할은 Markdown 파일 경로를 직접 읽지 않는다. S8이 기존 워크스페이스·프로젝트·워크를 조회하고 원문의 목표·제약·완료 조건을 실행 단위로 정리한 뒤 생성안을 제시한다. 별도 분류 모델이나 작업 실행 데몬을 추가하지 않는다.
 
 - 기존 상위 항목은 UID로 재사용하고 모호하면 확인한다. 새 워크스페이스·프로젝트도 승인한 등록안 안에서 생성할 수 있다.
-- `intake_source`는 허용된 MD 파일 또는 실제 사용자 메시지를 그대로 캡처한다. 모델의 원문 재작성·요약본은 받지 않는다. `sourceId`로 4,000자 단위 조회해 같은 스냅샷을 분석하며 여러 메시지는 회화 순서의 JSON으로 보존한다. 승인 전 캡처는 Pi 세션에 저장하며 Projectman에는 아직 쓰지 않는다.
+- 관리 역할의 `intake_source`는 실제 사용자 메시지를 그대로 캡처한다. 기존 확장에 남아 있는 `sourcePath` 파일 읽기는 매니저 경계에서 차단한다. 모델의 원문 재작성·요약본은 받지 않는다. `sourceId`로 4,000자 단위 조회해 같은 스냅샷을 분석하며 여러 메시지는 회화 순서의 JSON으로 보존한다. 승인 전 캡처는 Pi 세션에 저장하며 Projectman에는 아직 쓰지 않는다.
 - `projectman action=intake_preview`는 캡처한 `sourceId`와 생성안을 받는 서버 쓰기 없는 미리보기다. 원문·생성안·부모 콘텐츠 지문을 고정한다. 같은 이름의 기존 컨테이너가 있으면 후보를 조회해 UID를 선택해야 한다.
 - `action=intake_register, requestId=...` 또는 `/projectman-register <requestId>`에서 기존 대화형 승인 UI로 확인한 안만 등록한다. 취소하면 생성하지 않는다. 현재 headless 등록·무인 승인·자동등록 정책은 지원하지 않는다. Telegram에 승인 UI가 전달되지 않으면 웹 터미널/TUI에서 승인한다.
 - 신규 항목은 `todo`, `autorun=false`, `requiresApproval=true`, `allowedActions=[]`다. 선행 워크·서브워크 관계와 완료 조건은 명세로 저장하며 자동 실행을 활성화하지 않는다.
@@ -227,7 +310,7 @@ node --test pi/test/*.test.mjs apps/telegram-gateway/gateway.test.mjs
 npm run test:run --prefix frontend
 npm run lint --prefix frontend
 npm run build --prefix frontend
-bash -n start-pi.sh start-scheduler.sh
+bash -n start-pi.sh
 git diff --check
 ```
 
