@@ -43,7 +43,8 @@ for option in "$@"; do
         *) manager_options+=("$option") ;;
     esac
 done
-set -- "${manager_options[@]}"
+# Bash 3.2의 nounset에서는 빈 배열도 미설정으로 취급하므로, 값이 있을 때만 펼친다.
+set -- ${manager_options[@]+"${manager_options[@]}"}
 if [[ "${1:-}" == --manager ]]; then shift; fi
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
     printf '%s\n' \
@@ -87,7 +88,7 @@ if [[ "${1:-}" == --session && "${2:-}" != */* && "${2:-}" != *.jsonl ]]; then
     node "$AGENT_ROOT/pi/bin/manager-options.mjs" "$@"
     created_session=false
     if ! tmux has-session -t "=$session" 2>/dev/null; then
-        printf -v cmd '%q ' "$AGENT_ROOT/start-pi.sh" --managed "${service_options[@]}" "$@"
+        printf -v cmd '%q ' "$AGENT_ROOT/start-pi.sh" --managed ${service_options[@]+"${service_options[@]}"} "$@"
         tmux new-session -d -s "$session" -c "$AGENT_ROOT" "$cmd"
         tmux set-option -t "$session" @s8-managed 1
         created_session=true
@@ -96,7 +97,7 @@ if [[ "${1:-}" == --session && "${2:-}" != */* && "${2:-}" != *.jsonl ]]; then
     elif (($# > 0)); then
         echo '기존 세션 접속 시 Pi 실행 옵션은 변경할 수 없습니다.' >&2; exit 2
     fi
-    if ! $created_session && { $scheduler_enabled || $supervisor_enabled; }; then node "$AGENT_ROOT/pi/bin/pi-services.mjs" "${service_options[@]}"; fi
+    if ! $created_session && { $scheduler_enabled || $supervisor_enabled; }; then node "$AGENT_ROOT/pi/bin/pi-services.mjs" ${service_options[@]+"${service_options[@]}"}; fi
     if $telegram; then
         node --input-type=module -e "import {moveTelegram} from '$AGENT_ROOT/pi/lib/managed-sessions.mjs'; await moveTelegram(process.argv[1]);" "$AGENT_ROOT/.pi-runtime/$session.sock"
     fi
@@ -169,7 +170,7 @@ node "$PI_CONFIG_ROOT/bin/manager-options.mjs" "$@"
 start_services=true
 for option in "$@"; do if [[ "$option" == --version ]]; then start_services=false; fi; done
 if $start_services && { $scheduler_enabled || $supervisor_enabled; }; then
-    node "$PI_CONFIG_ROOT/bin/pi-services.mjs" "${service_options[@]}"
+    node "$PI_CONFIG_ROOT/bin/pi-services.mjs" ${service_options[@]+"${service_options[@]}"}
 fi
 
 # 자동 발견을 끄고 검토된 관리 확장만 로드한다.
@@ -191,9 +192,7 @@ while true; do
         --system-prompt "$AGENT_ROOT/agents/manager/SYSTEM.md"
         --tools projectman,kb,scheduler
     )
-    if ((${#restart_args[@]} > 0)); then
-        pi_args+=("${restart_args[@]}")
-    fi
+    pi_args+=(${restart_args[@]+"${restart_args[@]}"})
     if (($# > 0)); then
         pi_args+=("$@")
     fi

@@ -99,10 +99,12 @@ test('launcher enables services by default, consumes exclusion flags anywhere, a
   await writeFile(path.join(dir, 'pi/bin/pi-services.mjs'), `import {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)));`);
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), "#!/usr/bin/env node\nconsole.log(JSON.stringify(process.argv.slice(2)));\n", { mode: 0o755 });
   const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: dir } };
-  for (const [input, expected] of [[[], []], [['--no-scheduler'], ['--no-scheduler']], [['--model', 'fixture model', '--no-supervisor'], ['--no-supervisor']]]) {
+  for (const [input, expected] of [[[], []], [['--telegram'], []], [['--no-scheduler'], ['--no-scheduler']], [['--model', 'fixture model', '--no-supervisor'], ['--no-supervisor']]]) {
     await rm(log, { force: true }); const output = execFileSync('bash', [script, ...input], options);
     assert.deepEqual(JSON.parse(await readFile(log, 'utf8')), expected);
     assert.ok(!JSON.parse(output).some(arg => ['--no-scheduler', '--no-supervisor'].includes(arg)));
+    assert.ok(!JSON.parse(output).includes(''));
+    if (input.includes('--telegram')) assert.ok(JSON.parse(output).includes(path.join(dir, 'pi/extensions/telegram.mjs')));
   }
   for (const input of [['--no-scheduler', '--no-supervisor'], ['--help'], ['--version'], ['list']]) {
     await rm(log, { force: true }); execFileSync('bash', [script, ...input], options);
