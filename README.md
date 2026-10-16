@@ -154,7 +154,7 @@ npm --prefix frontend run preview -- --host 127.0.0.1 --port 4178 --strictPort
 ## 웹 터미널
 
 - `/s8/terminal`은 기본으로 호스트 셸에 접속한다. 세션 선택에서 같은 호스트 사용자·tmux 서버의 PHCMS, S8 스케줄러·개발 감독, Pi 등 모든 실행 세션을 제어한다. Pi 관리 표시가 없어도 접속할 수 있으며, tmux 밖의 서비스는 호스트 셸에서 운영 명령으로 제어한다.
-- `./start-infra.sh`는 `s8-infra` tmux 세션의 기존 창과 실행 중인 인프라를 유지하고 누락된 창/서비스만 준비한다. 이미 응답 중인 frontend는 다시 띄우지 않으며, PHCMS용 빈 창을 둔다. 웹 터미널 세션 목록에서 `s8-infra`를 선택해 접속한다. `NGINX_BIND_IP`를 지정하지 않으면 Compose의 `.env` 설정을 사용한다.
+- `./start-infra.sh`는 `s8-infra` tmux 세션의 기존 창과 실행 중인 인프라를 유지하고 누락된 창/서비스만 준비한다. 이미 응답 중인 frontend는 다시 띄우지 않으며, PHCMS용 빈 창을 둔다. 웹 터미널 세션 목록에서 `s8-infra`를 선택해 접속한다. `NGINX_BIND_IP`가 없으면 Compose의 `.env` 설정을 사용하고, 해당 설정도 없으면 localhost(`127.0.0.1`)에만 바인딩한다.
 - `./start-pi.sh --sessions`로 목록, `./start-pi.sh --session main`으로 생성·재사용한 뒤 창 목록을 출력한다. 접속은 웹 터미널이나 `tmux attach -t s8-main`을 사용한다.
 - `./start-pi.sh --session main --telegram`으로 실행 중인 세션에 Telegram 연결을 이전한다.
 - backend 설치·실행, Tailscale 전용 노출 및 복구는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.

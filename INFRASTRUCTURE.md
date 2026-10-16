@@ -63,7 +63,7 @@ NGINX_BIND_IP=100.120.50.80 docker compose -f infra/nginx/docker-compose.yml up 
 
 - Tailscale 전용 운영에서는 실제 Tailscale IPv4를 명시한다.
 - localhost 앞단만 사용할 때는 `127.0.0.1`을 지정한다.
-- `NGINX_BIND_IP`는 필수이며 전체 인터페이스로의 기본 바인딩은 없다. 운영에서 실제 Tailscale IP를 지정한다.
+- `NGINX_BIND_IP`가 없으면 `127.0.0.1`에만 바인딩한다. 원격 운영에서는 실제 Tailscale IPv4를 지정하며 전체 인터페이스로의 기본 바인딩은 없다.
 - `0.0.0.0`은 모든 인터페이스에 노출되므로 웹 터미널 운영에 사용하지 않는다.
 - 웹 터미널은 별도 인증 없이 호스트 사용자 권한을 제공한다. Tailscale ACL과 전용 바인딩을 접근 권한 경계로 사용한다. Host/Origin 검사로 다른 웹사이트의 연결을 차단한다.
 - 쓰기 API는 인증과 승인 정책 없이 추가하지 않는다.
