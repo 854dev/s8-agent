@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ConsoleError, list, request, type Detail, type Item } from './api'
+import { ConsoleError, createRequestId, list, request, type Detail, type Item } from './api'
 import './projectman.css'
 
 const labels: Record<string, string> = { todo: '승인 전', ready: '실행 대기', doing: '실행 중', blocked: '대기', review: '결과 검토', done: '완료', canceled: '취소' }
@@ -24,6 +24,7 @@ export function reviewLabel(detail: Detail) {
 
 export default function ProjectmanPage() {
   const [authenticated, setAuthenticated] = useState(false), [checking, setChecking] = useState(true)
+  const [sessionUnavailable, setSessionUnavailable] = useState(false), [sessionAttempt, setSessionAttempt] = useState(0)
   const [email, setEmail] = useState(''), [password, setPassword] = useState('')
   const [items, setItems] = useState<Item[]>([]), [projects, setProjects] = useState<Item[]>([]), [workspaces, setWorkspaces] = useState<Item[]>([])
   const [workspace, setWorkspace] = useState(new URLSearchParams(location.search).get('workspace') ?? ''), [humanOnly, setHumanOnly] = useState(false)
@@ -50,7 +51,19 @@ export default function ProjectmanPage() {
     const data = await request<Detail>(`/items/${encodeURIComponent(uid)}`, { signal })
     if (!signal?.aborted && selectedTask.current === uid) setDetail(data)
   }, [uid])
-  useEffect(() => { const controller = new AbortController(); request('/session', { signal: controller.signal }).then(() => setAuthenticated(true)).catch(cause => { if (!controller.signal.aborted && !(cause instanceof ConsoleError && cause.status === 401)) fail(cause) }).finally(() => { if (!controller.signal.aborted) setChecking(false) }); return () => controller.abort() }, [fail])
+  useEffect(() => {
+    const controller = new AbortController()
+    setChecking(true); setSessionUnavailable(false); setError('')
+    request('/session', { signal: controller.signal })
+      .then(() => { if (!controller.signal.aborted) setAuthenticated(true) })
+      .catch(cause => {
+        if (controller.signal.aborted) return
+        if (cause instanceof ConsoleError && cause.status === 401) setAuthenticated(false)
+        else { setSessionUnavailable(true); fail(cause) }
+      })
+      .finally(() => { if (!controller.signal.aborted) setChecking(false) })
+    return () => controller.abort()
+  }, [fail, sessionAttempt])
   useEffect(() => {
     if (!authenticated) return
     const controller = new AbortController()
@@ -69,7 +82,7 @@ export default function ProjectmanPage() {
     if (!detail?.execution.workflow) return
     setBusy(true); setError(''); setNotice('')
     const revision = ['draft', 'decide'].includes(String(operation.action)) ? answerRevision ?? detail.execution.workflow.revision : confirmedRevision ?? detail.execution.workflow.revision
-    const saved = pending.current ?? { uid, operation: { ...operation, expectedRevision: revision, requestId: crypto.randomUUID() } }
+    const saved = pending.current ?? { uid, operation: { ...operation, expectedRevision: revision, requestId: createRequestId() } }
     pending.current = saved
     try {
       await request(`/items/${encodeURIComponent(saved.uid)}/workflow`, { method: 'POST', body: JSON.stringify(saved.operation) })
@@ -102,7 +115,7 @@ export default function ProjectmanPage() {
     <header className="pm-header"><div><h1>작업과 결정</h1><p>프로젝트 진행 상황과 검토가 필요한 작업을 확인하세요.</p></div>{authenticated && <button onClick={() => { void request('/logout', { method: 'POST' }).then(() => { setAuthenticated(false); setItems([]); setDetail(null) }).catch(fail) }}>로그아웃</button>}</header>
     {error && <div role="alert" className="pm-error">{error}{pending.current && <button disabled={busy} onClick={() => { void mutate(pending.current!.operation) }}>같은 요청 확인·재시도</button>}</div>}
     {notice && <p role="status" className="pm-notice">{notice}</p>}
-    {checking ? <p>사용자 세션 확인 중…</p> : !authenticated ? <form className="pm-login" onSubmit={event => { event.preventDefault(); setBusy(true); setError(''); void request('/login', { method: 'POST', body: JSON.stringify({ email, password }) }).then(() => { setPassword(''); setAuthenticated(true) }).catch(fail).finally(() => setBusy(false)) }}><h2>PH-CMS 사용자 로그인</h2><p>사람의 결정은 사용자 계정으로 기록합니다.</p><label>이메일<input autoComplete="username" type="email" required value={email} onChange={event => setEmail(event.target.value)} /></label><label>비밀번호<input autoComplete="current-password" type="password" required value={password} onChange={event => setPassword(event.target.value)} /></label><button className="pm-primary" disabled={busy}>로그인</button></form> : <>
+    {checking ? <p>사용자 세션 확인 중…</p> : sessionUnavailable ? <section className="pm-login"><h2>콘솔에 연결할 수 없습니다.</h2><p>Projectman 콘솔 서버와 PH-CMS가 실행 중인지 확인하세요.</p><button onClick={() => setSessionAttempt(value => value + 1)}>연결 다시 시도</button></section> : !authenticated ? <form className="pm-login" onSubmit={event => { event.preventDefault(); setBusy(true); setError(''); void request('/login', { method: 'POST', body: JSON.stringify({ email, password }) }).then(() => { setPassword(''); setAuthenticated(true) }).catch(fail).finally(() => setBusy(false)) }}><h2>PH-CMS 사용자 로그인</h2><p>사람의 결정은 사용자 계정으로 기록합니다.</p><label>이메일<input autoComplete="username" type="email" required value={email} onChange={event => setEmail(event.target.value)} /></label><label>비밀번호<input autoComplete="current-password" type="password" required value={password} onChange={event => setPassword(event.target.value)} /></label><button className="pm-primary" disabled={busy}>로그인</button></form> : <>
       <div className="pm-workspace-layout">
         <nav className="pm-workspaces" aria-label="워크스페이스">
           <h2>워크스페이스</h2>

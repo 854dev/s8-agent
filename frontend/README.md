@@ -44,7 +44,9 @@ npm run dev --prefix frontend -- --host 127.0.0.1 --port 4178
 - 지식베이스·업로드: `apps/kb-browser`와 Nginx 필요
 - 터미널: `apps/terminal-gateway`와 tmux 필요
 - Projectman: PH-CMS와 `node pi/bin/projectman-console.mjs` 필요. [실행 안내](../README.md) 참고.
-- Vite dev/preview는 `/api/projectman`을 `127.0.0.1:8791`로, `/api/terminal`을 `127.0.0.1:8790`으로, 나머지 `/api`를 로컬 Nginx `http://127.0.0.1`로 proxy한다. API 사용 전 해당 backend와 Nginx의 접근 가능 여부를 확인한다.
+- Vite dev/preview는 `/api/projectman`을 `127.0.0.1:8791`로, `/api/terminal`을 `127.0.0.1:8790`으로, 나머지 `/api`를 Nginx로 proxy한다. Nginx 주소는 루트 `.env`의 `NGINX_BIND_IP`와 `NGINX_HTTP_PORT`를 사용하며 셸 환경변수가 우선한다. 기본값은 `127.0.0.1:80`이다. 설정 변경 시 frontend도 재시작한다. 이 설정은 브라우저 번들에 포함하지 않는다.
+- `./start-infra.sh`는 Nginx·KB Browser·frontend를 시작한다. Projectman 콘솔 API(`node pi/bin/projectman-console.mjs`)와 터미널 게이트웨이(`npm start --prefix apps/terminal-gateway`)는 별도로 실행해야 한다. PH-CMS는 `PHCMS_START_COMMAND`를 설정한 경우에만 스크립트에서 시작한다. 서비스 기동 중 연결이 실패하면 Projectman·지식베이스의 `연결 다시 시도`, 업로드의 `다시 시도`로 복구한다.
+- Nginx의 `/s8/`는 Vite 개발 서버의 HMR WebSocket도 전달한다. Tailscale의 HTTP 접속에서도 결정 요청 ID를 생성할 수 있다.
 - backend 실행·접근 제한·복구는 [웹 터미널 운영 문서](../apps/terminal-gateway/README.md)를 참고한다.
 
 ## 빌드

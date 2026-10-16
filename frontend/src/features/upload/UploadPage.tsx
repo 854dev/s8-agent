@@ -1,9 +1,9 @@
 import { useState, useRef } from 'react'
 import { ActionIcon, Button, Card, Container, Group, Progress, Stack, Text, Title } from '@mantine/core'
 import { IconUpload, IconFile, IconX, IconCheck, IconTrash } from '@tabler/icons-react'
-import { getAppBaseUrl } from '../../app-route'
 
 type UploadFile = {
+  id: number
   file: File
   progress: number
   status: 'pending' | 'uploading' | 'done' | 'error'
@@ -14,44 +14,43 @@ type UploadFile = {
 export default function UploadPage() {
   const [files, setFiles] = useState<UploadFile[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
-  const apiBase = getAppBaseUrl(import.meta.env.BASE_URL).replace(/\/s8\/?$/, '')
+  const nextFileId = useRef(0)
 
   const addFiles = (newFiles: FileList) => {
-    const list: UploadFile[] = Array.from(newFiles).map((f) => ({ file: f, progress: 0, status: 'pending' }))
+    const list: UploadFile[] = Array.from(newFiles).map((f) => ({ id: nextFileId.current++, file: f, progress: 0, status: 'pending' }))
     setFiles((prev) => [...prev, ...list])
   }
 
-  const upload = async (idx: number) => {
-    const item = files[idx]
-    if (!item || item.status !== 'pending') return
+  const upload = async (id: number) => {
+    const item = files.find(file => file.id === id)
+    if (!item || !['pending', 'error'].includes(item.status)) return
 
-    setFiles((prev) => prev.map((f, i) => (i === idx ? { ...f, status: 'uploading' } : f)))
+    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, status: 'uploading', error: undefined } : f)))
 
     const form = new FormData()
     form.append('file', item.file)
 
     try {
-      const res = await fetch(`${apiBase}/api/files/upload`, {
+      const res = await fetch('/api/files/upload', {
         method: 'POST',
         body: form,
       })
       if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `HTTP ${res.status}`)
+        throw new Error(`업로드에 실패했습니다. (HTTP ${res.status}) KB Browser와 Nginx 실행 상태를 확인하세요.`)
       }
       const result = await res.json()
-      setFiles((prev) => prev.map((f, i) =>
-        i === idx ? { ...f, status: 'done', progress: 100, result } : f
+      setFiles((prev) => prev.map((f) =>
+        f.id === id ? { ...f, status: 'done', progress: 100, result } : f
       ))
     } catch (err) {
-      setFiles((prev) => prev.map((f, i) =>
-        i === idx ? { ...f, status: 'error', error: String(err) } : f
+      setFiles((prev) => prev.map((f) =>
+        f.id === id ? { ...f, status: 'error', error: err instanceof Error && !(err instanceof TypeError || err instanceof SyntaxError) ? err.message : '업로드 서버에 연결할 수 없거나 응답이 올바르지 않습니다. 잠시 후 다시 시도하세요.' } : f
       ))
     }
   }
 
   const uploadAll = () => {
-    files.forEach((f, i) => { if (f.status === 'pending') upload(i) })
+    files.forEach((f) => { if (f.status === 'pending' || f.status === 'error') void upload(f.id) })
   }
 
   const clear = () => setFiles([])
@@ -92,15 +91,15 @@ export default function UploadPage() {
             <Group justify="space-between" mb="sm">
               <Text fw={600}>{files.length}개 파일</Text>
               <Group gap="xs">
-                <Button size="xs" onClick={uploadAll} disabled={files.every((f) => f.status !== 'pending')}>
+                <Button size="xs" onClick={uploadAll} disabled={files.every((f) => f.status !== 'pending' && f.status !== 'error')}>
                   모두 업로드
                 </Button>
                 <ActionIcon variant="subtle" color="gray" onClick={clear}><IconTrash size={16} /></ActionIcon>
               </Group>
             </Group>
             <Stack gap="xs">
-              {files.map((f, i) => (
-                <Card key={i} withBorder padding="xs">
+              {files.map((f) => (
+                <Card key={f.id} withBorder padding="xs">
                   <Group gap="sm" wrap="nowrap">
                     <IconFile size={20} stroke={1.5} />
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -108,7 +107,7 @@ export default function UploadPage() {
                       <Text size="xs" c="dimmed">{(f.file.size / 1024 / 1024).toFixed(1)}MB</Text>
                     </div>
                     {f.status === 'pending' && (
-                      <Button size="compact-xs" onClick={() => upload(i)}>업로드</Button>
+                      <Button size="compact-xs" onClick={() => void upload(f.id)}>업로드</Button>
                     )}
                     {f.status === 'uploading' && <Progress size="sm" w={80} value={100} animated />}
                     {f.status === 'done' && (
@@ -121,6 +120,7 @@ export default function UploadPage() {
                       <Group gap={4}>
                         <IconX size={18} color="red" />
                         <Text size="xs" c="red" truncate maw={200}>{f.error}</Text>
+                        <Button size="compact-xs" onClick={() => void upload(f.id)}>다시 시도</Button>
                       </Group>
                     )}
                   </Group>

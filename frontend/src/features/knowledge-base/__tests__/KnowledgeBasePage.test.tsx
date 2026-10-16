@@ -11,6 +11,24 @@ afterEach(() => {
 })
 
 describe('KnowledgeBasePage', () => {
+  it('retries tree, recent documents and the selected document after startup failure', async () => {
+    window.history.replaceState({}, '', '/s8/knowledge-base?path=README.md')
+    let ready = false
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (!ready) return { ok: false, status: 502 }
+      if (url.includes('/health')) return response({ status: 'ok', service: 'kb' })
+      if (url.includes('/tree')) return response({ root: '', entries: [] })
+      if (url.includes('/recent')) return response({ results: [] })
+      return response({ path: 'README.md', content: '# Recovered', size: 11, mtime: '2026-10-17T00:00:00Z' })
+    }))
+    render(<KnowledgeBasePage />)
+    const retry = await screen.findByRole('button', { name: '연결 다시 시도' })
+    ready = true
+    fireEvent.click(retry)
+    expect(await screen.findByRole('heading', { name: 'Recovered' })).toBeInTheDocument()
+    expect(await screen.findByText('API 연결됨')).toBeInTheDocument()
+  })
+
   it('loads the tree and restores a document from the URL', async () => {
     window.history.replaceState({}, '', '/s8/knowledge-base?path=docs%2Fguides%2Fguide.md')
     const fetchMock = vi.fn((url: string) => {

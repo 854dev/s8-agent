@@ -34,6 +34,7 @@ export default function KnowledgeBasePage({ onNavigateDashboard, onNavigateUploa
   const [treeLoading, setTreeLoading] = useState(true)
   const [treeError, setTreeError] = useState(false)
   const [health, setHealth] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [attempt, setAttempt] = useState(0)
   const [selectedPath, setSelectedPath] = useState(() => getSelectedDocumentPath(window.location.search))
   const [mobileView, setMobileView] = useState<MobileView>(() => (
     getSelectedDocumentPath(window.location.search) ? 'reader' : 'list'
@@ -42,6 +43,7 @@ export default function KnowledgeBasePage({ onNavigateDashboard, onNavigateUploa
 
   useEffect(() => {
     let active = true
+    setHealth('loading'); setTreeLoading(true); setTreeError(false)
     fetchHealth()
       .then(() => {
         if (active) setHealth('ready')
@@ -64,7 +66,7 @@ export default function KnowledgeBasePage({ onNavigateDashboard, onNavigateUploa
     return () => {
       active = false
     }
-  }, [])
+  }, [attempt])
 
   useEffect(() => {
     const handlePopState = () => {
@@ -114,6 +116,7 @@ export default function KnowledgeBasePage({ onNavigateDashboard, onNavigateUploa
           <span className={`kb-status kb-status--${health}`}>
             {health === 'ready' ? 'API 연결됨' : health === 'error' ? 'API 연결 실패' : '연결 확인 중'}
           </span>
+          {(health === 'error' || treeError) && <button type="button" onClick={() => setAttempt(value => value + 1)}>연결 다시 시도</button>}
           {onNavigateDashboard && (
             <button type="button" onClick={onNavigateDashboard}>대시보드</button>
           )}
@@ -125,7 +128,7 @@ export default function KnowledgeBasePage({ onNavigateDashboard, onNavigateUploa
       <div className="kb-page__body">
         {showSidebar && (
           <aside className="kb-page__sidebar">
-            <KnowledgeBaseSearch onSelect={selectDocument} />
+            <KnowledgeBaseSearch key={attempt} onSelect={selectDocument} />
             <section className="kb-tree-panel" aria-label="파일 탐색">
               <div className="kb-tree-panel__heading">
                 <h2>파일</h2>
@@ -144,7 +147,7 @@ export default function KnowledgeBasePage({ onNavigateDashboard, onNavigateUploa
         )}
         {showReader && (
           <div className="kb-page__reader">
-            <DocumentReader path={selectedPath} onBack={isMobile ? goToList : undefined} />
+            <DocumentReader key={attempt} path={selectedPath} onBack={isMobile ? goToList : undefined} />
           </div>
         )}
       </div>

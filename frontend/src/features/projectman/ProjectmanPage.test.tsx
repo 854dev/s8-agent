@@ -26,6 +26,18 @@ function fixture() {
   return { operations, detail, fetcher }
 }
 
+test('a console startup failure can be retried without losing a valid session', async () => {
+  const fetcher = vi.fn(async () => new Response('<html>Bad Gateway</html>', { status: 502 }))
+  vi.stubGlobal('fetch', fetcher)
+  render(<ProjectmanPage />)
+  expect(await screen.findByRole('heading', { name: '콘솔에 연결할 수 없습니다.' })).toBeInTheDocument()
+  expect(screen.queryByLabelText('비밀번호')).not.toBeInTheDocument()
+  fetcher.mockImplementation(async () => Response.json({ items: [], authenticated: true }))
+  await userEvent.click(screen.getByRole('button', { name: '연결 다시 시도' }))
+  expect(await screen.findByRole('button', { name: '로그아웃' })).toBeInTheDocument()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+})
+
 test('shows the original request, question, reason, choices and scope before a human decision', async () => {
   fixture(); render(<ProjectmanPage />)
   expect(await screen.findByRole('heading', { name: '음수를 허용할까요?' })).toBeInTheDocument()
