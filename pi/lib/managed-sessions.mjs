@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import net from 'node:net';
 const exec = promisify(execFile);
-export const validSession = name => /^s8-[A-Za-z0-9_-]{1,40}$/.test(name);
+export const validSession = name => typeof name === 'string' && /^s8-[A-Za-z0-9_-]{1,40}$/.test(name) && !name.includes('\n');
 export async function listSessions() {
   let stdout;
   try { ({ stdout } = await exec('tmux', ['list-sessions', '-F', '#{session_name}\t#{@s8-managed}'], { timeout: 3000, maxBuffer: 65536 })); }

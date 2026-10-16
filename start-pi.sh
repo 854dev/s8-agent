@@ -4,7 +4,7 @@
 # --telegram은 명시한 경우에만 Telegram을 연결한다. --help로 사용법을 확인한다.
 # 루트 .env의 연결 설정을 자식 프로세스에 전달하며 인증 값은 출력하지 않는다.
 # 모델 인증·대화는 .pi-runtime에 보관한다. 처음 실행하면 Pi에서 /login을 수행한다.
-# 두 서비스는 전용 tmux에서 유지된다. --no-scheduler / --no-supervisor로 자동 시작을 제외한다.
+# Pi와 두 서비스는 하나의 tmux 세션의 별도 창에서 유지된다. --no-scheduler / --no-supervisor로 자동 시작을 제외한다.
 # 제외 옵션은 이미 실행 중인 공유 서비스를 종료하지 않는다.
 set -euo pipefail
 
@@ -32,14 +32,12 @@ if [[ "${1:-}" == --service ]]; then
     exec node "$AGENT_ROOT/pi/bin/$service.mjs" "$@"
 fi
 # 서비스 제어 옵션은 Pi에 넘기지 않고 여기서 소비한다. 옵션 위치와 관계없이 처리한다.
-scheduler_enabled=true
-supervisor_enabled=true
 service_options=()
 manager_options=()
 for option in "$@"; do
     case "$option" in
-        --no-scheduler) scheduler_enabled=false; service_options+=(--no-scheduler) ;;
-        --no-supervisor) supervisor_enabled=false; service_options+=(--no-supervisor) ;;
+        --no-scheduler) service_options+=(--no-scheduler) ;;
+        --no-supervisor) service_options+=(--no-supervisor) ;;
         *) manager_options+=("$option") ;;
     esac
 done
@@ -49,14 +47,14 @@ if [[ "${1:-}" == --manager ]]; then shift; fi
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
     printf '%s\n' \
         '사용법: ./start-pi.sh [Pi 옵션]' \
-        '  (인자 없음)      매니저 + 스케줄러 + 개발 슈퍼바이저 실행' \
+        '  (인자 없음)      s8-main tmux 세션에 Pi·스케줄러·개발 감독 창 생성 후 목록 출력' \
         '  --no-scheduler   스케줄러 자동 시작 제외' \
         '  --no-supervisor  개발 슈퍼바이저 자동 시작 제외' \
         '  --service 종류   scheduler 또는 supervisor만 전경 실행 (감독 --check 지원)' \
         '  --telegram       Telegram 연동 실행 (Pi 옵션과 함께 사용 가능)' \
         '  --manager        기본 관리 역할의 별칭 (Projectman·KB·예약)' \
         '  --sessions       실행 중인 S8 tmux 세션 목록' \
-        '  --session 이름   S8 tmux 세션 생성 또는 접속 (--telegram으로 연결 이전)' \
+        '  --session 이름   s8-이름 세션 생성·재사용 후 목록 출력 (자동 접속 없음)' \
         '  --help, -h       이 도움말 표시' \
         '  관리 역할 옵션: --continue, --print, --no-session, --version, --model, --provider, --thinking' \
         '  Telegram 인증: TELEGRAM_BOT_TOKEN (환경변수)' \
@@ -65,48 +63,24 @@ if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
     exit 0
 fi
 if [[ "${1:-}" == --sessions ]]; then
-    node --input-type=module -e "import {listSessions} from '$AGENT_ROOT/pi/lib/managed-sessions.mjs'; console.log((await listSessions()).join('\\n') || '실행 중인 S8 세션이 없습니다.');"
-    exit 0
+    exec node "$AGENT_ROOT/pi/bin/pi-runtime.mjs" --sessions
 fi
-# 이름 기반 --session만 관리 tmux 생성·접속으로 처리한다.
-# 파일 경로 형태의 세션 옵션은 아래 관리 역할 인자 검사에서 허용하지 않는다.
-# Telegram 옵션이 먼저 와도 같은 관리 세션 접속 순서로 정규화한다.
-if [[ "${1:-}" == --telegram && "${2:-}" == --session && "${3:-}" != */* && "${3:-}" != *.jsonl ]]; then
-    shift
-    session_arg="${2:-}"
-    shift 2
-    set -- --session "$session_arg" --telegram "$@"
-fi
-# tmux 세션이 없으면 만들고, 기존 세션이면 실행 옵션을 바꾸지 않고 접속한다.
-if [[ "${1:-}" == --session && "${2:-}" != */* && "${2:-}" != *.jsonl ]]; then
-    name="${2:-}"
-    [[ "$name" =~ ^[A-Za-z0-9_-]{1,40}$ ]] || { echo '잘못된 세션 이름입니다.' >&2; exit 2; }
-    shift 2
-    session="s8-$name"
-    telegram=false
-    if [[ "${1:-}" == --telegram ]]; then telegram=true; shift; fi
-    node "$AGENT_ROOT/pi/bin/manager-options.mjs" "$@"
-    created_session=false
-    if ! tmux has-session -t "=$session" 2>/dev/null; then
-        printf -v cmd '%q ' "$AGENT_ROOT/start-pi.sh" --managed ${service_options[@]+"${service_options[@]}"} "$@"
-        tmux new-session -d -s "$session" -c "$AGENT_ROOT" "$cmd"
-        tmux set-option -t "$session" @s8-managed 1
-        created_session=true
-    elif [[ "$(tmux show-option -t "$session" -v @s8-managed 2>/dev/null)" != 1 ]]; then
-        echo 'S8이 관리하지 않는 세션입니다.' >&2; exit 2
-    elif (($# > 0)); then
-        echo '기존 세션 접속 시 Pi 실행 옵션은 변경할 수 없습니다.' >&2; exit 2
-    fi
-    if ! $created_session && { $scheduler_enabled || $supervisor_enabled; }; then node "$AGENT_ROOT/pi/bin/pi-services.mjs" ${service_options[@]+"${service_options[@]}"}; fi
-    if $telegram; then
-        node --input-type=module -e "import {moveTelegram} from '$AGENT_ROOT/pi/lib/managed-sessions.mjs'; await moveTelegram(process.argv[1]);" "$AGENT_ROOT/.pi-runtime/$session.sock"
-    fi
-    if [[ -n "${TMUX:-}" ]]; then exec tmux switch-client -t "=$session"; fi
-    exec tmux attach-session -t "=$session"
-fi
-# --managed는 이름 기반 tmux 실행 시 사용하는 내부 옵션이다.
+# 대화형 실행은 백그라운드 tmux 런타임을 준비하고 목록만 출력한다.
+# --managed는 런타임의 Pi 창에서만 사용하는 내부 전경 실행 옵션이다.
 managed=false
-if [[ "${1:-}" == --managed ]]; then managed=true; shift; fi
+if [[ "${1:-}" == --managed ]]; then
+    managed=true
+    shift
+else
+    runtime=true
+    case "${1:-}" in install|remove|uninstall|update|list|config) runtime=false ;; esac
+    for option in "$@"; do
+        case "$option" in --version|--print) runtime=false ;; esac
+    done
+    if $runtime; then
+        exec node "$AGENT_ROOT/pi/bin/pi-runtime.mjs" ${service_options[@]+"${service_options[@]}"} "$@"
+    fi
+fi
 # 연결·KB 경로 설정을 로드한다. 내용이나 인증 값을 로그로 출력하지 않는다.
 [ ! -f "$AGENT_ROOT/.env" ] || { set -a; source "$AGENT_ROOT/.env"; set +a; }
 if [[ "${1:-}" == telegram ]]; then
@@ -164,14 +138,6 @@ case "${1:-}" in
 esac
 # 임의 도구·확장·세션 파일 인자로 관리 역할 경계를 바꾸지 못하게 검사한다.
 node "$PI_CONFIG_ROOT/bin/manager-options.mjs" "$@"
-
-# 도움말·목록·패키지 관리·버전 확인은 서비스를 시작하지 않는다.
-# 일반 실행은 공유 tmux 서비스를 준비한다. 매니저 종료나 재시작에도 서비스는 유지된다.
-start_services=true
-for option in "$@"; do if [[ "$option" == --version ]]; then start_services=false; fi; done
-if $start_services && { $scheduler_enabled || $supervisor_enabled; }; then
-    node "$PI_CONFIG_ROOT/bin/pi-services.mjs" ${service_options[@]+"${service_options[@]}"}
-fi
 
 # 자동 발견을 끄고 검토된 관리 확장만 로드한다.
 # 재시작 요청 파일이 생기면 같은 실행 옵션과 최근 세션으로 다시 실행한다.

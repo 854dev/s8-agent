@@ -8,20 +8,22 @@
 cd /path/to/s8-agent
 npm ci --ignore-scripts --prefix pi
 ./start-pi.sh
+tmux attach-session -t s8-main
 ```
 
-Pi가 열리면 `/login`을 실행한다. credential과 세션은 `.pi-runtime/`에 저장되며 Git과 에이전트 도구의 접근 대상에서 제외된다. 기존 `.pi/`에 있던 인증정보와 세션은 자동으로 옮기지 않는다. 필요하면 사용자가 별도 백업·이관하고, 그렇지 않으면 `/login`으로 다시 인증한다.
+Pi 창이 열리면 `/login`을 실행한다. credential과 세션은 `.pi-runtime/`에 저장되며 Git과 에이전트 도구의 접근 대상에서 제외된다. 기존 `.pi/`에 있던 인증정보와 세션은 자동으로 옮기지 않는다. 필요하면 사용자가 별도 백업·이관하고, 그렇지 않으면 `/login`으로 다시 인증한다.
 
 ## Pi 실행
 
 ```bash
 ./start-pi.sh
 ./start-pi.sh --continue
-./start-pi.sh --resume
+./start-pi.sh --session work
 ```
 
 `start-pi.sh`는 다음 역할만 담당한다.
 
+- 기본 `s8-main` 세션에 `pi`·`scheduler`·`supervisor`·`shell` 창을 준비한 뒤 자동 접속 없이 목록 출력 (PH-CMS 별도 실행)
 - 프로젝트 로컬 Pi 바이너리 선택
 - 루트 `.env`를 읽고 작업 디렉터리를 `${S8_KB_ROOT:-../854_md}`로 고정
 - 인증정보와 세션을 `.pi-runtime/`로 분리
@@ -69,38 +71,33 @@ Pi가 열리면 `/login`을 실행한다. credential과 세션은 `.pi-runtime/`
 npm start --prefix apps/terminal-gateway
 ```
 
-- 기존 세션에는 재실행 없이 접속하며 `--telegram`은 그 세션으로 polling 소유권을 이전한다.
+- 기존 세션과 서비스 창은 재사용하고 접속 없이 목록만 출력하며 `--telegram`은 그 세션으로 polling 소유권을 이전한다.
 - 웹에서는 `/s8/terminal`이 기본으로 호스트 셸 `s8-host-shell`에 연결된다. S8 Pi 세션도 선택할 수 있다.
 - `셸 열기`는 고정 셸을 생성·재사용한다. 브라우저 연결 해제는 셸을 종료하지 않는다. 모바일 입력은 보조 키 버튼을 사용한다.
 - 설치, 네트워크 경계와 복구 절차는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.
 
 ## tmux 활용
 
-현재 터미널에서 새 세션을 만들고 바로 접속:
+백그라운드에서 Pi와 서비스 창을 준비한 뒤 직접 접속:
 
 ```bash
-tmux new-session -s pi-854-md -c "$PWD" "./start-pi.sh"
-```
-
-백그라운드에서 시작:
-
-```bash
-tmux new-session -d -s pi-854-md -c "$PWD" "./start-pi.sh"
+./start-pi.sh
+tmux attach-session -t s8-main
 ```
 
 접속, 분리, 상태 확인, 종료:
 
 ```bash
-tmux attach-session -t pi-854-md
-# 세션 안에서 Ctrl-b, d로 분리
-tmux has-session -t pi-854-md
-tmux kill-session -t pi-854-md
+tmux attach-session -t s8-main
+# 세션 안에서 Ctrl-b, w로 창 선택, Ctrl-b, d로 분리
+tmux has-session -t s8-main
+tmux kill-session -t s8-main
 ```
 
 frontend를 같은 tmux 세션의 별도 창에서 실행하려면 다음을 사용한다.
 
 ```bash
-tmux new-window -t pi-854-md -n frontend -c "$PWD" \
+tmux new-window -t s8-main -n frontend -c "$PWD" \
   "npm run preview --prefix frontend -- --host 127.0.0.1 --port 4178"
 ```
 
@@ -161,7 +158,7 @@ docker compose -f infra/nginx/docker-compose.yml down
 
 ```bash
 ./start-pi.sh --version
-tmux has-session -t pi-854-md
+tmux has-session -t s8-main
 curl -fsS http://127.0.0.1:4178/s8/
 docker compose -f infra/nginx/docker-compose.yml ps
 curl -fsS http://<BIND_IP>/health

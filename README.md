@@ -53,7 +53,7 @@ dev_854/
 요구 사항:
 
 - Node.js 22.19.0 이상과 npm
-- 기본 통합 실행·지속 실행·웹 터미널에는 tmux. 두 서비스의 자동 시작을 모두 제외하면 매니저 단독 실행 가능
+- 기본 통합 실행·지속 실행·웹 터미널에는 tmux
 - 예약 쉘 스크립트에는 Bash. Windows에서는 Git Bash 등으로 제공
 - 개발 작업의 테스트·빌드와 웹 인프라에는 Docker
 - Projectman에는 실행 중인 PH-CMS와 DB, 에이전트 서비스 키
@@ -63,9 +63,10 @@ dev_854/
 cd /path/to/s8-agent
 npm ci --ignore-scripts --prefix pi
 ./start-pi.sh
+tmux attach-session -t s8-main
 ```
 
-Pi가 열리면 `/login`으로 이 장비의 모델 인증을 설정한다. 인증정보와 세션은 `.pi-runtime/`에 저장되며 Git과 에이전트 도구의 접근 대상에서 제외한다. 공유 설정의 원본은 `pi/settings.json`이며 런타임에서 이 파일을 링크로 참조한다. 관리 세션의 provider/model은 `pi/settings.json`을 기준으로 하며 Pi에서 변경할 수 있다. 개발 CLI는 현재 기존 홈 Pi 인증(`~/.pi/agent/auth.json`)을 사용한다. 관리 세션과 개발 인증 경로는 다르므로 개발 실행 전 두 환경의 인증을 확인한다. 인증 파일을 자동 복사하거나 링크하지 않는다.
+`start-pi.sh`는 백그라운드 실행 후 세션과 창 목록만 출력한다. Pi 창이 열리면 `/login`으로 이 장비의 모델 인증을 설정한다. 인증정보와 세션은 `.pi-runtime/`에 저장되며 Git과 에이전트 도구의 접근 대상에서 제외한다. 공유 설정의 원본은 `pi/settings.json`이며 런타임에서 이 파일을 링크로 참조한다. 관리 세션의 provider/model은 `pi/settings.json`을 기준으로 하며 Pi에서 변경할 수 있다. 개발 CLI는 현재 기존 홈 Pi 인증(`~/.pi/agent/auth.json`)을 사용한다. 관리 세션과 개발 인증 경로는 다르므로 개발 실행 전 두 환경의 인증을 확인한다. 인증 파일을 자동 복사하거나 링크하지 않는다.
 
 이후 실행:
 
@@ -79,11 +80,7 @@ Pi가 열리면 `/login`으로 이 장비의 모델 인증을 설정한다. 인�
 ./start-pi.sh --no-scheduler --no-supervisor  # 매니저만 실행
 ```
 
-tmux에서 Pi를 유지하려면 저장소 루트에서 다음을 사용한다.
-
-```bash
-tmux new-session -s pi-854-md -c "$PWD" "./start-pi.sh"
-```
+Pi와 서비스는 기본 `s8-main` 세션의 `pi`·`scheduler`·`supervisor` 창에 유지된다. `shell` 창에서 호스트 명령을 실행한다. 스크립트는 자동 접속하지 않으며 웹 터미널에서 세션을 선택하거나 `tmux attach-session -t s8-main`으로 접속한다. PH-CMS는 별도로 실행한다.
 
 실행 스크립트는 시작할 때 저장소 루트의 `.env`를 로드한다(관리·감독의 도움말 조회는 제외). 처음 설정하는 장비에서만 예시를 복사하고, 이미 있는 설정은 덮어쓰지 않는다.
 
@@ -109,12 +106,13 @@ PHCMS_API_URL=http://127.0.0.1:8000/api/v2
 | `start-pi.sh --service supervisor` | 통합 실행에서 사용하는 개발 감독 진입점. 단독 실행·진단도 지원 | `./start-pi.sh --service supervisor` |
 | `start-pi.sh --service scheduler` | 통합 실행에서 사용하는 예약 데몬 진입점. 단독 실행도 지원 | `./start-pi.sh --service scheduler` |
 
-- 관리 세션은 `--continue`로 최근 대화를 이어간다. `--session 이름`은 관리 tmux 세션을 생성하거나 접속하고, `--sessions`는 목록을 표시한다.
+- 관리 세션은 `--continue`로 최근 대화를 이어간다. `--session 이름`은 관리 tmux 세션을 생성·재사용한 뒤 자동 접속 없이 창 목록을 출력하고, `--sessions`는 목록을 표시한다.
 - 감독 `--check`는 연결·API 기능을 확인한다. `--once`는 승인된 작업을 **실제 실행할 수 있는** 1회 감독 주기다. 인자 없이 실행하면 계속 대기한다.
-- 기본 실행은 스케줄러를 `s8-scheduler`, 개발 감독을 `s8-development-supervisor` tmux 세션에 준비한다. 같은 저장소의 기존 서비스는 재사용하며, 매니저 종료·재시작에도 유지한다.
+- 기본 실행은 `s8-main` 세션에 `shell`·`pi`·`scheduler`·`supervisor` 창을 준비한다. `--session manager`를 지정하면 `s8-manager`를 사용한다. 같은 저장소의 기존 서비스 창은 다른 런타임에도 링크해 중복 실행하지 않으며, 매니저 종료·재시작에도 유지한다. 이전 버전의 서비스 세션도 저장소 소유 표시가 일치하면 기존 창을 링크한다. tmux 밖의 기존 서비스나 남은 잠금은 확인 후 수동 정리해야 한다.
 - `--no-scheduler`, `--no-supervisor`는 해당 호출의 자동 시작만 제외한다. 이미 실행 중인 공유 서비스를 종료하지 않는다. 옵션은 `--session manager`와 함께 사용할 수 있으며, 기존 관리 세션의 실행 옵션을 바꾸지는 않는다.
-- 도움말·버전·세션 목록·패키지 관리 명령은 서비스를 시작하지 않는다. 서비스 시작에 실패하면 오류를 표시하며, 해당 제외 옵션으로 매니저를 따로 실행할 수 있다.
-- 자동 시작한 서비스를 종료하려면 `tmux attach -t s8-scheduler` 또는 `tmux attach -t s8-development-supervisor`로 접속해 `Ctrl+C`를 누른다. 강제 종료 후 잠금이 남으면 실제 프로세스 종료를 확인한 뒤 정리한다.
+- 도움말·버전·세션 목록·패키지 관리 명령과 일회성 `--print` 실행은 서비스를 시작하지 않는다. 서비스 시작에 실패하면 오류를 표시하며, 해당 제외 옵션으로 매니저를 따로 실행할 수 있다.
+- 이전 방식의 Pi 세션이 같은 이름을 사용 중이면 다른 `--session 이름`으로 시작한다. 기존 Pi를 자동 종료하거나 대화 기록을 이관하지 않는다.
+- 자동 시작한 서비스를 종료하려면 `tmux attach -t s8-main`으로 접속하고 `Ctrl+B`, `W`로 `scheduler` 또는 `supervisor` 창을 선택한 뒤 `Ctrl+C`를 누른다. 종료된 창은 로그 확인을 위해 남으며 다음 시작 시 재사용한다. 강제 종료 후 잠금이 남으면 실제 프로세스 종료를 확인한 뒤 정리한다.
 - 개발 에이전트를 직접 상시 띄우지 않는다. 감독이 작업마다 CLI를 실행하고 종료한다. 기본 전체·저장소별 병렬 한도는 각각 2다.
 - 전경 프로세스는 `Ctrl+C`로 종료한다. tmux에서는 `Ctrl+B`, `D`로 접속만 해제하면 실행이 유지된다.
 
@@ -155,7 +153,7 @@ npm --prefix frontend run preview -- --host 127.0.0.1 --port 4178 --strictPort
 ## 웹 터미널
 
 - `/s8/terminal`은 기본으로 호스트 셸에 접속한다. 세션 선택에서 같은 호스트 사용자·tmux 서버의 PHCMS, S8 스케줄러·개발 감독, Pi 등 모든 실행 세션을 제어한다. Pi 관리 표시가 없어도 접속할 수 있으며, tmux 밖의 서비스는 호스트 셸에서 운영 명령으로 제어한다.
-- `./start-pi.sh --sessions`로 목록, `./start-pi.sh --session main`으로 생성·접속한다.
+- `./start-pi.sh --sessions`로 목록, `./start-pi.sh --session main`으로 생성·재사용한 뒤 창 목록을 출력한다. 접속은 웹 터미널이나 `tmux attach -t s8-main`을 사용한다.
 - `./start-pi.sh --session main --telegram`으로 실행 중인 세션에 Telegram 연결을 이전한다.
 - backend 설치·실행, Tailscale 전용 노출 및 복구는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.
 - 별도 웹 인증은 없으므로 Tailscale IP와 ACL을 접근 권한 경계로 유지한다. 셸은 호스트 사용자 권한으로 실행되며 Pi의 파일 보호 확장은 직접 터미널 입력을 제한하지 않는다.
@@ -289,9 +287,10 @@ S8에 원문을 사용자 메시지로 전달하고 “이 요청문을 Projectm
 ./start-pi.sh
 ./start-pi.sh --continue
 
-tmux new-session -d -s pi-854-md -c "$PWD" "./start-pi.sh"
-tmux attach-session -t pi-854-md
-tmux kill-session -t pi-854-md
+tmux attach-session -t s8-main
+tmux list-windows -t s8-main
+# Pi와 서비스를 모두 종료할 때만 사용
+tmux kill-session -t s8-main
 ```
 
 ## 관련 문서

@@ -1,10 +1,9 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { createHash } from 'node:crypto';
+import { ensureWindow, windows, withTmuxLock, runTmux, quote } from './tmux-windows.mjs';
+import { validSession } from './managed-sessions.mjs';
 import { readFile, mkdir, open, rm, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
-const exec = promisify(execFile);
-const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
 const definitions = {
   scheduler: { session: 's8-scheduler', lock: '.s8-runtime/scheduler/owner.lock' },
   supervisor: { session: 's8-development-supervisor', lock: '.s8-runtime/services/supervisor.lock' },
@@ -15,37 +14,49 @@ async function ownerPid(file) {
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
 
-/** 서비스는 매니저 세션과 독립적으로 유지하고, 같은 저장소의 실행을 재사용한다. */
-export async function startPiServices(root, { scheduler = true, supervisor = true, run = (args => exec('tmux', args, { timeout: 5000, maxBuffer: 65536 })) } = {}) {
+/** 공유 서비스는 런타임 세션의 창에서 유지한다. 여러 런타임에는 같은 창을 링크한다. */
+export async function startPiServices(root, { session = 's8-main', scheduler = true, supervisor = true, run = runTmux } = {}) {
   root = await realpath(root);
+  if (scheduler || supervisor) {
+    if (!validSession(session)) throw new Error('잘못된 세션 이름입니다.');
+    const owner = (await run(['show-option', '-qv', '-t', session, '@s8-runtime-root'])).stdout.trim();
+    if (owner !== root) throw new Error(`${session}은 이 저장소의 런타임 세션이 아닙니다.`);
+  }
   const results = [];
   for (const [name, enabled] of Object.entries({ scheduler, supervisor })) {
     if (!enabled) continue;
-    const service = definitions[name], target = `=${service.session}`;
-    const pid = await ownerPid(path.join(root, service.lock));
-    if (pid && alive(pid)) { results.push({ service: name, reused: true, pid }); continue; }
-    const exists = async () => { try { await run(['has-session', '-t', target]); return true; } catch { return false; } };
-    let reused = await exists();
-    if (!reused) {
-      if (pid) throw new Error(`${name}의 종료된 프로세스 잠금이 남아 있습니다. 실행 여부를 확인한 뒤 ${service.lock}를 정리하세요.`);
-      try {
-        // tmux 명령 목록에서 생성과 소유 저장소 표시를 함께 반영한다.
-        await run(['new-session', '-d', '-s', service.session, '-c', root, `exec bash ${quote(path.join(root, 'start-pi.sh'))} --service ${name}`, ';', 'set-option', '-t', service.session, '@s8-service-root', root]);
-      } catch {
-        if (!await exists()) throw new Error(`${name}를 시작하지 못했습니다. tmux 설치와 서비스 설정을 확인하세요.`);
-        reused = true;
+    const service = definitions[name];
+    const lock = 's8-service-' + createHash('sha256').update(root + name).digest('hex');
+    results.push(await withTmuxLock(run, lock, async () => {
+      const current = (await windows(run, session)).find(window => window.name === name);
+      if (current?.dead) {
+        const pid = await ownerPid(path.join(root, service.lock));
+        if (pid) throw new Error(`${name}의 프로세스 잠금이 남아 있습니다 (PID ${pid}). 실행 여부와 ${service.lock}를 확인하세요.`);
       }
-    }
-    const marker = (await run(['show-option', '-t', service.session, '-qv', '@s8-service-root'])).stdout.trim();
-    if (marker !== root) {
-      // 이전 버전에서 직접 띄운 같은 저장소의 서비스 세션도 그대로 인계한다.
-      const cwd = (await run(['display-message', '-p', '-t', `${service.session}:0.0`, '#{pane_current_path}'])).stdout.trim();
-      if (marker || cwd !== root) throw new Error(`${service.session}은 다른 작업 경로의 세션입니다. 자동으로 변경하지 않습니다.`);
-      await run(['set-option', '-t', service.session, '@s8-service-root', root]);
-    }
-    await new Promise(resolve => setTimeout(resolve, 200));
-    if (!await exists()) throw new Error(`${name}가 시작 직후 종료됐습니다. --service 옵션으로 오류를 확인하거나 --no-${name}로 제외하세요.`);
-    results.push({ service: name, session: service.session, reused });
+      if (!current) {
+        // Adopt a live window from another runtime or an older standalone service session.
+        const { stdout } = await run(['list-windows', '-a', '-F', '#{window_id}\t#{window_name}\t#{@s8-window-root}\t#{session_name}\t#{@s8-service-root}\t#{pane_dead}']);
+        const candidate = stdout.trim().split('\n').map(line => line.split('\t')).find(([, windowName, owner, oldSession, legacyRoot, dead]) =>
+          dead !== '1' && ((windowName === name && owner === root) || (oldSession === service.session && legacyRoot === root)));
+        if (candidate) {
+          const [id] = candidate;
+          await run(['link-window', '-s', id, '-t', `${session}:`,
+            ';', 'rename-window', '-t', id, name,
+            ';', 'set-option', '-w', '-t', id, '@s8-window-root', root,
+            ';', 'set-option', '-w', '-t', id, 'remain-on-exit', 'on',
+            ';', 'set-option', '-w', '-t', id, 'automatic-rename', 'off']);
+        } else {
+          const pid = await ownerPid(path.join(root, service.lock));
+          if (pid) throw new Error(alive(pid)
+            ? `${name}은 tmux 밖이나 이전 세션에서 실행 중입니다 (PID ${pid}). 기존 실행을 종료한 뒤 다시 실행하세요.`
+            : `${name}의 종료된 프로세스 잠금이 남아 있습니다. 실행 여부를 확인한 뒤 ${service.lock}를 정리하세요.`);
+        }
+      }
+      const result = await ensureWindow(run, root, session, name, `exec bash ${quote(path.join(root, 'start-pi.sh'))} --service ${name}`);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      if ((await windows(run, session)).find(window => window.id === result.id)?.dead !== false) throw new Error(`${session}:${name}가 시작 직후 종료됐습니다. 해당 창에서 오류를 확인하세요.`);
+      return { service: name, session, window: name, reused: result.reused };
+    }));
   }
   return results;
 }

@@ -17,14 +17,14 @@
 <rect x="80" y="282" width="464" height="92" fill="#fff" stroke="none"/>
 <text x="98" y="310" class="heading">매니저 에이전트</text>
 <text x="98" y="337" class="small">현재 터미널에서 대화</text>
-<text x="98" y="362" class="small">--session 이름 → tmux 유지</text>
+<text x="98" y="362" class="small">s8-main:pi · 자동 접속 없음</text>
 <rect x="568" y="282" width="464" height="92" fill="#fff" stroke="none"/>
 <text x="586" y="310" class="heading">스케줄러</text>
-<text x="586" y="337" class="small">tmux: s8-scheduler</text>
+<text x="586" y="337" class="small">s8-main:scheduler</text>
 <text x="586" y="362" class="small">예약 시각에 Projectman 작업 확인</text>
 <rect x="1056" y="282" width="464" height="92" fill="#fff" stroke="none"/>
 <text x="1074" y="310" class="heading">개발 슈퍼바이저</text>
-<text x="1074" y="337" class="small">tmux: s8-development-supervisor</text>
+<text x="1074" y="337" class="small">s8-main:supervisor</text>
 <text x="1074" y="362" class="small">승인된 작업 조회 · 개발 CLI 실행</text>
 <text x="80" y="405" class="small">자동 시작 제외: --no-scheduler / --no-supervisor   ·   기존 서비스 재사용, 매니저가 끝나도 두 서비스는 유지</text>
 <text x="56" y="478" class="heading">02  개발 작업 흐름</text>

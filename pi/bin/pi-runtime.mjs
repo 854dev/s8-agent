@@ -1,0 +1,28 @@
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { startPiRuntime } from '../lib/pi-runtime.mjs';
+import { moveTelegram, listSessions } from '../lib/managed-sessions.mjs';
+const root = fileURLToPath(new URL('../..', import.meta.url));
+try {
+  if (process.argv[2] === '--sessions') {
+    console.log((await listSessions()).join('\n') || '실행 중인 S8 세션이 없습니다.');
+  } else {
+    let session = 's8-main', telegram = false, scheduler = true, supervisor = true;
+    const args = [];
+    const input = process.argv.slice(2);
+    for (let i = 0; i < input.length; i++) {
+      const arg = input[i];
+      if (arg === '--session') session = `s8-${input[++i] ?? ''}`;
+      else if (arg === '--telegram') telegram = true;
+      else if (arg === '--no-scheduler') scheduler = false;
+      else if (arg === '--no-supervisor') supervisor = false;
+      else if (['--model', '--provider', '--thinking'].includes(arg)) args.push(arg, input[++i]);
+      else args.push(arg);
+    }
+    const result = await startPiRuntime(root, { session, args, scheduler, supervisor });
+    if (telegram) await moveTelegram(path.join(root, '.pi-runtime', `${session}.sock`));
+    console.log(`tmux 세션: ${result.session}`);
+    for (const window of result.windows) console.log(`  ${result.session}:${window}`);
+    console.log(`접속: tmux attach-session -t ${result.session}`);
+  }
+} catch (error) { console.error(`[S8] ${error.message}`); process.exitCode = 1; }

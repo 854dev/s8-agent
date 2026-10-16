@@ -27,7 +27,7 @@ NGINX_BIND_IP=100.120.50.80 docker compose --env-file /dev/null -f infra/nginx/d
 - 실행 명령은 `s8-agent` 루트 기준이다. Nginx IP는 실제 장비의 Tailscale IPv4로 바꾼다.
 - 브라우저 접속: `http://<Tailscale-IP>/s8/terminal`
 - Host 검증 때문에 현재는 Tailscale IP 또는 localhost URL을 사용한다. MagicDNS 이름은 지원하지 않는다.
-- `start-pi.sh --session 이름`은 S8 관리 Pi 실행 세션을 생성·접속한다. `--sessions`는 이 관리 Pi 세션만 표시하며, 웹 터미널의 전체 호스트 세션 목록과 별개다.
+- `start-pi.sh --session 이름`은 S8 런타임 세션을 생성·재사용하고 창 목록만 출력한다. 기본은 `s8-main`이며 `pi`·`scheduler`·`supervisor`·`shell` 창을 가진다. 웹 터미널에서 이 세션을 선택하고 Ctrl+B, W로 창을 전환한다. `--sessions`는 이 관리 Pi 세션만 표시하며, 웹 터미널의 전체 호스트 세션 목록과 별개다.
 - 관리 세션별 대화 기록은 `.pi-runtime/managed/s8-이름/`으로 분리한다. 기존 기록은 자동 이관하지 않는다.
 - `--telegram`은 기존 실행 세션을 재시작하거나 키 입력을 주입하지 않고 로컬 제어 소켓으로 연결 이전을 요청한다. 토큰과 허용 채팅 설정이 기존대로 필요하다.
 - `목록 새로고침`으로 현재 실행 중인 호스트 tmux 세션을 조회한다. 웹 연결은 목록에 존재하는 정확한 세션 이름으로 접속한다. tmux 밖의 프로세스와 다른 사용자·별도 tmux 소켓의 세션은 이 목록에 표시하지 않는다.
