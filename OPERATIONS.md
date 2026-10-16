@@ -1,6 +1,6 @@
 # s8 운영 절차
 
-인프라 기준은 [`INFRASTRUCTURE.md`](INFRASTRUCTURE.md)를 따른다. Pi 실행 외에는 tmux, npm, Docker Compose, curl의 표준 명령을 직접 사용한다.
+인프라 기준은 [`INFRASTRUCTURE.md`](INFRASTRUCTURE.md)를 따른다. Pi 관리 실행은 `start-pi.sh`, 통합 인프라 실행은 `start-infra.sh`를 사용하고, 그 밖에는 tmux, npm, Docker Compose, curl의 표준 명령을 사용한다.
 
 ## 최초 설치와 로그인
 
@@ -116,6 +116,8 @@ curl -fsS http://127.0.0.1:4178/s8/
 ```
 
 ## Docker Compose와 Nginx
+
+`./start-infra.sh`는 `s8-infra` tmux 세션을 만들고 Nginx·KB Browser와 frontend 개발 서버를 시작한다. PHCMS는 별도 실행을 위해 빈 창으로 남긴다. 웹 터미널 세션 목록에서 `s8-infra`를 선택할 수 있다. 기존 세션이 있으면 재시작하지 않고 그대로 유지한다.
 
 로컬 전용 실행:
 

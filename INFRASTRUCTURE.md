@@ -24,7 +24,8 @@ dev_854/
     ├── pi/                   # Pi 버전, 공유 설정, extension, skill
     ├── .pi-runtime/          # Pi 인증정보, 세션, 캐시
     ├── .s8-runtime/          # 로그와 업로드 등 로컬 상태
-    └── start-pi.sh
+    ├── start-pi.sh
+    └── start-infra.sh
 ```
 
 ## 서비스 토폴로지
@@ -88,6 +89,7 @@ NGINX_BIND_IP=100.120.50.80 docker compose -f infra/nginx/docker-compose.yml up 
 - Pi 버전과 프로젝트 동작: `pi/`
 - Pi 장비별 런타임: `.pi-runtime/`
 - Pi 실행: `start-pi.sh`
+- 통합 인프라 실행: `start-infra.sh`
 - tmux: 표준 `tmux` 명령
 - Compose: `infra/nginx/docker-compose.yml`
 - Nginx route: `infra/nginx/conf.d/apps.conf`
@@ -109,5 +111,6 @@ NGINX_BIND_IP=100.120.50.80 docker compose -f infra/nginx/docker-compose.yml up 
 test -f pi/settings.json
 test -f pi/package-lock.json
 bash -n start-pi.sh
+bash -n start-infra.sh
 NGINX_BIND_IP=127.0.0.1 docker compose --env-file /dev/null -f infra/nginx/docker-compose.yml config --quiet
 ```

@@ -98,11 +98,12 @@ PHCMS_API_URL=http://127.0.0.1:8000/api/v2
 
 ## 실행 스크립트
 
-실행 진입점은 `start-pi.sh` 하나다. 경로는 스크립트 위치를 기준으로 계산하므로 다른 디렉터리에서도 실행할 수 있다.
+실행 스크립트는 경로를 스크립트 위치 기준으로 계산하므로 다른 디렉터리에서도 실행할 수 있다.
 
 | 스크립트 | 역할 | 실행 예 |
 | --- | --- | --- |
 | `start-pi.sh` | 매니저 실행 + 스케줄러·개발 감독 기본 시작 | `./start-pi.sh --session manager` |
+| `start-infra.sh` | Nginx·KB Browser, frontend 실행용 `s8-infra` tmux 세션 준비 (PHCMS 창은 비워 둠) | `./start-infra.sh` |
 | `start-pi.sh --service supervisor` | 통합 실행에서 사용하는 개발 감독 진입점. 단독 실행·진단도 지원 | `./start-pi.sh --service supervisor` |
 | `start-pi.sh --service scheduler` | 통합 실행에서 사용하는 예약 데몬 진입점. 단독 실행도 지원 | `./start-pi.sh --service scheduler` |
 
@@ -153,6 +154,7 @@ npm --prefix frontend run preview -- --host 127.0.0.1 --port 4178 --strictPort
 ## 웹 터미널
 
 - `/s8/terminal`은 기본으로 호스트 셸에 접속한다. 세션 선택에서 같은 호스트 사용자·tmux 서버의 PHCMS, S8 스케줄러·개발 감독, Pi 등 모든 실행 세션을 제어한다. Pi 관리 표시가 없어도 접속할 수 있으며, tmux 밖의 서비스는 호스트 셸에서 운영 명령으로 제어한다.
+- `./start-infra.sh`는 `s8-infra` tmux 세션에 Nginx·KB Browser 로그, 별도 실행할 PHCMS용 빈 창, frontend 개발 서버를 준비한다. 웹 터미널 세션 목록에서 `s8-infra`를 선택해 접속한다. `NGINX_BIND_IP`를 지정하지 않으면 Compose의 `.env` 설정을 사용한다.
 - `./start-pi.sh --sessions`로 목록, `./start-pi.sh --session main`으로 생성·재사용한 뒤 창 목록을 출력한다. 접속은 웹 터미널이나 `tmux attach -t s8-main`을 사용한다.
 - `./start-pi.sh --session main --telegram`으로 실행 중인 세션에 Telegram 연결을 이전한다.
 - backend 설치·실행, Tailscale 전용 노출 및 복구는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.
