@@ -117,7 +117,7 @@ curl -fsS http://127.0.0.1:4178/s8/
 
 ## Docker Compose와 Nginx
 
-`./start-infra.sh`는 `s8-infra` tmux 세션을 만들고 Nginx·KB Browser와 frontend 개발 서버를 시작한다. PHCMS는 별도 실행을 위해 빈 창으로 남긴다. 웹 터미널 세션 목록에서 `s8-infra`를 선택할 수 있다. 기존 세션이 있으면 재시작하지 않고 그대로 유지한다.
+`./start-infra.sh`는 `s8-infra` 세션을 재사용하고 빠진 창만 만든다. 기존 창의 작업은 건드리지 않는다. Compose의 Nginx·KB Browser가 모두 실행 중이면 그대로 두고, 누락된 서비스가 있을 때만 `up --build -d`로 보정한다. frontend가 `127.0.0.1:4178/s8/`에서 응답하면 기존 서버를 유지한다. PHCMS 창은 비워 두며, 웹 터미널 세션 목록에서 `s8-infra`를 선택할 수 있다.
 
 로컬 전용 실행:
 
