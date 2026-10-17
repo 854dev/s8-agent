@@ -27,7 +27,7 @@ export async function liveWorkflowEval({ root, baseUrl, managerToken, humanToken
   for (const args of [['init'], ['add', '.'], ['-c', 'user.name=Workflow fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'isolated counter fixture']]) await exec('git', args, { cwd: repo });
   const manager = new ProjectmanClient(baseUrl, managerToken), human = new ProjectmanClient(baseUrl, humanToken);
   const runtime = await smokeRuntime(), policy = await loadDevelopmentPolicy(root);
-  const spec = { repoPath: repo, completionCriteria: ['React + Vite counter, current value aria-label="카운터"', 'Buttons exactly 증가, 감소, 초기화', 'Ask the human about the minimum before writing code; obey the recorded answer on resume', 'Existing independent tests and build pass'], allowedPaths: ['src', 'package-lock.json'], commandNames: ['install', 'test', 'build'], dependsOn: [], timeBudgetMinutes: 8 };
+  const spec = { repoPath: repo, completionCriteria: ['React + Vite counter, current value aria-label="카운터"', 'Buttons exactly 증가, 감소, 초기화', 'Minimum is zero; negative values are not allowed (confirmed before final approval)', 'Existing independent tests and build pass'], allowedPaths: ['src', 'package-lock.json'], commandNames: ['install', 'test', 'build'], dependsOn: [], timeBudgetMinutes: 8 };
   let taskUid;
   let browser;
   const evidence = [];
@@ -51,48 +51,39 @@ export async function liveWorkflowEval({ root, baseUrl, managerToken, humanToken
   };
   try {
     managerSession = await openManagerSession({ root, cwd: repo, directory, modelRuntime: runtime.runtime, model: runtime.model, poll: true });
-    await session('manager-plan', `프로젝트 UID ${projectUid} 아래에 type=task로 작업 한 개를 생성하라. 생성 응답의 uid를 이후 workflow 작업에 사용하라. 리액트 Vite 카운터를 만들어라. 감소 버튼의 최솟값 정책은 사람이 결정해야 하므로, 첫 개발 실행에서는 코드나 명령을 실행하기 전에 반드시 human 질문을 반환해야 한다. 사람이 답한 뒤 새 개발 실행에서 구현한다. 기존 테스트와 빌드 설정이 준비되어 있다. create로 작업을 등록한 뒤 workflow_get으로 revision을 읽고 delegate하라. 위임 spec: ${JSON.stringify(spec)}`);
+    await session('manager-plan', `프로젝트 UID ${projectUid} 아래에 type=task로 작업 한 개를 생성하라. 리액트 Vite 카운터 요청에서 감소 버튼의 최솟값은 아직 정해지지 않았다. 개발자에게 질문을 맡기지 말고 매니저가 착수 전에 request_review(audience=human)로 최솟값을 질문하라. 답변 전 delegate나 preflight_review를 하지 말고 실행하지 않는다. 기존 테스트와 빌드 설정이 준비되어 있다.`);
     const created = await manager.list('task', projectUid);
     check('real manager created exactly one task', created.length === 1);
     taskUid = created[0].uid;
     let current = await manager.getWorkflow(taskUid);
-    check('manager prepared delegation without self-authorization', current.workflow?.spec && !current.workflow.grant && current.state === 'todo');
+    check('manager asked before development or authorization', current.workflow?.review?.pending && current.workflow.review.audience === 'human' && !current.workflow.grant && !current.workflow.run);
+    check('unresolved pre-start work never executes', (await developmentTick({ root, client: manager, policy, allowedRoot: fixture })).length === 0);
+    const reviewId = current.workflow.review.id;
     if (humanLogin) {
       browser = await liveConsoleBrowser({ root, baseUrl, directory, login: humanLogin });
       await browser.open(taskUid);
-      await browser.page.getByRole('checkbox', { name: '위 저장소·파일·명령의 실행 범위를 확인했습니다.' }).check();
-      await browser.operation('authorize', () => browser.page.getByRole('button', { name: '이 범위의 개발 실행 승인' }).click());
-      check('real browser authorized visible execution scope', true);
-    } else await human.workflow(taskUid, { action: 'authorize', expectedRevision: current.workflow.revision, requestId: randomUUID() });
-    const first = await developmentTick({ root, client: manager, policy, allowedRoot: fixture });
-    current = await manager.getWorkflow(taskUid);
-    check('real developer CLI returned a human question', current.state === 'blocked' && current.workflow.review?.pending && current.workflow.review.audience === 'human');
-    const firstRequest = JSON.parse(await readFile(path.join(root, '.s8-runtime/runs', first[0].runId, 'request.json'), 'utf8'));
-    check('question stopped code changes', (await exec('git', ['status', '--porcelain'], { cwd: firstRequest.run.workspace })).stdout.trim() === '');
-    const reviewId = current.workflow.review.id;
-    if (browser) {
-      await browser.page.getByRole('heading', { name: current.workflow.review.question, exact: true }).waitFor();
-      await browser.page.getByLabel('내 답변', { exact: true }).fill('최솟값 0. 음수는 허용하지 않습니다. 기존 승인 범위 안에서 구현하세요.');
+      await browser.page.getByLabel('내 답변', { exact: true }).fill('최솟값 0. 음수는 허용하지 않습니다. 구현 방식은 개발자가 결정하세요.');
       await browser.operation('draft', () => browser.page.getByRole('button', { name: '답변 저장', exact: true }).click());
-      await browser.screenshot('human-review-draft.png');
-      check('real browser displays question and saves draft', true);
+      await browser.screenshot('pre-start-review-draft.png');
     } else await human.workflow(taskUid, { action: 'draft', expectedRevision: current.workflow.revision, requestId: randomUUID(), reviewId, answer: '최솟값 0. 음수는 허용하지 않습니다.' });
     check('draft does not execute development', (await developmentTick({ root, client: manager, policy, allowedRoot: fixture })).length === 0);
     current = await manager.getWorkflow(taskUid);
     if (browser) {
       await browser.page.getByRole('checkbox', { name: '답변과 승인 범위를 확인했습니다.' }).check();
       await browser.operation('decide', () => browser.page.getByRole('button', { name: '답변 확정 · 재개 요청' }).click());
-      await browser.page.getByText('결정 확정 · 재개 대기', { exact: true }).waitFor();
-      check('real browser sends a durable human resume signal', true);
-    } else await human.workflow(taskUid, { action: 'decide', expectedRevision: current.workflow.revision, requestId: randomUUID(), reviewId, decision: 'resume', answer: '최솟값 0. 음수는 허용하지 않습니다. 기존 승인 범위 안에서 구현하세요.' });
-    const beforeFollowup = await developmentTick({ root, client: manager, policy, allowedRoot: fixture });
-    check('human signal waits for manager followup', beforeFollowup.every(item => item.status === 'idle'));
-    current = await awaitManager(fresh => fresh.workflow.followup?.reviewId === reviewId);
-    check('real manager automatically recorded followup bound to decision', current.workflow.followup?.reviewId === reviewId);
-    const resumed = await developmentTick({ root, client: manager, policy, allowedRoot: fixture });
+    } else await human.workflow(taskUid, { action: 'decide', expectedRevision: current.workflow.revision, requestId: randomUUID(), reviewId, decision: 'resume', answer: '최솟값 0. 음수는 허용하지 않습니다. 구현 방식은 개발자가 결정하세요.' });
+    await session('manager-final-plan', `작업 ${taskUid}의 확정 답변을 조회하라. 사용자 결정은 최솟값 0, 음수 금지이며 구현 선택은 개발자에게 위임한다. 추가 질문은 없다. 이 확정 내용을 반영해 최종 spec으로 delegate한 뒤 workflow_get의 revision을 사용해 preflight_review를 기록하라. 검토 메시지에 사용자 결정과 테스트·빌드 계획을 포함한다. 스스로 실행 승인하지 않는다. spec: ${JSON.stringify(spec)}`);
     current = await manager.getWorkflow(taskUid);
-    check('new developer CLI implemented and verified counter', current.state === 'review' && current.workflow.result.status === 'completed' && ['test', 'build'].every(name => current.workflow.result.verification.some(item => item.name === name && item.ok)));
-    check('resume signal bound to actual run', current.workflow.review.resumedRunId === resumed[0].runId);
+    check('manager prepared final delegation without self-authorization', current.state === 'todo' && current.workflow?.spec && !current.workflow.grant);
+    check('manager recorded resolved decisions on the work', Boolean((await manager.get(taskUid)).detail?.attributes.s8Preflight));
+    if (browser) {
+      await browser.page.getByRole('checkbox', { name: '위 저장소·파일·명령의 실행 범위를 확인했습니다.' }).check();
+      await browser.operation('authorize', () => browser.page.getByRole('button', { name: '이 범위의 개발 실행 승인' }).click());
+    } else await human.workflow(taskUid, { action: 'authorize', expectedRevision: current.workflow.revision, requestId: randomUUID() });
+    const first = await developmentTick({ root, client: manager, policy, allowedRoot: fixture });
+    current = await manager.getWorkflow(taskUid);
+    check('approved developer implemented and verified without asking', current.state === 'review' && !current.workflow.review?.pending && current.workflow.result.status === 'completed' && ['test', 'build'].every(name => current.workflow.result.verification.some(item => item.name === name && item.ok)));
+    const firstRequest = JSON.parse(await readFile(path.join(root, '.s8-runtime/runs', first[0].runId, 'request.json'), 'utf8'));
     current = await awaitManager(fresh => Boolean(fresh.workflow.managerReview?.message));
     check('real manager automatically reviewed developer evidence', current.workflow.managerReview?.message);
     if (browser) {
@@ -108,7 +99,7 @@ export async function liveWorkflowEval({ root, baseUrl, managerToken, humanToken
     managerSession = undefined;
     const benchmark = await parallelWorkflowEval({ root, directory, repo, fixture, manager, human, projectUid, runtime, policy, systemPrompt: system });
     check('one manager delegated and collected two real parallel developers', benchmark.ok);
-    const summary = { ok: true, scenario: 'real-server-real-model-human-fixture-resume', managerSessionId, humanDecision: humanLogin ? 'automated Chromium clicks by authenticated isolated human fixture' : 'authenticated isolated human fixture API', directory, taskUid, firstRunId: first[0].runId, resumedRunId: resumed[0].runId, worktree: firstRequest.run.workspace, benchmark, evidence };
+    const summary = { ok: true, scenario: 'manager-preflight-approved-autonomous-development', managerSessionId, humanDecision: humanLogin ? 'automated Chromium clicks by authenticated isolated human fixture' : 'authenticated isolated human fixture API', directory, taskUid, firstRunId: first[0].runId, worktree: firstRequest.run.workspace, benchmark, evidence };
     await saveJson(path.join(directory, 'summary.json'), summary); return summary;
   } catch (error) { await saveJson(path.join(directory, 'summary.json'), { ok: false, directory, taskUid, evidence, failure: evidence.at(-1)?.name ?? 'Model or server failure' }); throw error; }
   finally {

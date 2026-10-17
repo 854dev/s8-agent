@@ -117,7 +117,7 @@ export class Gateway {
     }));
   }
   menuMarkup() {
-    return { keyboard: [['상태', '중단'], ['배치'], ['새 대화', '모델'], ['재시작', '메뉴', '도움말']], resize_keyboard: true, is_persistent: true };
+    return { keyboard: [['상태', '중단'], ['배치'], ['새 대화', '모델'], ['재시작', '전체 재시작'], ['메뉴', '도움말']], resize_keyboard: true, is_persistent: true };
   }
   showMenu() { return this.send('s8 메뉴', this.menuMarkup()); }
   command(type, fields = {}) {
@@ -216,7 +216,7 @@ export class Gateway {
   async incoming(message) {
     const text = message.text.trim();
     if (!text) return;
-    const action = ({ '상태': '/status', '중단': '/abort', '새 대화': '/new', '재시작': '/restart', '도움말': '/help', '모델': '/model', '배치': '/jobs' })[text]
+    const action = ({ '상태': '/status', '중단': '/abort', '새 대화': '/new', '재시작': '/restart', '전체 재시작': '/restart all', '도움말': '/help', '모델': '/model', '배치': '/jobs' })[text]
       ?? (this.models?.find(model => model.name === text) ? `model:${this.models.find(model => model.name === text).id}` : text);
     try {
       const scheduleCommand = /^\/jobs(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$/.exec(action);
@@ -235,6 +235,7 @@ export class Gateway {
         '/new - 새 대화',
         '/model - 모델 선택',
         '/restart - Pi 재시작',
+        '/restart all - 인프라·Pi·스케줄러·슈퍼바이저 전체 재시작',
         '/jobs - 배치 상태·중단 (stop ID)',
         '/help - 이 도움말',
       ].join('\n'), this.menuMarkup());
@@ -263,10 +264,14 @@ export class Gateway {
         const result = await this.command('set_model', { model: action.slice(6) });
         return await this.send(result?.ok ? `모델을 ${result.name}(으)로 변경했습니다.` : '모델을 변경하지 못했습니다.');
       }
-      if (action === '/restart') {
+      const restart = /^\/restart(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$/.exec(action);
+      if (restart) {
+        const scope = (restart[1] ?? '').trim();
+        if (scope && scope !== 'all') return await this.send('사용법: /restart 또는 /restart all');
         if (this.busy) return await this.send('진행 중입니다. 먼저 중단한 뒤 재시작하세요.');
-        await this.send('Pi를 재시작합니다.');
-        const result = await this.command('restart');
+        await this.send(scope === 'all' ? '전체 재시작 요청을 접수했습니다. 인프라와 Pi·스케줄러·슈퍼바이저를 순서대로 재시작합니다. 웹 연결이 잠시 끊길 수 있으며 완료 결과는 Telegram으로 알려드립니다.' : 'Pi를 재시작합니다.');
+        const result = await this.command(scope === 'all' ? 'restart_all' : 'restart');
+        if (result?.reason === 'busy') return await this.send('진행 중입니다. 먼저 중단한 뒤 재시작하세요.');
         if (!result?.ok) return await this.send('자동 재시작이 설정되지 않았습니다.');
         return;
       }

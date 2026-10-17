@@ -11,7 +11,7 @@ export const WORK_PROMPT = `지정한 Projectman 워크 또는 서브워크 1건
 마지막 응답은 다른 문장이나 코드 블록 없이 JSON 하나로 작성하라:
 {"status":"continue","summary":"수행 내용·남은 내용·다음 단계"}
 status 값은 completed, continue, blocked 중 하나다.
-완료가 명확할 때만 completed, 다음 실행에서 이어갈 수 있으면 continue, 사용자 판단·승인이 필요하면 blocked를 사용한다.`;
+완료가 명확할 때만 completed, 다음 실행에서 이어갈 수 있으면 continue를 사용한다. 승인 범위 안의 결정은 기존 코드·테스트·확정 요구사항을 근거로 스스로 내리고 질문하지 않는다. blocked는 실제 접근·실행 장애로 더 진행할 수 없을 때만 사용하고 질문 대신 사실과 시도한 조치를 보고한다.`;
 
 type Notice = { stage: 'start' | 'finish'; uid: string; message: string };
 type Options = {

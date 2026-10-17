@@ -2,6 +2,7 @@ import { readFile, appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import managerExtension from '../extensions/manager.ts';
+import { MANAGER_TOOLS } from './manager-launch.mjs';
 import { visible } from '../../apps/telegram-gateway/gateway.mjs';
 
 /** Persistent logical manager using the same tools/guards as the default Pi entrypoint. */
@@ -13,7 +14,7 @@ export async function openManagerSession({ root, cwd, directory, modelRuntime, m
   await loader.reload();
   if (loader.getExtensions().errors.length) throw new Error('Manager extension could not load');
   const sessionManager = persist ? SessionManager.continueRecent(cwd, path.join(root, '.pi-runtime/sessions/manager')) : SessionManager.inMemory(cwd);
-  const { session } = await createAgentSession({ cwd, agentDir: directory, modelRuntime, model, thinkingLevel: 'low', resourceLoader: loader, settingsManager, sessionManager, tools: ['projectman', 'kb', 'scheduler'] });
+  const { session } = await createAgentSession({ cwd, agentDir: directory, modelRuntime, model, thinkingLevel: 'low', resourceLoader: loader, settingsManager, sessionManager, tools: MANAGER_TOOLS });
   let writes = Promise.resolve(), writeError;
   const record = event => { writes = writes.then(() => appendFile(path.join(directory, 'manager.events.jsonl'), `${JSON.stringify(event, (_key, value) => typeof value === 'string' ? visible(value) : value)}\n`, { mode: 0o600 })).catch(error => { writeError = error; void session.abort(); }); };
   record({ type: 'manager_session', sessionId: session.sessionId, systemPrompt, tools: session.getActiveToolNames() });

@@ -81,6 +81,19 @@ test('another runtime links the same service windows without launching duplicate
   assert.deepEqual((await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').sort(), ['scheduler', 'supervisor']);
 });
 
+test('restart replaces shared service processes in their existing linked windows', async t => {
+  const f = await fixture(t);
+  await startPiServices(f.root, { run: f.run });
+  const before = (await f.run(['list-windows', '-t', 's8-main', '-F', '#{window_name}\t#{window_id}\t#{pane_pid}'])).stdout.trim().split('\n').map(line => line.split('\t'));
+  await startPiServices(f.root, { run: f.run, restart: true });
+  const after = (await f.run(['list-windows', '-t', 's8-main', '-F', '#{window_name}\t#{window_id}\t#{pane_pid}'])).stdout.trim().split('\n').map(line => line.split('\t'));
+  for (const name of ['scheduler', 'supervisor']) {
+    const old = before.find(row => row[0] === name), fresh = after.find(row => row[0] === name);
+    assert.equal(fresh[1], old[1]); assert.notEqual(fresh[2], old[2]);
+  }
+  assert.equal((await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').length, 4);
+});
+
 test('legacy service sessions are linked without restarting their process', async t => {
   const f = await fixture(t);
   await f.run(['new-session', '-d', '-s', 's8-scheduler', '-c', f.root, 'sleep 60']);

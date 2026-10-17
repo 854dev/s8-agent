@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# S8 관리 에이전트와 스케줄러·개발 감독을 기본으로 실행한다. 기본 도구는 Projectman·KB·Scheduler로 제한한다.
+# S8 범용 매니저와 스케줄러·개발 감독을 기본으로 실행한다. 일반 파일·Bash 작업과 Projectman 개발 위임을 지원한다.
 # 사용 예: ./start-pi.sh / ./start-pi.sh --continue / ./start-pi.sh --session manager
-# --telegram은 명시한 경우에만 Telegram을 연결한다. --help로 사용법을 확인한다.
+# 기본으로 Telegram을 연결하며 마지막 실행 세션이 연결을 가져간다. --no-telegram으로 단독 실행한다.
 # 루트 .env의 연결 설정을 자식 프로세스에 전달하며 인증 값은 출력하지 않는다.
 # 모델 인증·대화는 .pi-runtime에 보관한다. 처음 실행하면 Pi에서 /login을 수행한다.
 # Pi와 두 서비스는 하나의 tmux 세션의 별도 창에서 유지된다. --no-scheduler / --no-supervisor로 자동 시작을 제외한다.
@@ -34,8 +34,11 @@ fi
 # 서비스 제어 옵션은 Pi에 넘기지 않고 여기서 소비한다. 옵션 위치와 관계없이 처리한다.
 service_options=()
 manager_options=()
+telegram=true
 for option in "$@"; do
     case "$option" in
+        --telegram) telegram=true ;;
+        --no-telegram) telegram=false ;;
         --no-scheduler) service_options+=(--no-scheduler) ;;
         --no-supervisor) service_options+=(--no-supervisor) ;;
         *) manager_options+=("$option") ;;
@@ -47,14 +50,15 @@ if [[ "${1:-}" == --manager ]]; then shift; fi
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
     printf '%s\n' \
         '사용법: ./start-pi.sh [Pi 옵션]' \
-        '  (인자 없음)      s8-main tmux 세션에 Pi·스케줄러·개발 감독 창 생성 후 목록 출력' \
+        '  (인자 없음)      s8-main의 Pi·스케줄러·개발 감독 재시작 및 Telegram 연결' \
         '  --no-scheduler   스케줄러 자동 시작 제외' \
         '  --no-supervisor  개발 슈퍼바이저 자동 시작 제외' \
         '  --service 종류   scheduler 또는 supervisor만 전경 실행 (감독 --check 지원)' \
-        '  --telegram       Telegram 연동 실행 (Pi 옵션과 함께 사용 가능)' \
-        '  --manager        기본 관리 역할의 별칭 (Projectman·KB·예약)' \
+        '  --telegram       Telegram 연결 (기본값, 마지막 실행 세션이 연결을 가져감)' \
+        '  --no-telegram    Telegram 없이 단독 실행' \
+        '  --manager        기본 매니저의 별칭 (일반 대화·파일·Bash·Projectman·KB·예약)' \
         '  --sessions       실행 중인 S8 tmux 세션 목록' \
-        '  --session 이름   s8-이름 세션 생성·재사용 후 목록 출력 (자동 접속 없음)' \
+        '  --session 이름   s8-이름 세션 생성·재시작 후 목록 출력 (자동 접속 없음)' \
         '  --help, -h       이 도움말 표시' \
         '  관리 역할 옵션: --continue, --print, --no-session, --version, --model, --provider, --thinking' \
         '  Telegram 인증: TELEGRAM_BOT_TOKEN (환경변수)' \
@@ -78,7 +82,9 @@ else
         case "$option" in --version|--print) runtime=false ;; esac
     done
     if $runtime; then
-        exec node "$AGENT_ROOT/pi/bin/pi-runtime.mjs" ${service_options[@]+"${service_options[@]}"} "$@"
+        telegram_option=--telegram
+        $telegram || telegram_option=--no-telegram
+        exec node "$AGENT_ROOT/pi/bin/pi-runtime.mjs" "$telegram_option" ${service_options[@]+"${service_options[@]}"} "$@"
     fi
 fi
 # 연결·KB 경로 설정을 로드한다. 내용이나 인증 값을 로그로 출력하지 않는다.
@@ -97,12 +103,6 @@ KNOWLEDGE_BASE_ROOT="$(cd -- "$KNOWLEDGE_BASE_ROOT" && pwd -P)"
 PI_CONFIG_ROOT="$AGENT_ROOT/pi"
 PI_CODING_AGENT_DIR="$AGENT_ROOT/.pi-runtime"
 PI_BINARY="$PI_CONFIG_ROOT/node_modules/.bin/pi"
-TELEGRAM_EXTENSION=''
-if [[ "${1:-}" == --telegram ]]; then
-    TELEGRAM_EXTENSION="$PI_CONFIG_ROOT/extensions/telegram.mjs"
-    shift
-fi
-
 [ -x "$PI_BINARY" ] || {
     printf '%s\n' '오류: Pi가 설치되지 않았습니다. npm ci --ignore-scripts --prefix pi를 실행하세요.' >&2
     exit 1
@@ -142,6 +142,15 @@ node "$PI_CONFIG_ROOT/bin/manager-options.mjs" "$@"
 # 자동 발견을 끄고 검토된 관리 확장만 로드한다.
 # 재시작 요청 파일이 생기면 같은 실행 옵션과 최근 세션으로 다시 실행한다.
 restart_args=()
+stop_pi() {
+    trap - INT TERM HUP
+    if [[ -n "${pi_pid:-}" ]]; then
+        kill -TERM "$pi_pid" 2>/dev/null || true
+        wait "$pi_pid" 2>/dev/null || true
+    fi
+    exit 0
+}
+trap stop_pi INT TERM HUP
 while true; do
     pi_args=(
         --no-extensions --no-skills --no-prompt-templates --no-context-files
@@ -150,13 +159,14 @@ while true; do
     if $managed; then
         managed_name="$(tmux display-message -p '#S')"
         [[ "$managed_name" =~ ^s8-[A-Za-z0-9_-]{1,40}$ ]] || { echo '관리 세션에서만 실행할 수 있습니다.' >&2; exit 2; }
-        pi_args+=(--session-dir "$PI_CODING_AGENT_DIR/managed/$managed_name" --extension "$PI_CONFIG_ROOT/extensions/managed-session.mjs")
-    elif [[ -n "$TELEGRAM_EXTENSION" ]]; then
-        pi_args+=(--extension "$TELEGRAM_EXTENSION")
+        pi_args+=(--session-dir "$PI_CODING_AGENT_DIR/managed/$managed_name")
+        if $telegram; then pi_args+=(--extension "$PI_CONFIG_ROOT/extensions/managed-session.mjs"); fi
+    elif $telegram; then
+        pi_args+=(--extension "$PI_CONFIG_ROOT/extensions/telegram.mjs")
     fi
     pi_args+=(
         --system-prompt "$AGENT_ROOT/agents/manager/SYSTEM.md"
-        --tools projectman,kb,scheduler
+        --tools projectman,kb,scheduler,read,bash,edit,write,grep,find,ls
     )
     pi_args+=(${restart_args[@]+"${restart_args[@]}"})
     if (($# > 0)); then

@@ -1,16 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, symlink, link, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, symlink, link, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { managerArgs } from '../lib/manager-launch.mjs';
 import { managerKb } from '../lib/manager-kb.mjs';
-import manager, { MANAGER_TOOLS } from '../extensions/manager.ts';
+import manager, { MANAGER_TOOLS, MANAGER_EXTENSION_TOOLS } from '../extensions/manager.ts';
+import { openManagerSession } from '../lib/manager-session.mjs';
 
 test('manager launch disables discovery and rejects permission/session/file injection', () => {
   const args = managerArgs('/s8', ['--model', 'fixture', '--continue']);
   for (const flag of ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-context-files']) assert.ok(args.includes(flag));
-  assert.equal(args[args.indexOf('--tools') + 1], 'projectman,kb,scheduler');
+  assert.deepEqual(args[args.indexOf('--tools') + 1].split(','), MANAGER_TOOLS);
   for (const input of [['--tools', 'bash'], ['-e', 'evil.ts'], ['--session', 'old.jsonl'], ['@/tmp/file'], ['--model', '--extension'], ['--', 'prompt']]) assert.throws(() => managerArgs('/s8', input), /Unsupported/);
 });
 
@@ -33,7 +34,7 @@ test('KB only reads Markdown inside root and rejects hidden, symlink, hardlink a
   await assert.rejects(managerKb(path.join(root, 'missing')).search('query'));
 });
 
-test('manager exposes three tools, omits autopilot, blocks shell and rejects shell schedule mutations', async t => {
+test('manager enables general tools, omits autopilot and rejects shell schedule mutations', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'manager-role-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const previous = process.env.S8_PI_CONFIG_ROOT;
@@ -42,15 +43,14 @@ test('manager exposes three tools, omits autopilot, blocks shell and rejects she
   const tools = new Map(), handlers = new Map(), commands = [];
   let active;
   manager({ on(name, fn) { handlers.set(name, [...(handlers.get(name) ?? []), fn]); }, registerTool(tool) { tools.set(tool.name, tool); }, registerCommand(name) { commands.push(name); }, setActiveTools(names) { active = names; } });
-  assert.deepEqual([...tools.keys()].sort(), [...MANAGER_TOOLS].sort());
+  assert.deepEqual([...tools.keys()].sort(), [...MANAGER_EXTENSION_TOOLS].sort());
   assert.ok(!commands.includes('autopilot'));
   const guard = handlers.get('tool_call').at(-1);
-  assert.equal(guard({ toolName: 'bash' }).block, true);
-  assert.equal(guard({ toolName: 'write' }).block, true);
-  assert.equal(guard({ toolName: 'projectman' }), undefined);
+  for (const toolName of MANAGER_TOOLS) assert.equal(guard({ toolName }), undefined);
+  assert.equal(guard({ toolName: 'unknown_tool' }).block, true);
   for (const handler of handlers.get('session_start')) handler({}, { sessionManager: { getBranch: () => [] } });
   assert.deepEqual(active, MANAGER_TOOLS);
-  assert.equal((await handlers.get('user_bash')[0]()).result.exitCode, 1);
+  assert.equal(handlers.has('user_bash'), false);
   await assert.rejects(tools.get('projectman').execute('test', { action: 'intake_source', sourcePath: '/tmp/private.md' }), /cannot read source files/);
   const execute = args => tools.get('scheduler').execute('test', args, undefined, undefined, { hasUI: true, ui: { confirm: async () => true } });
   await assert.rejects(execute({ action: 'create', id: 'evil', kind: 'shell', script: 'echo evil' }), /only permits/);
@@ -74,7 +74,25 @@ test('installed Pi SDK loads the manager extension without discovered packages o
   const loaded = loader.getExtensions();
   assert.deepEqual(loaded.errors, []);
   assert.equal(loaded.extensions.length, 1);
-  assert.deepEqual([...loaded.extensions[0].tools.keys()].sort(), [...MANAGER_TOOLS].sort());
+  assert.deepEqual([...loaded.extensions[0].tools.keys()].sort(), [...MANAGER_EXTENSION_TOOLS].sort());
+});
+
+test('persistent manager SDK session exposes general tools alongside Projectman', async t => {
+  const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'manager-general-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const previous = process.env.S8_PI_CONFIG_ROOT;
+  process.env.S8_PI_CONFIG_ROOT = path.join(root, 'pi');
+  t.after(() => { if (previous === undefined) delete process.env.S8_PI_CONFIG_ROOT; else process.env.S8_PI_CONFIG_ROOT = previous; });
+  const directory = path.join(root, 'session');
+  const modelRuntime = await ModelRuntime.create({ authPath: path.join(root, 'auth.json'), modelsPath: path.join(root, 'models.json') });
+  const model = { id: 'fixture', name: 'Fixture', provider: 'fixture', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32768, maxTokens: 1024 };
+  const session = await openManagerSession({ root: new URL('../..', import.meta.url).pathname, cwd: root, directory, modelRuntime, model, poll: false });
+  await session.close();
+  const [record] = (await readFile(path.join(directory, 'manager.events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.deepEqual([...record.tools].sort(), [...MANAGER_TOOLS].sort());
+  assert.match(record.systemPrompt, /일반 대화는 도구 없이 바로 답한다/);
+  assert.match(record.systemPrompt, /기능 구현.*Projectman 작업으로 위임한다/);
 });
 
 test('KB CRUD requires policy and current document version; protected paths remain denied', async t => {

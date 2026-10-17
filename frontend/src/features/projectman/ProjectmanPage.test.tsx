@@ -1,7 +1,7 @@
 import { render, screen, waitFor, cleanup, act, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, test, vi } from 'vitest'
-import ProjectmanPage, { reviewLabel } from './ProjectmanPage'
+import ProjectmanPage, { reviewLabel, responsibleRole } from './ProjectmanPage'
 import type { Detail } from './api'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); history.replaceState(null, '', '/') })
@@ -166,4 +166,36 @@ test('workspace links restore scope after refresh and browser navigation', async
   act(() => { history.pushState(null, '', '/s8/?workspace=ws-b'); window.dispatchEvent(new PopStateEvent('popstate')) })
   expect(await screen.findByRole('heading', { name: '팀 B' })).toBeInTheDocument()
   expect(within(screen.getByLabelText('프로젝트별 작업 보드')).queryByText('카운터 화면')).not.toBeInTheDocument()
+})
+
+
+test('pre-start work belongs to manager and cannot be authorized before review', async () => {
+  const { detail } = fixture()
+  detail.execution.state = 'todo'
+  detail.item.detail!.attributes.state = 'todo'
+  delete detail.execution.workflow!.review
+  expect(responsibleRole(detail.item)).toBe('manager')
+  render(<ProjectmanPage />)
+  expect(await screen.findByRole('heading', { name: '일 시작 전 · 매니저 검토' })).toBeInTheDocument()
+  expect(screen.getByText('매니저 사전 검토가 끝나야 최종 승인할 수 있습니다.')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '이 범위의 개발 실행 승인' })).not.toBeInTheDocument()
+})
+
+test('reviewed work displays resolved decisions and allows explicit final approval', async () => {
+  const { detail, operations } = fixture()
+  detail.execution.state = 'todo'
+  detail.execution.preflightReviewed = true
+  detail.item.detail!.attributes.state = 'todo'
+  delete detail.execution.workflow!.review
+  detail.execution.workflow!.specHash = 'scope-1'
+  detail.item.detail!.attributes.s8Preflight = { status: 'reviewed', specHash: 'scope-1', summary: '사용자 확정: 최솟값 0. 구현 방식은 개발자가 결정.' }
+  expect(responsibleRole(detail.item)).toBe('human')
+  render(<ProjectmanPage />)
+  const button = await screen.findByRole('button', { name: '이 범위의 개발 실행 승인' })
+  expect(button).toBeDisabled()
+  expect(screen.getByText('사용자 확정: 최솟값 0. 구현 방식은 개발자가 결정.')).toBeInTheDocument()
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('checkbox', { name: '위 저장소·파일·명령의 실행 범위를 확인했습니다.' }))
+  await user.click(button)
+  await waitFor(() => expect(operations[0]?.action).toBe('authorize'))
 })

@@ -4,14 +4,18 @@ import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { preflightFingerprint } from '../lib/projectman-preflight.mjs';
 import { createProjectmanConsole } from '../lib/projectman-console.mjs';
 
-async function fixture(t, { capabilities = async () => ({ workflowVersion: 1, actorType: 'human' }) } = {}) {
+async function fixture(t, { capabilities = async () => ({ workflowVersion: 1, actorType: 'human' }), reviewed = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-console-'));
   const operations = [];
+  const workflow = { revision: 2, specHash: 'scope', spec: { allowedPaths: ['src'] } };
+  const item = { uid: 'task-1', title: 'Counter', detail: { text: 'Minimum zero', attributes: {} } };
+  if (reviewed) item.detail.attributes.s8Preflight = { status: 'reviewed', specHash: workflow.specHash, fingerprint: preflightFingerprint(item, workflow), summary: 'Resolved scope' };
   const server = createProjectmanConsole({ root, authFactory: () => ({ login: async () => ({ accessToken: 'fixture.user.token', refreshToken: 'fixture.refresh.token' }) }), clientFactory: token => {
     assert.equal(token, 'fixture.user.token');
-    return { capabilities, list: async () => [], workflow: async (uid, input) => { operations.push({ uid, input }); if (input.expectedRevision === 0) throw new Error('PH-CMS request failed (HTTP 409)'); return { uid, state: 'ready' }; } };
+    return { capabilities, get: async () => item, getWorkflow: async () => ({ state: 'todo', workflow }), list: async () => [], workflow: async (uid, input) => { operations.push({ uid, input }); if (input.expectedRevision === 0) throw new Error('PH-CMS request failed (HTTP 409)'); return { uid, state: 'ready' }; } };
   } });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(root, { recursive: true, force: true }); });
@@ -54,3 +58,13 @@ test('expired sessions and agent-role JWTs cannot read tasks or submit human dec
     assert.equal(operations.length, 0)
   }
 })
+
+
+test('console final authorization requires the current manager preflight', async t => {
+  for (const reviewed of [false, true]) {
+    const { base, headers, operations } = await fixture(t, { reviewed });
+    const response = await fetch(`${base}/api/projectman/items/task-1/workflow`, { method: 'POST', headers, body: JSON.stringify({ action: 'authorize', expectedRevision: 2 }) });
+    assert.equal(response.status, reviewed ? 200 : 409);
+    assert.equal(operations.length, reviewed ? 1 : 0);
+  }
+});

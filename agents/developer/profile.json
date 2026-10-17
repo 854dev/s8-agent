@@ -4,6 +4,6 @@
   "readOnlyTools": ["read", "grep", "find", "ls"],
   "writeExecutionEnabled": true,
   "workerSystemPrompt": "WORKER_SYSTEM.md",
-  "workerTools": ["workspace", "command", "request_decision", "finish"],
+  "workerTools": ["workspace", "command", "finish"],
   "policy": "policy.json"
 }

@@ -108,7 +108,7 @@ test('Telegram keyboard buttons invoke the matching Pi actions and model selecti
   assert.ok(sent.some(item => item.text.includes('토큰 23')));
   await session.incoming(privateMessage(123, '/help'));
   const help = sent.find(item => item.text.startsWith('명령어:'));
-  assert.deepEqual(help.text.match(/^\/\w+/gm), ['/status', '/abort', '/new', '/model', '/restart', '/jobs', '/help']);
+  assert.deepEqual(help.text.match(/^\/\w+/gm), ['/status', '/abort', '/new', '/model', '/restart', '/restart', '/jobs', '/help']);
   assert.equal(help.reply_markup.is_persistent, true);
   await session.incoming(privateMessage(123, '모델'));
   assert.deepEqual(sent.find(item => item.text === '모델을 선택하세요.').reply_markup.keyboard[0], ['Provider · Model']);
@@ -246,4 +246,23 @@ test('outbound secrets are redacted and long unicode replies split safely', asyn
   assert.equal([...sent[1].text].length, 500);
   assert.equal(sent[0].message_thread_id, 5);
   session.stop();
+});
+
+
+test('restart all uses a dedicated controller command and rejects invalid or busy requests', async t => {
+  const { sent, fetchImpl } = transport();
+  const calls = [];
+  const session = new Gateway({ token: 'fake', chat: 123, pi: fake().pi, fetchImpl,
+    commandImpl: async (type, fields) => { calls.push({ type, ...fields }); return { ok: true }; },
+  });
+  t.after(() => session.stop());
+  for (const text of ['/restart all', '/restart@my_bot all', '전체 재시작']) await session.incoming(privateMessage(123, text));
+  assert.deepEqual(calls.map(call => call.type), ['restart_all', 'restart_all', 'restart_all']);
+  assert.ok(sent.some(item => item.text.includes('전체 재시작 요청을 접수')));
+  await session.incoming(privateMessage(123, '/restart all extra'));
+  assert.match(sent.at(-1).text, /사용법/);
+  session.busy = true;
+  await session.incoming(privateMessage(123, '/restart all'));
+  assert.match(sent.at(-1).text, /먼저 중단/);
+  assert.equal(calls.length, 3);
 });

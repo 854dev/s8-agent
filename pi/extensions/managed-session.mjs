@@ -5,7 +5,7 @@ import path from 'node:path';
 import { attach } from './telegram.mjs';
 
 export default function (pi) {
-  const activate = attach(pi, { autoStart: false });
+  const activate = attach(pi, { autoStart: true });
   let server, socket;
   const stop = async () => {
     if (!server) return;
@@ -27,7 +27,7 @@ export default function (pi) {
       client.once('data', data => {
         try {
           if (data.toString() !== 'telegram') throw new Error('Unknown command');
-          activate();
+          activate({ force: false });
           client.end('ok');
         } catch { client.end('error'); }
       });

@@ -2,6 +2,14 @@
 
 인프라 기준은 [`INFRASTRUCTURE.md`](INFRASTRUCTURE.md)를 따른다. Pi 관리 실행은 `start-pi.sh`, 통합 인프라 실행은 `start-infra.sh`를 사용하고, 그 밖에는 tmux, npm, Docker Compose, curl의 표준 명령을 사용한다.
 
+## Telegram 전체 재시작
+
+- 업데이트된 코드를 받은 후 기존 `/restart`로 새 명령을 로드한다.
+- `/restart`는 현재 Pi만 재시작한다. `/restart all` 또는 `전체 재시작` 버튼은 공유 실행기 정리 → 인프라 재시작 → 준비 확인 → 현재 Pi·스케줄러·슈퍼바이저 재시작 순서로 실행한다.
+- Telegram 허용 채팅 정책을 그대로 적용하며 모델 호출이나 추가 셸 명령을 받지 않는다. 작업 중이면 `/abort` 후 실행한다.
+- 제어 프로세스는 Pi와 웹 터미널이 종료돼도 계속 실행한다. 원래 채팅과 토픽으로 결과를 보내고, `.s8-runtime/runtime-restarts/실행ID/`에 단계와 결과를 저장한다. 토큰은 실행 요청 파일에 저장하지 않는다.
+- 인프라 준비 확인에 실패하면 기존 Telegram Pi를 유지해 결과 확인과 `/restart all` 재시도를 할 수 있다. 진행 중인 전체 재시작이 있으면 중복 실행하지 않는다. 이 명령은 git pull이나 의존성 설치를 수행하지 않는다.
+
 ## 최초 설치와 로그인
 
 ```bash
@@ -71,7 +79,7 @@ Pi 창이 열리면 `/login`을 실행한다. credential과 세션은 `.pi-runti
 npm start --prefix apps/terminal-gateway
 ```
 
-- 기존 세션과 서비스 창은 재사용하고 접속 없이 목록만 출력하며 `--telegram`은 그 세션으로 polling 소유권을 이전한다.
+- 선택한 세션의 Pi와 공유 스케줄러·개발 감독을 같은 창에서 재시작하고 접속 없이 목록만 출력한다. 기본으로 그 세션이 Telegram polling 소유권을 가져온다. `--no-telegram`은 Telegram 없이 실행하며 다른 세션의 연결을 가져오지 않는다. 재시작 제어는 별도 프로세스에서 수행하므로 호출한 Pi가 종료돼도 계속 진행한다.
 - 웹에서는 `/s8/terminal`이 기본으로 호스트 셸 `s8-host-shell`에 연결된다. S8 Pi 세션도 선택할 수 있다.
 - `셸 열기`는 고정 셸을 생성·재사용한다. 브라우저 연결 해제는 셸을 종료하지 않는다. 모바일 입력은 보조 키 버튼을 사용한다.
 - 설치, 네트워크 경계와 복구 절차는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.

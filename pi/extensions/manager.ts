@@ -4,11 +4,14 @@ import projectman from './projectman.ts';
 import { registerScheduler } from './scheduler.ts';
 import { managerKb } from '../lib/manager-kb.mjs';
 import { projectmanFromEnv } from '../lib/projectman-client.ts';
+import { hasReviewedPreflight } from '../lib/projectman-preflight.mjs';
+import { MANAGER_TOOLS } from '../lib/manager-launch.mjs';
 
-export const MANAGER_TOOLS = ['projectman', 'kb', 'scheduler'];
+export { MANAGER_TOOLS };
+export const MANAGER_EXTENSION_TOOLS = ['projectman', 'kb', 'scheduler'];
 export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
   const libraries = new Map<string, ReturnType<typeof managerKb>>();
-  // Omit /autopilot: manager cannot directly start child processes.
+  // Development runs stay with the supervisor; general shell work uses bash.
   projectman(new Proxy(pi, { get(target, key) {
     if (key === 'registerTool') return tool => target.registerTool({ ...tool, async execute(id, args, ...rest) {
       if (args.action === 'intake_source' && args.sourcePath !== undefined) throw new Error('Manager cannot read source files; capture a user message instead');
@@ -40,7 +43,6 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
   });
   pi.on('session_start', () => pi.setActiveTools(MANAGER_TOOLS));
   pi.on('tool_call', event => MANAGER_TOOLS.includes(event.toolName) ? undefined : { block: true, reason: 'Manager role does not permit this tool' });
-  pi.on('user_bash', async () => ({ result: { output: 'Manager role does not permit shell execution', exitCode: 1, cancelled: false, truncated: false } }));
   let timer: ReturnType<typeof setInterval> | undefined;
   const seen = new Set<string>();
   pi.on('session_start', (_event, ctx) => {
@@ -57,13 +59,14 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
           const workflow = item.detail?.attributes.workflow as any;
           if (!workflow) continue;
           const key = `${item.uid}:${workflow.revision}`;
+          const needsPreflight = ['todo', 'ready'].includes(String(item.detail?.attributes.state)) && !hasReviewedPreflight(item, workflow);
           const needsReview = item.detail?.attributes.state === 'review' && !workflow.managerReview;
           const needsFollowup = item.detail?.attributes.state === 'ready' && workflow.review?.decision === 'resume' && workflow.followup?.reviewId !== workflow.review.id;
           const humanQuestion = workflow.review?.pending;
-          if (!seen.has(key) && (needsReview || needsFollowup || humanQuestion)) {
+          if (!seen.has(key) && (needsPreflight || needsReview || needsFollowup || humanQuestion)) {
             seen.add(key);
             if (seen.size > 1000) seen.delete(seen.values().next().value!);
-            pi.sendMessage({ customType: 'projectman-update', content: `Projectman 작업 ${item.uid}에 새 결과 또는 검토 상태가 있습니다. workflow_get으로 실제 상태를 확인하세요. 사람의 질문은 대신 결정하지 말고 알리세요. 결정이 확정되었으면 근거를 인용한 followup, 완료 결과는 review_result로 검토를 기록하세요.`, display: true }, { triggerTurn: true, deliverAs: 'followUp' });
+            pi.sendMessage({ customType: 'projectman-update', content: `Projectman 작업 ${item.uid}에 새 결과 또는 검토 상태가 있습니다. workflow_get으로 실제 상태를 확인하세요. 일 시작 전 검토가 없으면 매니저가 원문·코드·지침을 검토하고 작은 의문도 사용자에게 확인한 뒤 최종 범위의 preflight_review를 기록하세요. 승인 후 개발자의 구현 결정을 사용자 질문으로 돌리지 마세요. 사람의 질문은 대신 결정하지 말고 알리세요. 결정이 확정되었으면 근거를 인용한 followup, 완료 결과는 review_result로 검토를 기록하세요.`, display: true }, { triggerTurn: true, deliverAs: 'followUp' });
             break;
           }
         }

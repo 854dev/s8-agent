@@ -1,13 +1,22 @@
 import net from 'node:net';
+import { execFileSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { Bot, Gateway, sessionKey, tokenUsage } from '../../apps/telegram-gateway/gateway.mjs';
-import { loadTelegramConfig } from '../lib/telegram-config.mjs';
+import { agentRoot, loadTelegramConfig } from '../lib/telegram-config.mjs';
+import { queuePiRuntimeRestart } from '../lib/pi-runtime-restart.mjs';
+import { validSession } from '../lib/managed-sessions.mjs';
+
+async function requestFullRestart(notification) {
+  if (!process.env.TMUX) throw new Error('전체 재시작은 start-pi 관리 세션에서 사용할 수 있습니다.');
+  const session = execFileSync('tmux', ['display-message', '-p', '#S'], { encoding: 'utf8' }).trim();
+  if (!validSession(session)) throw new Error('잘못된 관리 세션입니다.');
+  return queuePiRuntimeRestart(agentRoot, { all: true, session, notification });
+}
 
 // One local polling owner per bot. Older Pi instances retry only when the owner exits.
-export function ownership({ port, key, onAcquire, onRelease, interval = 1000 }) {
-  const started = process.hrtime.bigint();
+export function ownership({ port, key, onAcquire, onRelease, interval = 1000, started = process.hrtime.bigint() }) {
   const signature = stamp => createHmac('sha256', key).update(stamp).digest('hex');
   let server, stopped = false, acquiring = false, retryAfter = 0;
   const release = () => { if (server) { server.close(); server = null; onRelease(); } };
@@ -51,7 +60,8 @@ export function ownership({ port, key, onAcquire, onRelease, interval = 1000 }) 
   return () => { stopped = true; clearInterval(timer); release(); };
 }
 
-export function attach(pi, { port = 39485, config = process.env, fetchImpl = fetch, autoStart = true, settings } = {}) {
+export function attach(pi, { port = 39485, config = process.env, fetchImpl = fetch, autoStart = true, settings, restartAllImpl = requestFullRestart } = {}) {
+  const started = process.hrtime.bigint();
   let stopOwner, gateway, telegramPrompt = false, context, enabled = autoStart;
   pi.registerCommand('telegram-new', { description: 'Telegram에서 새 대화를 시작합니다', handler: async (_args, ctx) => { await ctx.newSession(); } });
   const start = ctx => {
@@ -68,7 +78,7 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
     if (!token || (!users.size && !groups.size)) return;
     let bot, selected;
     const stop = () => { bot?.stop(); bot = null; gateway?.stop(); gateway = null; selected = null; telegramPrompt = false; };
-    stopOwner = ownership({ port, key: token, onRelease: stop, onAcquire: releaseOwner => {
+    stopOwner = ownership({ port, key: token, started, onRelease: stop, onAcquire: releaseOwner => {
       // A prior Pi owner must re-read the shared policy before resuming polling.
       try {
         current = settings ?? loadTelegramConfig(undefined, config);
@@ -114,6 +124,11 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
                 const ok = await pi.setModel(model);
                 return { ok, name: model.name };
               }
+              if (type === 'restart_all') {
+                if (!ctx.isIdle()) return { ok: false, reason: 'busy' };
+                const result = await restartAllImpl({ chat: message.chat.id, ...(message.message_thread_id === undefined ? {} : { thread: message.message_thread_id }) });
+                return { ok: true, runId: result.id };
+              }
               if (type === 'restart') {
                 if (!config.S8_PI_RESTART_DIR) return { ok: false };
                 await writeFile(`${config.S8_PI_RESTART_DIR}/restart-${process.ppid}`, 'restart\n', { mode: 0o600 });
@@ -151,9 +166,9 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
   pi.on('ui_prompt_start', (_event, ctx) => { if (telegramPrompt) ctx.abort(); });
   pi.on('agent_settled', event => { gateway?.onRecord(event); telegramPrompt = false; });
   pi.on('session_shutdown', () => { stopOwner?.(); stopOwner = null; context = undefined; });
-  return () => {
+  return ({ force = true } = {}) => {
     if (!context || !config.TELEGRAM_BOT_TOKEN) throw new Error('Telegram 설정 또는 실행 세션이 없습니다.');
-    if (!start(context)) throw new Error('Telegram 허용 채팅 설정이 올바르지 않습니다.');
+    if ((force || !stopOwner) && !start(context)) throw new Error('Telegram 허용 채팅 설정이 올바르지 않습니다.');
     enabled = true;
   };
 }

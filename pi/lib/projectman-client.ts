@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { preflightFingerprint, hasReviewedPreflight, requireReviewedPreflight } from './projectman-preflight.mjs';
 import type { IntakePlan, IntakePreview, IntakeResult } from './projectman-intake.ts';
 
 export type ProjectmanContent = {
@@ -78,11 +79,23 @@ export class ProjectmanClient {
     return this.request<any>(`projectman/items/${encodeURIComponent(uid)}/workflow`);
   }
 
+  async reviewPreflight(uid: string, expectedRevision: number, summary: string) {
+    if (!summary?.trim() || summary.length > 8000) throw new Error('Preflight review summary required (1–8000 characters)');
+    const [item, task] = await Promise.all([this.get(uid), this.getWorkflow(uid)]);
+    if (task.state !== 'todo' || task.workflow?.grant || task.workflow?.review?.pending || !task.workflow?.specHash || task.workflow.revision !== expectedRevision) throw new Error('PH-CMS request failed (HTTP 409): Unapproved delegation required');
+    const s8Preflight = { status: 'reviewed', specHash: task.workflow.specHash, fingerprint: preflightFingerprint(item, task.workflow), summary: summary.trim() };
+    await this.request(`contents/${encodeURIComponent(uid)}`, { method: 'PUT', body: JSON.stringify({ attributes: { s8Preflight } }) });
+    const [saved, fresh] = await Promise.all([this.get(uid), this.getWorkflow(uid)]);
+    if (fresh.state !== 'todo' || fresh.workflow?.revision !== expectedRevision || !hasReviewedPreflight(saved, fresh.workflow)) throw new Error('PH-CMS request failed (HTTP 409): Preflight changed while saving');
+    return { uid, state: 'todo', preflight: s8Preflight };
+  }
+
   async capabilities() {
     return this.request<{ workflowVersion: number; humanDecisions: boolean; atomicClaims: boolean; idempotentReports: boolean; actorType?: string }>('projectman/capabilities');
   }
 
   async workflow(uid: string, operation: Record<string, unknown>) {
+    if (operation.action === 'authorize') await requireReviewedPreflight(this, uid);
     return this.request<any>(`projectman/items/${encodeURIComponent(uid)}/workflow`, { method: 'POST', body: JSON.stringify(operation) });
   }
 

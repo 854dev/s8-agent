@@ -1,5 +1,7 @@
 import path from 'node:path';
 
+export const MANAGER_TOOLS = ['projectman', 'kb', 'scheduler', 'read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'];
+
 // No arbitrary arguments, @file attachments, sessions, extensions or tool overrides.
 export function managerArgs(root, input) {
   const extra = [];
@@ -15,7 +17,7 @@ export function managerArgs(root, input) {
     '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-context-files',
     '--extension', path.join(root, 'pi/extensions/manager.ts'),
     '--system-prompt', path.join(root, 'agents/manager/SYSTEM.md'),
-    '--tools', 'projectman,kb,scheduler',
+    '--tools', MANAGER_TOOLS.join(','),
     '--session-dir', path.join(root, '.pi-runtime/sessions/manager'), ...extra,
   ];
 }

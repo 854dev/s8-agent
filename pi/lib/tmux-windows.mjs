@@ -14,6 +14,20 @@ export async function windows(run, session) {
     return { id, name, root, dead: dead === '1' };
   });
 }
+export async function stopWindow(run, root, session, name, { timeoutMs = 20000 } = {}) {
+  const matches = (await windows(run, session)).filter(window => window.name === name);
+  if (matches.length > 1 || (matches[0] && matches[0].root !== root)) throw new Error(`${session}:${name}은 S8이 관리하는 창이 아닙니다.`);
+  const window = matches[0];
+  if (!window || window.dead) return;
+  await run(['send-keys', '-t', window.id, 'C-c']);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const current = (await windows(run, session)).find(item => item.id === window.id);
+    if (!current || current.dead) return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error(`${session}:${name}가 정상 종료되지 않았습니다. 중복 실행을 막기 위해 재시작을 중단했습니다.`);
+}
 export async function ensureWindow(run, root, session, name, command) {
   const current = (await windows(run, session)).filter(window => window.name === name);
   if (current.length > 1 || (current[0] && current[0].root !== root)) throw new Error(`${session}:${name}은 S8이 관리하는 창이 아닙니다.`);

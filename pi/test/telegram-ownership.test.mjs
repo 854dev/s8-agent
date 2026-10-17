@@ -34,3 +34,18 @@ test('last Pi process owns polling and prior one resumes when it exits', async t
   stopSecond();
   await waitFor(() => first && !second);
 });
+
+test('an older session restarting its Telegram handler cannot steal a newer session', async t => {
+  const socket = net.createServer();
+  await new Promise(resolve => socket.listen(0, '127.0.0.1', resolve));
+  const { port } = socket.address();
+  await new Promise(resolve => socket.close(resolve));
+  let latest = false, older = false;
+  const stopLatest = ownership({ port, key: 'test-token', started: 2n, interval: 20, onAcquire: () => { latest = true; }, onRelease: () => { latest = false; } });
+  t.after(stopLatest);
+  await waitFor(() => latest);
+  const stopOlder = ownership({ port, key: 'test-token', started: 1n, interval: 20, onAcquire: () => { older = true; }, onRelease: () => { older = false; } });
+  t.after(stopOlder);
+  await new Promise(resolve => setTimeout(resolve, 120));
+  assert.equal(latest, true); assert.equal(older, false);
+});

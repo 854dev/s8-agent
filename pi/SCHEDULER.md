@@ -10,7 +10,7 @@ S8 관리 대화의 `scheduler` 도구로 Projectman 예약을 관리하고, 별
 ./start-pi.sh --service scheduler            # 예약 데몬만 전경에서 실행
 ```
 
-통합 실행은 기본 `s8-main` tmux 세션의 `scheduler` 창을 만들거나 재사용한다. `--session 이름`을 지정하면 해당 런타임 세션에 같은 서비스 창을 연결한다. 매니저가 끝나도 예약 데몬은 유지된다. 제외 옵션은 이미 실행 중인 데몬을 종료하지 않는다.
+통합 실행은 기본 `s8-main` tmux 세션의 `scheduler` 창을 만들고, 재실행 시 정상 종료한 뒤 같은 창에서 프로세스를 교체한다. `--session 이름`을 지정하면 해당 런타임 세션에 같은 서비스 창을 연결한다. 매니저가 끝나도 예약 데몬은 유지된다. 제외 옵션은 이미 실행 중인 데몬을 종료하지 않는다.
 
 `start-pi.sh --service scheduler` 단독 실행은 포그라운드 서비스다. 예약 실행을 유지하려면 macOS `launchd`, Linux `systemd --user`, Windows 작업 스케줄러 등 해당 OS의 서비스 관리자에 시작 명령을 등록한다. 여러 인스턴스가 동시에 시작되면 하나만 소유권을 얻고 나머지는 종료한다. tmux 세션의 정상 종료 신호(`SIGINT`, `SIGTERM`, `SIGHUP`)에는 실행 중 작업을 정리한 뒤 소유 잠금을 제거한다. 전원 종료나 강제 종료 등 신호를 처리하지 못한 비정상 종료 후 `.s8-runtime/scheduler/owner.lock`이 남으면 스케줄러가 실행 중이지 않은 것을 확인한 뒤 해당 잠금 파일만 제거한다.
 

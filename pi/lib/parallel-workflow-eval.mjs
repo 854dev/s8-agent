@@ -10,14 +10,15 @@ export async function parallelWorkflowEval({ root, directory, repo, fixture, man
   for (const mode of ['sequential', 'parallel']) {
     const ids = [], outputs = ['alpha', 'beta'].map(text => ({ text, file: `src/${mode}-${text}.txt` }));
     const tool = {
-      name: 'projectman', label: 'Real Projectman', description: 'create, workflow_get, delegate, review_result for exactly two independent fixture tasks. Human authorization is not available.',
-      parameters: Type.Object({ action: Type.Union(['create', 'workflow_get', 'delegate', 'review_result'].map(value => Type.Literal(value))), uid: Type.Optional(Type.String()), title: Type.Optional(Type.String()), text: Type.Optional(Type.String()), spec: Type.Optional(Type.Unknown()), expectedRevision: Type.Optional(Type.Integer()), message: Type.Optional(Type.String()) }),
+      name: 'projectman', label: 'Real Projectman', description: 'create, workflow_get, delegate, preflight_review, review_result for exactly two independent fixture tasks. Human authorization is not available.',
+      parameters: Type.Object({ action: Type.Union(['create', 'workflow_get', 'delegate', 'preflight_review', 'review_result'].map(value => Type.Literal(value))), uid: Type.Optional(Type.String()), title: Type.Optional(Type.String()), text: Type.Optional(Type.String()), spec: Type.Optional(Type.Unknown()), expectedRevision: Type.Optional(Type.Integer()), message: Type.Optional(Type.String()) }),
       async execute(_id, args) {
         let response;
         if (args.action === 'create') { if (ids.length >= 2) throw new Error('Only two tasks'); response = await manager.create(projectUid, 'task', args.title, args.text); ids.push(response.uid); response = { uid: response.uid, revision: 0, state: 'todo' }; }
         else {
           if (!ids.includes(args.uid)) throw new Error('Use a task ID returned by create');
           if (args.action === 'workflow_get') response = await manager.getWorkflow(args.uid);
+          else if (args.action === 'preflight_review') response = await manager.reviewPreflight(args.uid, args.expectedRevision, args.message);
           else {
             if (!Number.isInteger(args.expectedRevision)) throw new Error('Read revision first; a new workflow has revision 0');
             response = await manager.workflow(args.uid, { action: args.action, expectedRevision: args.expectedRevision, requestId: randomUUID(), ...(args.action === 'delegate' ? { spec: args.spec } : { message: args.message }) });
@@ -28,7 +29,7 @@ export async function parallelWorkflowEval({ root, directory, repo, fixture, man
     };
     const plans = outputs.map(output => ({ title: `Independent ${mode} ${output.text}`, text: `Write the file ${output.file} with exactly ${output.text} (optional trailing newline). This is a fully decided independent task: no questions and no command execution are needed.`, spec: { repoPath: repo, completionCriteria: [`${output.file} contains exactly ${output.text}`], allowedPaths: [output.file], commandNames: [], dependsOn: [], timeBudgetMinutes: 3 } }));
     const invoke = (role, prompt) => smokeSession({ ...runtime, role, prompt, systemPrompt, tools: [tool], run: { directory, workspace: repo }, signal: AbortSignal.timeout(120000) });
-    await invoke(`manager-${mode}-plan`, `아래 두 개의 독립 작업을 각각 create하고 delegate하라. 총 2개 모두 위임해야 한다. spec과 텍스트를 그대로 사용하고 작업 생성 응답의 uid와 revision을 전달한다. 승인과 실행은 평가 감독자가 담당한다.\n${JSON.stringify(plans)}`);
+    await invoke(`manager-${mode}-plan`, `아래 두 개의 독립 작업을 각각 create하고 delegate하라. 총 2개 모두 위임하고 workflow_get으로 revision을 조회한 뒤 preflight_review로 확정 요구사항·허용 범위·검증 방법을 기록해야 한다. spec과 텍스트를 그대로 사용하고 작업 생성 응답의 uid와 revision을 전달한다. 승인과 실행은 평가 감독자가 담당한다.\n${JSON.stringify(plans)}`);
     if (ids.length !== 2) throw new Error('Manager did not prepare two independent tasks');
     const tasks = await Promise.all(ids.map(uid => manager.getWorkflow(uid)));
     if (new Set(tasks.map(task => task.workflow?.spec?.allowedPaths?.[0])).size !== 2) throw new Error('Independent scopes must be distinct');

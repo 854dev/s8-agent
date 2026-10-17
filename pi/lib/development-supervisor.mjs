@@ -1,3 +1,4 @@
+import { requireReviewedPreflight } from './projectman-preflight.mjs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, readdir, open, rm, lstat } from 'node:fs/promises';
@@ -38,9 +39,10 @@ const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; } };
 function reportForServer(value) {
   const report = { status: ['completed', 'continue', 'blocked', 'failed'].includes(value?.status) ? value.status : 'failed', summary: String(value?.summary ?? '').trim().slice(0, 8000) || 'No valid development summary was returned.', changedFiles: value?.changedFiles ?? [], verification: (value?.verification ?? []).slice(-20).map(item => ({ name: String(item.name).slice(0, 100), ok: item.ok === true, summary: String(item.summary ?? '').slice(0, 1000) })) };
-  if (value?.question) report.question = { question: String(value.question.question).slice(0, 3000), reason: String(value.question.reason).slice(0, 3000), audience: value.question.audience === 'manager' ? 'manager' : 'human', options: (value.question.options ?? []).slice(0, 10).map(option => String(option).slice(0, 1000)), impact: String(value.question.impact ?? '').slice(0, 3000), recommendation: String(value.question.recommendation ?? '').slice(0, 3000) };
-  if (['failed', 'blocked'].includes(report.status) && !report.question) report.question = { question: '실행 기록과 실패 원인을 확인한 뒤 다시 진행할까요?', reason: report.summary.slice(0, 3000), audience: 'human', options: ['원인 확인 후 재개', '거절', '취소'], impact: '현재 작업과 의존 작업은 대기합니다.', recommendation: '실행 기록과 변경 내용을 확인한 뒤 결정하세요.' };
-  if (report.question) report.status = 'blocked';
+  if (['failed', 'blocked'].includes(report.status)) {
+    report.status = 'blocked';
+    report.question = { question: '매니저가 실행 장애와 저장된 검증 결과를 확인하세요.', reason: report.summary.slice(0, 3000), audience: 'manager', options: [], impact: '실제 실행 장애가 해결될 때까지 해당 작업을 보존합니다.', recommendation: '기록과 승인 범위를 먼저 조사하고 복구하세요. 구현 선택에 대한 사용자 반문은 하지 않습니다.' };
+  }
   return report;
 }
 
@@ -96,7 +98,7 @@ export async function flushDevelopmentOutbox({ root, client }) {
   return outcomes;
 }
 
-export async function runDevelopmentTask({ root, client, candidate, policy, signal, worker = runDeveloper, allowedRoot }) {
+export async function runDevelopmentTask({ root, client, candidate, policy, signal, worker = runDeveloper, command = developmentCommand, allowedRoot }) {
   const locks = path.join(root, '.s8-runtime/development-locks');
   await mkdir(locks, { recursive: true, mode: 0o700 });
   const lockPath = path.join(locks, `${candidate.uid}.json`);
@@ -112,6 +114,8 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
     const task = await client.getWorkflow(candidate.uid);
     prepared = task;
     if (task.state !== 'ready' || !task.workflow?.grant || task.workflow.review?.pending || (task.workflow.review && task.workflow.followup?.reviewId !== task.workflow.review.id)) return { status: 'idle', uid: candidate.uid };
+    let preflight;
+    try { preflight = await requireReviewedPreflight(client, candidate.uid); } catch (error) { if (/HTTP 409/.test(error.message)) return { status: 'preflight_required', uid: candidate.uid }; throw error; }
     if (task.workflow.spec.commandNames.some(name => !Object.hasOwn(policy.commands, name))) throw new Error('Command policy not configured');
     if ((task.workflow.runCount ?? 0) >= (policy.maxRuns ?? 6)) throw new Error('Execution budget exhausted');
     if (signal?.aborted) return { status: 'stopped', uid: candidate.uid };
@@ -121,7 +125,7 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
     claimed = await client.workflow(candidate.uid, { action: 'claim', expectedRevision: task.workflow.revision, requestId: randomUUID(), runId, workerId: `s8-${process.pid}` });
     const run = { runId, directory, workspace: workspace.worktree };
     const projectInstructions = await projectGuidelines(workspace.worktree, task.workflow.spec.allowedPaths);
-    const request = { root, run, task: { ...task, workflow: claimed.workflow }, policy, previous: task.workflow.result, projectInstructions };
+    const request = { root, run, task: { ...task, workflow: claimed.workflow }, preflight: preflight.preflight, policy, previous: task.workflow.result, projectInstructions };
     await saveJson(path.join(directory, 'request.json'), request);
     timeout = setTimeout(abort, Math.min(policy.maxTimeMinutes, task.workflow.spec.timeBudgetMinutes) * 60000);
     let failures = 0, polling = false;
@@ -138,7 +142,7 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
     if (outcome.report.status === 'completed' && !controller.signal.aborted) {
       const results = []; let baseline = await workspaceChanges(run.workspace, task.workflow.spec.allowedPaths);
       for (const name of task.workflow.spec.commandNames) {
-        const checked = await developmentCommand({ root, worktree: run.workspace, name, allowedNames: task.workflow.spec.commandNames, policy, runId, signal: controller.signal });
+        const checked = await command({ root, worktree: run.workspace, name, allowedNames: task.workflow.spec.commandNames, policy, runId, signal: controller.signal });
         results.push({ name, ...checked });
         if (!checked.ok) break;
         if (name === 'install') baseline = await workspaceChanges(run.workspace, task.workflow.spec.allowedPaths);
@@ -147,7 +151,7 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
       const stable = !baseline || JSON.stringify(baseline) === JSON.stringify(afterChecks);
       await saveJson(path.join(directory, 'verification.json'), { stable, results, finalFingerprints: afterChecks.fingerprints });
       outcome.report.verification = results.map(item => ({ name: item.name, ok: item.ok, summary: item.output.slice(-1000) }));
-      if (!stable || results.length !== task.workflow.spec.commandNames.length || results.some(item => !item.ok)) { outcome.report.status = 'blocked'; outcome.report.summary = 'Independent supervisor verification failed or final source changed during checks. Inspect verification.json.'; }
+      if (!stable || results.length !== task.workflow.spec.commandNames.length || results.some(item => !item.ok)) { outcome.report.status = 'continue'; outcome.report.summary = 'Independent supervisor verification failed or final source changed during checks. Repair the saved workspace and rerun approved checks in the next execution.'; }
     }
     const changes = await workspaceChanges(run.workspace, task.workflow.spec.allowedPaths);
     await writeFile(path.join(directory, 'changes.patch'), await workspacePatch(run.workspace, task.workflow.spec.allowedPaths), { mode: 0o600 });
@@ -158,11 +162,11 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
     return { status: report.status, uid: candidate.uid, runId, worktree: run.workspace };
   } catch (error) {
     if (claimed && directory) {
-      const report = reportForServer({ status: 'failed', summary: 'Supervisor stopped before successful result handoff; human review required.', changedFiles: [], verification: [] });
+      const report = reportForServer({ status: 'failed', summary: 'Supervisor stopped before successful result handoff; manager operational review required.', changedFiles: [], verification: [] });
       await saveJson(path.join(directory, 'outbox.json'), { uid: candidate.uid, runId, report, operation: { action: 'report', requestId: randomUUID(), expectedRevision: claimed.workflow.revision, runId, report } });
       await flushDevelopmentOutbox({ root, client });
     } else if (prepared?.state === 'ready' && !/HTTP 409/.test(error.message)) {
-      await client.workflow(candidate.uid, { action: 'request_review', requestId: randomUUID(), expectedRevision: prepared.workflow.revision, question: { audience: 'human', question: '개발 실행 준비를 확인해 주세요.', reason: '저장소 청결 상태·허용 경로·명령 정책·worktree 준비 중 검증에 실패했습니다. 실행하지 않았습니다.', options: ['설정·저장소를 확인한 뒤 재개', '취소'], impact: '이 작업만 대기합니다.', recommendation: '설정과 저장소 변경을 확인한 후 재개하세요.' } }).catch(() => {});
+      await client.workflow(candidate.uid, { action: 'request_review', requestId: randomUUID(), expectedRevision: prepared.workflow.revision, question: { audience: 'manager', question: '매니저가 개발 실행 준비 장애를 확인하세요.', reason: '저장소 청결 상태·허용 경로·명령 정책·worktree 준비 중 검증에 실패했습니다. 실행하지 않았습니다.', options: ['설정·저장소를 확인한 뒤 재개', '취소'], impact: '이 작업만 대기합니다.', recommendation: '설정과 저장소 변경을 확인한 후 재개하세요.' } }).catch(() => {});
     }
     return { status: /HTTP 409/.test(error.message) ? 'conflict' : 'blocked', uid: candidate.uid };
   } finally {
