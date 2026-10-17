@@ -208,7 +208,7 @@ npm ci --ignore-scripts --prefix pi
 ./start-pi.sh
 ```
 
-- `pi/package-lock.json`으로 동일한 Pi 버전과 npm 의존성을 설치한다.
+- Pi `1.3.0`을 사용하며, `pi/package-lock.json`으로 동일한 Pi 버전과 npm 의존성을 설치한다. Node.js `22.19.0` 이상이 필요하다.
 - `pi/`의 npm 잠금 파일, 설정, extension, skill, 시스템 지침을 모든 장비에서 공유한다.
 - `.pi-runtime/`은 각 장비의 인증정보, 세션, 캐시, 설치 패키지를 보관한다. 공유 설정은 복사하지 않는다.
 - 모델 인증, 세션, 로그, 업로드는 장비마다 별도로 유지한다.
@@ -228,6 +228,8 @@ npm ci --ignore-scripts --prefix pi
 - `@dietrichgebert/ponytail`: 과잉 구현 방지와 최소 구현 지향 스킬
 - `pi-web-access`: 웹 검색, URL fetch, GitHub clone, PDF와 미디어 분석 도구
 - `pi-mcp-extension`: MCP 서버 연결용 클라이언트 확장
+
+Pi 1.3.0에도 내장 MCP가 있지만 `pi-mcp-extension@1.5.0`의 설치와 패키지 등록은 유지한다. 현재 매니저는 `--no-extensions`로 내장 MCP와 외부 MCP 확장의 자동 로딩을 모두 끈다. MCP를 활성화할 때는 세션마다 사용할 구현 하나를 명시적으로 선택하고 매니저의 도구 허용 목록도 함께 조정해야 한다. 외부 확장을 삭제하지 않고 자동 로딩만 끄려면 해당 패키지를 `{ "source": "npm:pi-mcp-extension@1.5.0", "extensions": [] }`로 설정할 수 있다.
 
 ## 작업 정책
 
@@ -318,5 +320,7 @@ npm run build --prefix frontend
 bash -n start-pi.sh
 git diff --check
 ```
+
+`pi/test/pi-sdk.test.mjs`는 로컬 모의 API와 실제 설치된 Pi SDK로 매니저의 Bash 실행과 개발 워커의 파일 쓰기를 검증한다. 외부 모델 API나 실제 인증정보는 사용하지 않는다.
 
 웹 터미널 backend와 Nginx의 별도 검증은 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 참고한다.
