@@ -82,11 +82,14 @@ export class ProjectmanClient {
   async reviewPreflight(uid: string, expectedRevision: number, summary: string) {
     if (!summary?.trim() || summary.length > 8000) throw new Error('Preflight review summary required (1–8000 characters)');
     const [item, task] = await Promise.all([this.get(uid), this.getWorkflow(uid)]);
-    if (task.state !== 'todo' || task.workflow?.grant || task.workflow?.review?.pending || !task.workflow?.specHash || task.workflow.revision !== expectedRevision) throw new Error('PH-CMS request failed (HTTP 409): Unapproved delegation required');
+    const state = item.detail?.attributes.state;
+    if (state !== 'todo' || task.state !== state || task.workflow?.grant || task.workflow?.review?.pending || !task.workflow?.specHash || task.workflow.revision !== expectedRevision) throw new Error('PH-CMS request failed (HTTP 409): Unapproved delegation required');
     const s8Preflight = { status: 'reviewed', specHash: task.workflow.specHash, fingerprint: preflightFingerprint(item, task.workflow), summary: summary.trim() };
-    await this.request(`contents/${encodeURIComponent(uid)}`, { method: 'PUT', body: JSON.stringify({ attributes: { s8Preflight } }) });
+    // Generic content updates require the observed state; the server checks it again under the transition row lock.
+    await this.request(`contents/${encodeURIComponent(uid)}`, { method: 'PUT', body: JSON.stringify({ attributes: { state, s8Preflight } }) });
     const [saved, fresh] = await Promise.all([this.get(uid), this.getWorkflow(uid)]);
-    if (fresh.state !== 'todo' || fresh.workflow?.revision !== expectedRevision || !hasReviewedPreflight(saved, fresh.workflow)) throw new Error('PH-CMS request failed (HTTP 409): Preflight changed while saving');
+    const savedPreflight = saved.detail?.attributes.s8Preflight as typeof s8Preflight | undefined;
+    if (saved.detail?.attributes.state !== state || fresh.state !== state || fresh.workflow?.grant || fresh.workflow?.review?.pending || fresh.workflow?.revision !== expectedRevision || !hasReviewedPreflight(saved, fresh.workflow) || savedPreflight?.fingerprint !== s8Preflight.fingerprint || savedPreflight?.summary !== s8Preflight.summary) throw new Error('PH-CMS request failed (HTTP 409): Preflight changed while saving');
     return { uid, state: 'todo', preflight: s8Preflight };
   }
 
