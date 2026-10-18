@@ -5,7 +5,12 @@ import path from 'node:path';
 import { attach } from './telegram.mjs';
 
 export default function (pi) {
-  const activate = attach(pi, { autoStart: true });
+  const mode = execFileSync('tmux', ['show-option', '-qv', '@s8-mode'], { encoding: 'utf8' }).trim() || 'project';
+  const session = execFileSync('tmux', ['display-message', '-p', '#S'], { encoding: 'utf8' }).trim();
+  const autoStart = execFileSync('tmux', ['show-option', '-qv', '-t', session, '@s8-telegram'], { encoding: 'utf8' }).trim() === 'take';
+  const activate = attach(pi, { autoStart, mode, session, persist: enabled => {
+    execFileSync('tmux', ['set-option', '-t', session, '@s8-telegram', enabled ? 'take' : 'off']);
+  } });
   let server, socket;
   const stop = async () => {
     if (!server) return;
@@ -23,11 +28,11 @@ export default function (pi) {
     // A killed Pi can leave its socket behind; tmux owns this unique session name.
     try { unlinkSync(socket); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     server = net.createServer(client => {
-      client.setTimeout(2000, () => client.destroy());
-      client.once('data', data => {
+      client.setTimeout(10000, () => client.destroy());
+      client.once('data', async data => {
         try {
           if (data.toString() !== 'telegram') throw new Error('Unknown command');
-          activate({ force: false });
+          await activate.control('take');
           client.end('ok');
         } catch { client.end('error'); }
       });

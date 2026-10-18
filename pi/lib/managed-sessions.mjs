@@ -18,7 +18,7 @@ export async function moveTelegram(socket) {
     try {
       return await new Promise((resolve, reject) => {
         const client = net.connect(socket);
-        client.setTimeout(2000, () => client.destroy(new Error('Session control timeout')));
+        client.setTimeout(10000, () => client.destroy(new Error('Session control timeout')));
         client.on('connect', () => client.write('telegram'));
         client.on('error', reject);
         client.on('data', data => { client.end(); data.toString() === 'ok' ? resolve() : reject(new Error('Telegram activation failed')); });

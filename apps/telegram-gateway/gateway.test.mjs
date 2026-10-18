@@ -266,3 +266,19 @@ test('restart all uses a dedicated controller command and rejects invalid or bus
   assert.match(sent.at(-1).text, /먼저 중단/);
   assert.equal(calls.length, 3);
 });
+
+test('local Telegram hides schedules and blocks access to shared project schedules', async t => {
+  const { pi } = fake();
+  const { sent, fetchImpl } = transport();
+  let calls = 0;
+  const gateway = new Gateway({ mode: 'local', token: 'fake', pi, chat: 123, fetchImpl,
+    schedulerImpl: async () => { calls++; return 'unexpected'; } });
+  t.after(() => gateway.close());
+  assert.ok(!gateway.menuMarkup().keyboard.flat().includes('배치'));
+  await gateway.incoming(privateMessage(123, '/jobs pause example'));
+  assert.equal(calls, 0);
+  assert.match(sent.at(-1).text, /로컬 모드/);
+  await gateway.incoming(privateMessage(123, '/help'));
+  assert.match(sent.at(-1).text, /로컬 Pi 재시작/);
+  assert.ok(!sent.at(-1).text.includes('/jobs'));
+});

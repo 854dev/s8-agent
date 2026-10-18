@@ -6,6 +6,7 @@ import { EventEmitter } from 'node:events';
 import { Bot, Gateway, sessionKey, tokenUsage } from '../../apps/telegram-gateway/gateway.mjs';
 import { agentRoot, loadTelegramConfig } from '../lib/telegram-config.mjs';
 import { queuePiRuntimeRestart } from '../lib/pi-runtime-restart.mjs';
+import { telegramOwner } from '../lib/telegram-status.mjs';
 import { validSession } from '../lib/managed-sessions.mjs';
 
 async function requestFullRestart(notification) {
@@ -16,7 +17,7 @@ async function requestFullRestart(notification) {
 }
 
 // One local polling owner per bot. Older Pi instances retry only when the owner exits.
-export function ownership({ port, key, onAcquire, onRelease, interval = 1000, started = process.hrtime.bigint() }) {
+export function ownership({ port, key, onAcquire, onRelease, interval = 1000, started = process.hrtime.bigint(), session = 'Pi' }) {
   const signature = stamp => createHmac('sha256', key).update(stamp).digest('hex');
   let server, stopped = false, acquiring = false, retryAfter = 0;
   const release = () => { if (server) { server.close(); server = null; onRelease(); } };
@@ -26,6 +27,7 @@ export function ownership({ port, key, onAcquire, onRelease, interval = 1000, st
     const candidate = net.createServer(socket => {
       socket.setTimeout(2000, () => socket.destroy());
       socket.once('data', data => {
+        if (data.toString() === 'status') { socket.end(JSON.stringify({ session })); return; }
         const [stamp, mac] = data.toString().split(':');
         const expected = /^\d+$/.test(stamp) ? signature(stamp) : '';
         if (expected && /^[0-9a-f]{64}$/.test(mac ?? '') && timingSafeEqual(Buffer.from(mac), Buffer.from(expected)) && BigInt(stamp) > started) {
@@ -60,8 +62,8 @@ export function ownership({ port, key, onAcquire, onRelease, interval = 1000, st
   return () => { stopped = true; clearInterval(timer); release(); };
 }
 
-export function attach(pi, { port = 39485, config = process.env, fetchImpl = fetch, autoStart = true, settings, restartAllImpl = requestFullRestart } = {}) {
-  const started = process.hrtime.bigint();
+export function attach(pi, { port = 39485, config = process.env, fetchImpl = fetch, autoStart = true, mode = 'project', settings, session = 'Pi', persist = () => {}, restartAllImpl = requestFullRestart } = {}) {
+  let started = process.hrtime.bigint();
   let stopOwner, gateway, telegramPrompt = false, context, enabled = autoStart;
   pi.registerCommand('telegram-new', { description: 'Telegram에서 새 대화를 시작합니다', handler: async (_args, ctx) => { await ctx.newSession(); } });
   const start = ctx => {
@@ -78,7 +80,7 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
     if (!token || (!users.size && !groups.size)) return;
     let bot, selected;
     const stop = () => { bot?.stop(); bot = null; gateway?.stop(); gateway = null; selected = null; telegramPrompt = false; };
-    stopOwner = ownership({ port, key: token, started, onRelease: stop, onAcquire: releaseOwner => {
+    stopOwner = ownership({ port, key: token, started, session, onRelease: stop, onAcquire: releaseOwner => {
       // A prior Pi owner must re-read the shared policy before resuming polling.
       try {
         current = settings ?? loadTelegramConfig(undefined, config);
@@ -98,7 +100,7 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
           fake.stdout = new EventEmitter();
           fake.stderr = new EventEmitter();
           fake.stdin = { writableEnded: false, end() { this.writableEnded = true; fake.emit('exit'); } };
-          gateway = new Gateway({ token, chat: message.chat.id, thread: message.message_thread_id, pi: fake, fetchImpl,
+          gateway = new Gateway({ mode, token, chat: message.chat.id, thread: message.message_thread_id, pi: fake, fetchImpl,
             commandImpl: async (type, fields) => {
               if (type === 'get_state') return {
                 isStreaming: !ctx.isIdle(),
@@ -166,11 +168,59 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
   pi.on('ui_prompt_start', (_event, ctx) => { if (telegramPrompt) ctx.abort(); });
   pi.on('agent_settled', event => { gateway?.onRecord(event); telegramPrompt = false; });
   pi.on('session_shutdown', () => { stopOwner?.(); stopOwner = null; context = undefined; });
-  return ({ force = true } = {}) => {
+  const activate = ({ force = true } = {}) => {
     if (!context || !config.TELEGRAM_BOT_TOKEN) throw new Error('Telegram 설정 또는 실행 세션이 없습니다.');
+    if (force) started = process.hrtime.bigint();
     if ((force || !stopOwner) && !start(context)) throw new Error('Telegram 허용 채팅 설정이 올바르지 않습니다.');
     enabled = true;
   };
+  const waitOwner = async predicate => {
+    let owner;
+    for (let i = 0; i < 65; i++) {
+      owner = await telegramOwner({ port });
+      if (predicate(owner)) return owner;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return owner;
+  };
+  const describe = owner => `Telegram: ${owner ? owner + ' 연결' : '연결 없음'} · 이 세션 ${enabled ? owner === session ? '수신 중' : '연결 대기' : '꺼짐'}`;
+  activate.control = async action => {
+    const before = await telegramOwner({ port });
+    if (action === 'status') return describe(before);
+    if (action === 'take') {
+      if (before !== session || !stopOwner) activate();
+      const owner = await waitOwner(value => value === session);
+      if (owner !== session) {
+        stopOwner?.(); stopOwner = null; enabled = false; persist(false);
+        throw new Error('Telegram 연결을 가져오지 못했습니다. 설정과 현재 연결 상태를 확인하세요.');
+      }
+      persist(true);
+      return `Telegram: ${before && before !== session ? before + ' → ' : ''}${session} 연결 이전 완료`;
+    }
+    if (action === 'off') {
+      persist(false);
+      enabled = false;
+      stopOwner?.(); stopOwner = null;
+      const owner = before === session ? await waitOwner(value => value !== null && value !== session) : before;
+      return `이 세션 Telegram 연결 해제. ${describe(owner)}`;
+    }
+    throw new Error('사용법: /telegram [take|off]');
+  };
+  pi.registerCommand('telegram', {
+    description: 'Telegram 연결 상태·가져오기·해제 (/telegram take|off)',
+    handler: async (args, ctx) => {
+      try {
+        let action = args.trim();
+        if (!action) {
+          ctx.ui.notify(await activate.control('status'), 'info');
+          const selected = await ctx.ui.select('Telegram 연결', ['현재 연결 유지', '여기로 가져오기', '이 세션 연결 해제']);
+          action = selected === '여기로 가져오기' ? 'take' : selected === '이 세션 연결 해제' ? 'off' : 'status';
+        }
+        ctx.ui.notify(await activate.control(action), 'info');
+      } catch (error) { ctx.ui.notify(error.message, 'error'); }
+    },
+  });
+  return activate;
 }
 
 export default attach;

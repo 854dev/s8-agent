@@ -60,7 +60,8 @@ export function sessionKey(message, users, groups) {
 }
 
 export class Gateway {
-  constructor({ token, pi, chat, thread, fetchImpl = fetch, editInterval = 1000, onClose = () => {}, commandImpl, schedulerImpl = (action, id) => controlSchedules(path.join(root, '.s8-runtime', 'scheduler'), action, id) }) {
+  constructor({ mode = 'project', token, pi, chat, thread, fetchImpl = fetch, editInterval = 1000, onClose = () => {}, commandImpl, schedulerImpl = (action, id) => controlSchedules(path.join(root, '.s8-runtime', 'scheduler'), action, id) }) {
+    this.mode = mode;
     this.token = token;
     this.pi = pi;
     this.chat = chat;
@@ -117,7 +118,7 @@ export class Gateway {
     }));
   }
   menuMarkup() {
-    return { keyboard: [['상태', '중단'], ['배치'], ['새 대화', '모델'], ['재시작', '전체 재시작'], ['메뉴', '도움말']], resize_keyboard: true, is_persistent: true };
+    return { keyboard: [['상태', '중단'], ...(this.mode === 'local' ? [] : [['배치']]), ['새 대화', '모델'], ['재시작', '전체 재시작'], ['메뉴', '도움말']], resize_keyboard: true, is_persistent: true };
   }
   showMenu() { return this.send('s8 메뉴', this.menuMarkup()); }
   command(type, fields = {}) {
@@ -220,6 +221,7 @@ export class Gateway {
       ?? (this.models?.find(model => model.name === text) ? `model:${this.models.find(model => model.name === text).id}` : text);
     try {
       const scheduleCommand = /^\/jobs(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$/.exec(action);
+      if (scheduleCommand && this.mode === 'local') return await this.send('로컬 모드에서는 예약 기능을 사용하지 않습니다.');
       if (scheduleCommand) {
         const [operation = 'list', id, ...extra] = (scheduleCommand[1] ?? '').trim().split(/\s+/).filter(Boolean);
         if (extra.length || !['list', 'pause', 'resume', 'stop'].includes(operation) || (operation !== 'list' && !id)) {
@@ -235,8 +237,8 @@ export class Gateway {
         '/new - 새 대화',
         '/model - 모델 선택',
         '/restart - Pi 재시작',
-        '/restart all - 인프라·Pi·스케줄러·슈퍼바이저 전체 재시작',
-        '/jobs - 배치 상태·중단 (stop ID)',
+        this.mode === 'local' ? '/restart all - 로컬 Pi 재시작' : '/restart all - 인프라·Pi·스케줄러·슈퍼바이저 전체 재시작',
+        ...(this.mode === 'local' ? [] : ['/jobs - 배치 상태·중단 (stop ID)']),
         '/help - 이 도움말',
       ].join('\n'), this.menuMarkup());
       if (action === '/status') {
@@ -269,7 +271,7 @@ export class Gateway {
         const scope = (restart[1] ?? '').trim();
         if (scope && scope !== 'all') return await this.send('사용법: /restart 또는 /restart all');
         if (this.busy) return await this.send('진행 중입니다. 먼저 중단한 뒤 재시작하세요.');
-        await this.send(scope === 'all' ? '전체 재시작 요청을 접수했습니다. 인프라와 Pi·스케줄러·슈퍼바이저를 순서대로 재시작합니다. 웹 연결이 잠시 끊길 수 있으며 완료 결과는 Telegram으로 알려드립니다.' : 'Pi를 재시작합니다.');
+        await this.send(scope === 'all' && this.mode !== 'local' ? '전체 재시작 요청을 접수했습니다. 인프라와 Pi·스케줄러·슈퍼바이저를 순서대로 재시작합니다. 웹 연결이 잠시 끊길 수 있으며 완료 결과는 Telegram으로 알려드립니다.' : 'Pi를 재시작합니다.');
         const result = await this.command(scope === 'all' ? 'restart_all' : 'restart');
         if (result?.reason === 'busy') return await this.send('진행 중입니다. 먼저 중단한 뒤 재시작하세요.');
         if (!result?.ok) return await this.send('자동 재시작이 설정되지 않았습니다.');

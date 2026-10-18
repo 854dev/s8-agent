@@ -13,7 +13,7 @@ const options = JSON.parse(await readFile(path.join(directory, 'request.json'), 
 try {
   const value = options.all ? await runFullRestart(root, options, directory) : await startPiRuntime(root, options);
   await saveRestartResult(directory, { ok: true, value });
-  if (options.all) await notifyFullRestart(options.notification, '전체 재시작을 완료했습니다. 인프라와 Pi·스케줄러·슈퍼바이저를 시작했고 Telegram 연결을 복구했습니다.');
+  if (options.all) await notifyFullRestart(options.notification, '선택한 모드로 재시작을 완료하고 Telegram 연결을 복구했습니다.');
 } catch (error) {
   await saveRestartResult(directory, { ok: false, error: String(error.message) });
   if (options.all) await notifyFullRestart(options.notification, `전체 재시작을 완료하지 못했습니다. ${error.message}\n실행 ID: ${id}\n문제를 확인한 뒤 /restart all로 다시 요청할 수 있습니다.`);

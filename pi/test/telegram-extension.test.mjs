@@ -85,3 +85,46 @@ test('authorized restart all hands chat and topic to the detached controller aft
   await waitFor(() => requests.length === 1);
   assert.deepEqual(requests, [{ chat: -100, thread: 7 }]);
 });
+
+test('older session can take ownership; off restores the waiting session and persists', async t => {
+  const listener = net.createServer();
+  await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
+  const { port } = listener.address();
+  await new Promise(resolve => listener.close(resolve));
+  const { telegramOwner } = await import('../lib/telegram-status.mjs');
+  const controls = [], changes = [];
+  const ctx = { mode: 'tui', isIdle: () => true, sessionManager: { getBranch: () => [] } };
+  const fetchImpl = async (_url, options) => new Promise((_, reject) => {
+    options.signal.addEventListener('abort', () => reject(new Error('stopped')), { once: true });
+  });
+  for (const session of ['s8-first', 's8-second']) {
+    const pi = new EventEmitter();
+    const commands = new Map();
+    pi.registerCommand = (name, command) => commands.set(name, command);
+    const control = attach(pi, { port, autoStart: false, session, config: { TELEGRAM_BOT_TOKEN: 'test-token' },
+      settings: { allowedUserIds: ['123'], allowedGroupIds: [] }, fetchImpl,
+      persist: enabled => changes.push([session, enabled]),
+    });
+    pi.emit('session_start', null, ctx);
+    t.after(() => pi.emit('session_shutdown'));
+    controls.push({ pi, control, commands });
+  }
+  assert.equal(await telegramOwner({ port }), null);
+  assert.match(await controls[0].control.control('take'), /s8-first 연결 이전 완료/);
+  assert.match(await controls[1].control.control('take'), /s8-first → s8-second/);
+  const notices = [];
+  await controls[0].commands.get('telegram').handler('take', { ui: { notify: message => notices.push(message) } });
+  assert.equal(await telegramOwner({ port }), 's8-first');
+  assert.match(notices.at(-1), /s8-second → s8-first/);
+  assert.match(await controls[0].control.control('off'), /s8-second 연결/);
+  assert.equal(await telegramOwner({ port }), 's8-second');
+  controls[0].pi.emit('session_start', null, ctx);
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  assert.equal(await telegramOwner({ port }), 's8-second');
+  assert.deepEqual(changes.at(-1), ['s8-first', false]);
+  let menu;
+  await controls[0].commands.get('telegram').handler('', { ui: {
+    notify: () => {}, select: async (_title, options) => { menu = options; return '현재 연결 유지'; },
+  } });
+  assert.deepEqual(menu, ['현재 연결 유지', '여기로 가져오기', '이 세션 연결 해제']);
+});

@@ -18,7 +18,7 @@ async function fixture(t) {
   t.after(async () => { await run(['kill-server']).catch(() => {}); await rm(root, { recursive: true, force: true }); });
   for (const directory of ['pi/bin', 'pi/lib', 'pi/node_modules/.bin', 'tools']) await mkdir(path.join(root, directory), { recursive: true });
   await copyFile(new URL('../../start-pi.sh', import.meta.url), path.join(root, 'start-pi.sh'));
-  for (const file of ['bin/pi-runtime.mjs', 'bin/pi-runtime-worker.mjs', 'bin/manager-options.mjs', 'lib/pi-runtime-restart.mjs', 'lib/full-restart.mjs', 'lib/pi-runtime.mjs', 'lib/pi-services.mjs', 'lib/tmux-windows.mjs', 'lib/managed-sessions.mjs', 'lib/manager-launch.mjs']) {
+  for (const file of ['bin/pi-runtime.mjs', 'bin/telegram-status.mjs', 'bin/pi-runtime-worker.mjs', 'bin/manager-options.mjs', 'lib/pi-runtime-restart.mjs', 'lib/full-restart.mjs', 'lib/pi-runtime.mjs', 'lib/pi-services.mjs', 'lib/tmux-windows.mjs', 'lib/managed-sessions.mjs', 'lib/manager-launch.mjs', 'lib/telegram-status.mjs']) {
     await copyFile(new URL(`../${file}`, import.meta.url), path.join(root, 'pi', file));
   }
   for (const service of ['scheduler', 'supervisor']) await writeFile(path.join(root, `pi/bin/${service}.mjs`), `import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(path.join(root, 'service-starts'))}, JSON.stringify({service:${JSON.stringify(service)},pid:process.pid})+'\\n'); setInterval(() => {}, 1000);`);
@@ -29,19 +29,19 @@ import('node:fs').then(async fs => {
   const net = await import('node:net');
   const session = execFileSync('tmux', ['display-message', '-p', '#S'], {encoding:'utf8'}).trim();
   fs.appendFileSync(${JSON.stringify(path.join(root, 'starts'))}, JSON.stringify({session,args:process.argv.slice(2)})+'\\n');
-  if (!process.argv.some(arg => arg.endsWith('/extensions/managed-session.mjs'))) { setInterval(() => {}, 1000); return; }
+  if (execFileSync('tmux', ['show-option', '-qv', '@s8-telegram'], {encoding:'utf8'}).trim() !== 'take') { setInterval(() => {}, 1000); return; }
   const socket = process.env.S8_PI_RESTART_DIR + '/' + session + '.sock';
   if (fs.existsSync(socket)) fs.unlinkSync(socket);
   net.createServer(client => client.once('data', data => {
     if (data.toString() === 'self-restart') {
-      spawn('bash', [${JSON.stringify(path.join(root, 'start-pi.sh'))}, '--no-telegram'], {stdio:'ignore'});
+      spawn('bash', [${JSON.stringify(path.join(root, 'start-pi.sh'))}, '--mode', 'project', '--no-telegram'], {stdio:'ignore'});
       client.end('ok'); return;
     }
     fs.appendFileSync(${JSON.stringify(path.join(root, 'telegram'))}, session+'\\n'); client.end('ok');
   })).listen(socket);
 });
 `, { mode: 0o755 });
-  const launch = args => exec('bash', [path.join(root, 'start-pi.sh'), ...args], {
+  const launch = args => exec('bash', [path.join(root, 'start-pi.sh'), '--mode', 'project', ...args], {
     env: { ...process.env, PATH: `${root}/tools:${process.env.PATH}`, S8_KB_ROOT: root, TMUX: '' }, timeout: 12000,
   });
   return { root, run, launch };
@@ -96,7 +96,8 @@ test('last launched Telegram session takes over; no-telegram sessions stay indep
   assert.deepEqual((await readFile(path.join(f.root, 'telegram'), 'utf8')).trim().split('\n'), ['s8-main', 's8-work']);
   const records = (await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').map(JSON.parse);
   const local = records.find(record => record.session === 's8-local');
-  assert.ok(!local.args.some(arg => /extensions\/(managed-session|telegram)\.mjs$/.test(arg)));
+  assert.ok(local.args.includes(path.join(f.root, 'pi/extensions/managed-session.mjs')));
+  assert.equal((await f.run(['show-option', '-qv', '-t', 's8-local', '@s8-telegram'])).stdout.trim(), 'off');
   await f.launch([]);
   assert.deepEqual((await readFile(path.join(f.root, 'telegram'), 'utf8')).trim().split('\n'), ['s8-main', 's8-work', 's8-main']);
   const sessions = (await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n').sort();
@@ -151,4 +152,84 @@ test('restart finishes even when it kills the Pi pane that requested it', async 
   assert.equal(completed, true);
   assert.notEqual((await f.run(['display-message', '-p', '-t', 's8-main:pi', '#{pane_pid}'])).stdout, before);
   assert.equal((await f.run(['display-message', '-p', '-t', 's8-main:pi', '#{pane_dead}'])).stdout.trim(), '0');
+});
+
+test('local mode works without KB or project config and does not start services', async t => {
+  const f = await fixture(t);
+  const result = await f.launch(['--mode', 'local', '--cwd', f.root]);
+  assert.match(result.stdout, /s8-local/);
+  await assert.rejects(readFile(path.join(f.root, 'service-starts')), { code: 'ENOENT' });
+  const first = JSON.parse((await readFile(path.join(f.root, 'starts'), 'utf8')).trim());
+  assert.ok(first.args.includes(path.join(f.root, 'pi/extensions/local.mjs')));
+  assert.ok(first.args.includes(path.join(f.root, 'pi/extensions/managed-session.mjs')));
+  assert.equal(first.args[first.args.indexOf('--tools') + 1], 'read,bash,edit,write,grep,find,ls');
+  await f.launch(['--mode', 'local', '--cwd', f.root]);
+  const second = (await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').map(JSON.parse).at(-1);
+  assert.ok(second.args.includes('--continue'));
+  const other = path.join(f.root, 'other');
+  await mkdir(other);
+  await f.launch(['--mode', 'local', '--cwd', other]);
+  const changed = (await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').map(JSON.parse).at(-1);
+  assert.ok(!changed.args.includes('--continue'));
+  assert.notEqual(changed.args[changed.args.indexOf('--session-dir') + 1], first.args[first.args.indexOf('--session-dir') + 1]);
+  await f.launch([]);
+  const services = await readFile(path.join(f.root, 'service-starts'), 'utf8');
+  await f.launch(['--mode', 'local', '--cwd', other]);
+  assert.equal(await readFile(path.join(f.root, 'service-starts'), 'utf8'), services);
+});
+
+test('noninteractive mode selection fails early; help and invalid modes are explicit', async t => {
+  const f = await fixture(t);
+  await assert.rejects(exec('bash', [path.join(f.root, 'start-pi.sh')]), /--mode project/);
+  await assert.rejects(f.launch(['--mode', 'invalid']), /모드는 project 또는 local/);
+  assert.match((await f.launch(['--help'])).stdout, /--mode project\|local/);
+});
+
+test('telegram take/off aliases and saved preference survive runtime restart', async t => {
+  const f = await fixture(t);
+  await f.launch(['--telegram', 'off']);
+  assert.equal((await f.run(['show-option', '-qv', '-t', 's8-main', '@s8-telegram'])).stdout.trim(), 'off');
+  await f.launch([]);
+  await assert.rejects(readFile(path.join(f.root, 'telegram')), { code: 'ENOENT' });
+  await f.launch(['--telegram', 'take']);
+  assert.equal((await f.run(['show-option', '-qv', '-t', 's8-main', '@s8-telegram'])).stdout.trim(), 'take');
+  await f.launch(['--no-telegram']);
+  await f.launch([]);
+  assert.equal((await readFile(path.join(f.root, 'telegram'), 'utf8')).trim(), 's8-main');
+  await assert.rejects(f.launch(['--telegram', 'unknown']), /take 또는 off/);
+});
+
+test('interactive startup shows mode and Telegram choices and defaults to keeping the connection', async t => {
+  const f = await fixture(t);
+  const script = `import os, pty, select, subprocess, sys, time
+master, slave = pty.openpty()
+p = subprocess.Popen(['bash', sys.argv[1]], stdin=slave, stdout=slave, stderr=slave)
+os.close(slave)
+os.write(master, b'2\\n1\\n')
+output = bytearray()
+deadline = time.monotonic() + 20
+while time.monotonic() < deadline:
+    if select.select([master], [], [], 0.1)[0]:
+        try:
+            data = os.read(master, 65536)
+            if not data: break
+            output.extend(data)
+        except OSError: break
+    if p.poll() is not None: break
+if p.poll() is None:
+    p.kill()
+    raise RuntimeError('interactive launch timed out')
+os.close(master)
+sys.stdout.buffer.write(output)
+sys.exit(p.wait())
+`;
+  const { stdout } = await exec('python3', ['-c', script, path.join(f.root, 'start-pi.sh')], {
+    cwd: f.root, env: { ...process.env, PATH: `${f.root}/tools:${process.env.PATH}`, S8_KB_ROOT: f.root, TMUX: '' }, timeout: 25000,
+  });
+  assert.match(stdout, /실행 모드/);
+  assert.match(stdout, /Telegram 현재 연결/);
+  assert.match(stdout, /현재 연결 유지/);
+  assert.match(stdout, /여기로 가져오기/);
+  assert.match(stdout, /s8-local/);
+  assert.equal((await f.run(['show-option', '-qv', '-t', 's8-local', '@s8-telegram'])).stdout.trim(), 'off');
 });

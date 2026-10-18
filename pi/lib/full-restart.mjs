@@ -43,6 +43,8 @@ export async function runFullRestart(root, options, directory, { run = runTmux, 
   if (!validSession(session)) throw new Error('Invalid restart session');
   const owner = (await run(['show-option', '-qv', '-t', session, '@s8-runtime-root'])).stdout.trim();
   if (owner !== root) throw new Error('Restart session belongs to another checkout');
+  const mode = (await run(['show-option', '-qv', '-t', session, '@s8-mode'])).stdout.trim() || 'project';
+  if (mode === 'local') return runtime(root, { session, mode, args: [], scheduler: false, supervisor: false, telegram: undefined });
   const lockName = 's8-full-restart-' + createHash('sha256').update(root).digest('hex');
   const lockFile = path.join(root, '.s8-runtime/runtime-restarts/all.lock');
   const handle = await withTmuxLock(run, lockName, async () => {
@@ -72,7 +74,7 @@ export async function runFullRestart(root, options, directory, { run = runTmux, 
     await progress('infra'); await infra(root);
     await progress('infra-ready'); await ready();
     await progress('pi');
-    const value = await runtime(root, { session, args: [], scheduler: true, supervisor: true, telegram: true });
+    const value = await runtime(root, { session, args: [], scheduler: true, supervisor: true, telegram: undefined });
     await progress('completed');
     return value;
   } catch {

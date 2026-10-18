@@ -18,7 +18,7 @@ async function fixture(t) {
     if (args[0] === 'send-keys') { const name = args[2].slice(1); stopped.add(name); events.push(`stop:${name}`); }
     return { stdout: '' };
   };
-  const deps = { run, infra: async () => { events.push('infra'); }, ready: async () => { events.push('ready'); }, runtime: async (_root, options) => { events.push('pi'); assert.equal(options.session, 's8-work'); assert.equal(options.telegram, true); return { session: options.session }; } };
+  const deps = { run, infra: async () => { events.push('infra'); }, ready: async () => { events.push('ready'); }, runtime: async (_root, options) => { events.push('pi'); assert.equal(options.session, 's8-work'); assert.equal(options.telegram, undefined); return { session: options.session }; } };
   return { root, directory, events, deps };
 }
 
@@ -63,4 +63,16 @@ test('infrastructure runner uses a fixed script and completion notifications pre
   assert.equal(await notifyFullRestart({ chat: -100, thread: 7 }, 'Restart complete', { token: 'fixture-token', fetchImpl: async (_url, options) => { calls.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ ok: true }) }; } }), true);
   assert.deepEqual(calls, [{ chat_id: -100, message_thread_id: 7, text: 'Restart complete' }]);
   assert.equal(await notifyFullRestart({ chat: 1 }, 'Failed', { token: 'fixture-token', fetchImpl: async () => { throw new Error('offline'); } }), false);
+});
+
+test('local full restart leaves project infrastructure and services untouched', async t => {
+  const f = await fixture(t);
+  const run = async args => args.at(-1) === '@s8-mode' ? { stdout: 'local' } : f.deps.run(args);
+  await runFullRestart(f.root, { session: 's8-work' }, f.directory, { ...f.deps, run, runtime: async (_root, options) => {
+    assert.equal(options.mode, 'local');
+    assert.equal(options.scheduler, false);
+    assert.equal(options.supervisor, false);
+    f.events.push('local-pi');
+  } });
+  assert.deepEqual(f.events, ['local-pi']);
 });

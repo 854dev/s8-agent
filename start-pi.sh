@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# S8 범용 매니저와 스케줄러·개발 감독을 기본으로 실행한다. 일반 파일·Bash 작업과 Projectman 개발 위임을 지원한다.
+# project: Projectman 관리·개발 위임 / local: 프로젝트 서비스 없는 범용 에이전트.
 # 사용 예: ./start-pi.sh / ./start-pi.sh --continue / ./start-pi.sh --session manager
-# 기본으로 Telegram을 연결하며 마지막 실행 세션이 연결을 가져간다. --no-telegram으로 단독 실행한다.
+# Telegram은 시작 메뉴에서 유지/가져오기를 선택한다. --telegram take/off로 명시할 수 있다.
 # 루트 .env의 연결 설정을 자식 프로세스에 전달하며 인증 값은 출력하지 않는다.
 # 모델 인증·대화는 .pi-runtime에 보관한다. 처음 실행하면 Pi에서 /login을 수행한다.
 # Pi와 두 서비스는 하나의 tmux 세션의 별도 창에서 유지된다. --no-scheduler / --no-supervisor로 자동 시작을 제외한다.
@@ -34,8 +34,32 @@ fi
 # 서비스 제어 옵션은 Pi에 넘기지 않고 여기서 소비한다. 옵션 위치와 관계없이 처리한다.
 service_options=()
 manager_options=()
-telegram=true
-for option in "$@"; do
+telegram=auto
+mode=""
+local_cwd="$PWD"
+profile_options=()
+while (($#)); do
+    case "$1" in
+        --mode|--cwd)
+            [[ $# -ge 2 && -n "$2" ]] || { echo "$1 값이 필요합니다." >&2; exit 2; }
+            if [[ "$1" == --mode ]]; then mode="$2"; else local_cwd="$2"; fi
+            shift 2 ;;
+        --manager) mode=project; shift ;;
+        --telegram)
+            telegram=true
+            case "${2:-}" in
+                take) shift ;;
+                off) telegram=false; shift ;;
+                '') ;;
+                --*) ;;
+                *) echo '--telegram은 take 또는 off를 받습니다.' >&2; exit 2 ;;
+            esac
+            shift ;;
+        --no-telegram) telegram=false; shift ;;
+        *) profile_options+=("$1"); shift ;;
+    esac
+done
+for option in ${profile_options[@]+"${profile_options[@]}"}; do
     case "$option" in
         --telegram) telegram=true ;;
         --no-telegram) telegram=false ;;
@@ -49,12 +73,17 @@ set -- ${manager_options[@]+"${manager_options[@]}"}
 if [[ "${1:-}" == --manager ]]; then shift; fi
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
     printf '%s\n' \
-        '사용법: ./start-pi.sh [Pi 옵션]' \
-        '  (인자 없음)      s8-main의 Pi·스케줄러·개발 감독 재시작 및 Telegram 연결' \
+        '사용법: ./start-pi.sh [--mode project|local] [--cwd 경로] [Pi 옵션]' \
+        '  --mode project  Projectman 관리·개발 위임 (기존 실행)' \
+        '  --mode local    로컬 범용 에이전트 (프로젝트 서비스 없음)' \
+        '  --cwd 경로      로컬 작업 디렉터리 (기본: 실행 위치)' \
+        '  모드 생략 시 터미널에서 선택, 자동화에서는 명시 필수'  \
+        '  (인자 없음)      프로젝트 / 로컬 모드 선택' \
         '  --no-scheduler   스케줄러 자동 시작 제외' \
         '  --no-supervisor  개발 슈퍼바이저 자동 시작 제외' \
         '  --service 종류   scheduler 또는 supervisor만 전경 실행 (감독 --check 지원)' \
-        '  --telegram       Telegram 연결 (기본값, 마지막 실행 세션이 연결을 가져감)' \
+        '  --telegram take  이 세션으로 Telegram 연결 이전 (단독 --telegram도 호환)' \
+        '  --telegram off   이 세션의 Telegram 연결 비활성 (--no-telegram도 호환)' \
         '  --no-telegram    Telegram 없이 단독 실행' \
         '  --manager        기본 매니저의 별칭 (일반 대화·파일·Bash·Projectman·KB·예약)' \
         '  --sessions       실행 중인 S8 tmux 세션 목록' \
@@ -69,6 +98,29 @@ fi
 if [[ "${1:-}" == --sessions ]]; then
     exec node "$AGENT_ROOT/pi/bin/pi-runtime.mjs" --sessions
 fi
+if [[ -z "$mode" ]]; then
+    case "${1:-}" in
+        install|remove|uninstall|update|list|config|--version) mode=local ;;
+        *)
+            if [[ ! -t 0 ]]; then echo '--mode project 또는 --mode local을 지정하세요.' >&2; exit 2; fi
+            printf '%s\n' '실행 모드: 1) Projectman 프로젝트 관리·개발  2) 로컬 범용 에이전트'
+            read -r -p '선택 [1/2]: ' selection
+            case "$selection" in 1|project) mode=project ;; 2|local) mode=local ;; *) echo '잘못된 모드 선택입니다.' >&2; exit 2 ;; esac ;;
+    esac
+fi
+case "$mode" in project|local) ;; *) echo '모드는 project 또는 local이어야 합니다.' >&2; exit 2 ;; esac
+if [[ "$telegram" == auto && -t 0 && "${1:-}" != --managed ]]; then
+    case "${1:-}" in
+        install|remove|uninstall|update|list|config|--version|--print) ;;
+        *)
+            current_telegram="$(node "$AGENT_ROOT/pi/bin/telegram-status.mjs")"
+            printf 'Telegram 현재 연결: %s\n' "$current_telegram"
+            printf '%s\n' '1) 현재 연결 유지  2) 여기로 가져오기'
+            read -r -p '선택 [1]: ' selection
+            case "$selection" in ''|1) telegram=keep ;; 2|take) telegram=true ;; *) echo '잘못된 Telegram 선택입니다.' >&2; exit 2 ;; esac ;;
+    esac
+fi
+local_cwd="$(cd -- "$local_cwd" && pwd -P)"
 # 대화형 실행은 백그라운드 tmux 런타임을 준비하고 목록만 출력한다.
 # --managed는 런타임의 Pi 창에서만 사용하는 내부 전경 실행 옵션이다.
 managed=false
@@ -82,19 +134,30 @@ else
         case "$option" in --version|--print) runtime=false ;; esac
     done
     if $runtime; then
-        telegram_option=--telegram
-        $telegram || telegram_option=--no-telegram
-        exec node "$AGENT_ROOT/pi/bin/pi-runtime.mjs" "$telegram_option" ${service_options[@]+"${service_options[@]}"} "$@"
+        telegram_options=()
+        case "$telegram" in
+            true) telegram_options=(--telegram take) ;;
+            false) telegram_options=(--telegram off) ;;
+            keep) telegram_options=(--telegram-keep) ;;
+        esac
+        exec node "$AGENT_ROOT/pi/bin/pi-runtime.mjs" --mode "$mode" --cwd "$local_cwd" ${telegram_options[@]+"${telegram_options[@]}"} ${service_options[@]+"${service_options[@]}"} "$@"
     fi
 fi
+if [[ "$telegram" == auto ]]; then
+    telegram=false
+    [[ "$mode" != project ]] || telegram=true
+fi
 # 연결·KB 경로 설정을 로드한다. 내용이나 인증 값을 로그로 출력하지 않는다.
-[ ! -f "$AGENT_ROOT/.env" ] || { set -a; source "$AGENT_ROOT/.env"; set +a; }
+if [[ "$mode" == project || "$telegram" == true || "$managed" == true ]]; then
+    [ ! -f "$AGENT_ROOT/.env" ] || { set -a; source "$AGENT_ROOT/.env"; set +a; }
+fi
 if [[ "${1:-}" == telegram ]]; then
     printf '%s\n' 'telegram 단독 실행은 지원하지 않습니다. 인자 없이 ./start-pi.sh를 실행하세요.' >&2
     exit 2
 fi
 # 상대 KB 경로는 저장소 루트 기준으로 해석하고 실제 작업 디렉터리로 사용한다.
-KNOWLEDGE_BASE_ROOT="${S8_KB_ROOT:-$AGENT_ROOT/../854_md}"
+KNOWLEDGE_BASE_ROOT="$local_cwd"
+if [[ "$mode" == project ]]; then KNOWLEDGE_BASE_ROOT="${S8_KB_ROOT:-$AGENT_ROOT/../854_md}"; fi
 case "$KNOWLEDGE_BASE_ROOT" in
     /*) ;;
     *) KNOWLEDGE_BASE_ROOT="$AGENT_ROOT/$KNOWLEDGE_BASE_ROOT" ;;
@@ -152,22 +215,32 @@ stop_pi() {
 }
 trap stop_pi INT TERM HUP
 while true; do
+    if $managed; then
+        telegram=false
+        [[ "$(tmux show-option -qv @s8-telegram)" != take ]] || telegram=true
+    fi
     pi_args=(
         --no-extensions --no-skills --no-prompt-templates --no-context-files
-        --extension "$PI_CONFIG_ROOT/extensions/manager.ts"
+        --extension "$PI_CONFIG_ROOT/extensions/$([[ "$mode" == project ]] && echo manager.ts || echo local.mjs)"
     )
     if $managed; then
         managed_name="$(tmux display-message -p '#S')"
         [[ "$managed_name" =~ ^s8-[A-Za-z0-9_-]{1,40}$ ]] || { echo '관리 세션에서만 실행할 수 있습니다.' >&2; exit 2; }
-        pi_args+=(--session-dir "$PI_CODING_AGENT_DIR/managed/$managed_name")
-        if $telegram; then pi_args+=(--extension "$PI_CONFIG_ROOT/extensions/managed-session.mjs"); fi
+        session_path="$PI_CODING_AGENT_DIR/managed/$managed_name"
+        if [[ "$mode" == local ]]; then
+            cwd_key="$(printf '%s' "$KNOWLEDGE_BASE_ROOT" | sha256sum | cut -c1-16)"
+            session_path="$PI_CODING_AGENT_DIR/local/$managed_name/$cwd_key"
+        fi
+        pi_args+=(--session-dir "$session_path")
+        pi_args+=(--extension "$PI_CONFIG_ROOT/extensions/managed-session.mjs")
     elif $telegram; then
         pi_args+=(--extension "$PI_CONFIG_ROOT/extensions/telegram.mjs")
     fi
-    pi_args+=(
-        --system-prompt "$AGENT_ROOT/agents/manager/SYSTEM.md"
-        --tools projectman,kb,scheduler,read,bash,edit,write,grep,find,ls
-    )
+    if [[ "$mode" == project ]]; then
+        pi_args+=(--system-prompt "$AGENT_ROOT/agents/manager/SYSTEM.md" --tools projectman,kb,scheduler,read,bash,edit,write,grep,find,ls)
+    else
+        pi_args+=(--system-prompt "$AGENT_ROOT/agents/local/SYSTEM.md" --tools read,bash,edit,write,grep,find,ls)
+    fi
     pi_args+=(${restart_args[@]+"${restart_args[@]}"})
     if (($# > 0)); then
         pi_args+=("$@")
