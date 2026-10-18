@@ -45,7 +45,7 @@ export class ProjectmanClient {
       signal: this.signal ? AbortSignal.any([this.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) throw new Error(`PH-CMS request failed (HTTP ${response.status})`);
-    return response.json() as Promise<T>;
+    return response.status === 204 ? undefined as T : response.json() as Promise<T>;
   }
 
   async list(type: string, parentUid?: string, filters?: Record<string, string | boolean>): Promise<ProjectmanContent[]> {
@@ -66,7 +66,7 @@ export class ProjectmanClient {
     const query = new URLSearchParams({ channelSlug: 'ph-projectman', uids: uid, withDetail: 'true', withParent: 'true' });
     const result = await this.request<Page>(`contents?${query}`);
     const item = result.content.find(content => content.uid === uid);
-    if (!item || !['task', 'subtask', 'project', 'workspace'].includes(item.type)) throw new Error('Projectman item not found');
+    if (!item || !['task', 'subtask', 'project', 'workspace'].includes(item.type)) throw new Error('Projectman item not found (HTTP 404)');
     return item;
   }
 
@@ -93,7 +93,7 @@ export class ProjectmanClient {
   }
 
   async capabilities() {
-    return this.request<{ workflowVersion: 2; humanDecisions: boolean; atomicClaims: boolean; idempotentReports: boolean; actorType?: string }>('projectman/capabilities');
+    return this.request<{ workflowVersion: 2; safeResourceDelete?: boolean; humanDecisions: boolean; atomicClaims: boolean; idempotentReports: boolean; actorType?: string }>('projectman/capabilities');
   }
 
   async workflow(uid: string, operation: Record<string, unknown>) {
@@ -123,6 +123,21 @@ export class ProjectmanClient {
       channelSlug: 'ph-projectman', parentUid, type, title, text, tags, status: 'published',
       attributes: ['task', 'subtask'].includes(type) ? { state: 'todo', autorun: false, ...(type === 'subtask' ? { timeBudgetMinutes: 20 } : {}) } : type === 'project' ? { repoPath } : {},
     }) });
+  }
+
+  // Human console entry point; the agent-facing create() keeps its workspace restriction.
+  async createWorkspace(title: string, text: string) {
+    return this.request<ProjectmanContent>('contents', { method: 'POST', body: JSON.stringify({ channelSlug: 'ph-projectman', type: 'workspace', title, text, status: 'published', attributes: {} }) });
+  }
+
+  async editResource(uid: string, title: string, text: string) {
+    await this.get(uid); // Resolve in the Projectman channel, never an arbitrary content UID.
+    return this.request<ProjectmanContent>(`contents/${encodeURIComponent(uid)}`, { method: 'PUT', body: JSON.stringify({ title, text }) });
+  }
+
+  async deleteResource(uid: string) {
+    await this.get(uid);
+    await this.request<void>(`contents/${encodeURIComponent(uid)}`, { method: 'DELETE' });
   }
 
   async bindProject(uid: string, repoPath: string) {

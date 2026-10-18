@@ -40,7 +40,31 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
         if (!['task', 'subtask', 'workspace', 'project'].includes(type)) return json(res, 400, { error: '잘못된 작업 유형입니다.' });
         return json(res, 200, { items: await client.list(type, url.searchParams.get('parentUid') ?? undefined) });
       }
+      if (req.method === 'POST' && url.pathname === '/api/projectman/items') {
+        const input = await body(req);
+        const parents = { workspace: null, project: 'workspace', task: 'project', subtask: 'task' };
+        if (!Object.hasOwn(parents, input.type) || typeof input.title !== 'string' || !input.title.trim() || input.title.length > 200 || typeof input.text !== 'string' || input.text.length > 50000 ||
+          (input.type === 'workspace' ? input.parentUid : typeof input.parentUid !== 'string') ||
+          (input.type === 'project' && (typeof input.repoPath !== 'string' || !path.isAbsolute(input.repoPath))) ||
+          Object.keys(input).some(key => !['type', 'parentUid', 'title', 'text', 'repoPath'].includes(key))) return json(res, 400, { error: '유형·제목·상위 항목과 프로젝트 저장소 절대 경로를 확인하세요.' });
+        if (parents[input.type] && (await client.get(input.parentUid)).type !== parents[input.type]) return json(res, 400, { error: '상위 항목의 유형이 맞지 않습니다.' });
+        const created = input.type === 'workspace' ? await client.createWorkspace(input.title.trim(), input.text) : await client.create(input.parentUid, input.type, input.title.trim(), input.text, [], input.repoPath);
+        return json(res, 201, { item: created });
+      }
       const item = /^\/api\/projectman\/items\/([a-zA-Z0-9_-]+)$/.exec(url.pathname);
+      if (item && ['PATCH', 'DELETE'].includes(req.method)) {
+        const input = await body(req);
+        if (typeof input.title !== 'string' || !input.title.trim() || input.title.length > 200 || Object.keys(input).some(key => !['title', ...(req.method === 'PATCH' ? ['text'] : [])].includes(key))) return json(res, 400, { error: '제목을 확인하세요.' });
+        if (req.method === 'PATCH') {
+          if (typeof input.text !== 'string' || input.text.length > 50000) return json(res, 400, { error: '본문을 확인하세요.' });
+          return json(res, 200, { item: await client.editResource(item[1], input.title.trim(), input.text) });
+        }
+        if ((await client.capabilities()).safeResourceDelete !== true) return json(res, 503, { error: 'PH-CMS에 안전한 리소스 삭제 지원을 먼저 적용해야 합니다.' });
+        const current = await client.get(item[1]);
+        if (input.title !== current.title) return json(res, 409, { error: '삭제할 항목의 현재 제목을 정확히 입력하세요.' });
+        await client.deleteResource(current.uid);
+        return json(res, 200, { deleted: true });
+      }
       if (req.method === 'GET' && item) {
         const content = await client.get(item[1]);
         const workflow = ['task', 'subtask'].includes(content.type) ? await client.getWorkflow(content.uid) : null;
@@ -80,7 +104,7 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
     } catch (error) {
       const upstream = /HTTP (\d+)/.exec(error.message ?? '');
       const status = error.status ?? (upstream ? Number(upstream[1]) : error.code === 'ENOENT' ? 404 : 503);
-      const messages = { 400: '요청을 확인하세요.', 401: 'PH-CMS 사용자 로그인이 필요합니다.', 403: '이 작업을 확인하거나 결정할 권한이 없습니다.', 404: '대상을 찾지 못했습니다.', 409: '작업 또는 결정이 변경됐습니다. 새로고침 후 다시 확인하세요.', 413: '요청 또는 기록이 너무 큽니다.' };
+      const messages = { 400: '요청을 확인하세요.', 401: 'PH-CMS 사용자 로그인이 필요합니다.', 403: '이 작업을 확인하거나 결정할 권한이 없습니다.', 404: '대상을 찾지 못했습니다.', 409: '하위 리소스를 먼저 삭제하고 실행을 종료하세요. 작업 또는 결정이 변경된 경우 새로고침 후 다시 확인하세요.', 413: '요청 또는 기록이 너무 큽니다.' };
       return json(res, status >= 400 && status <= 599 ? status : 503, { error: messages[status] ?? 'Projectman 연결 또는 기록 조회에 실패했습니다.' });
     }
   });

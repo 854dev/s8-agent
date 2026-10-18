@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ConsoleError, createRequestId, list, request, type Detail, type Item } from './api'
+import ResourceForm, { type ResourceEditor } from './ResourceForm'
 import './projectman.css'
 
 const labels: Record<string, string> = { todo: '일 시작 전', ready: '실행 대기', doing: '실행 중', blocked: '대기', review: '결과 검토', done: '완료', canceled: '취소' }
@@ -30,6 +31,11 @@ export default function ProjectmanPage() {
   const [items, setItems] = useState<Item[]>([]), [projects, setProjects] = useState<Item[]>([]), [workspaces, setWorkspaces] = useState<Item[]>([])
   const [workspace, setWorkspace] = useState(new URLSearchParams(location.search).get('workspace') ?? ''), [humanOnly, setHumanOnly] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [editor, setEditor] = useState<ResourceEditor | null>(null)
+  const resourceForm = useRef<HTMLDivElement>(null)
+  useEffect(() => { if (editor) resourceForm.current?.scrollIntoView?.({ block: 'start' }) }, [editor])
+  const createResource = (type: string, parentUid?: string) => { setError(''); setNotice(''); setEditor({ mode: 'create', item: { uid: '', type, title: '', ...(parentUid ? { parent: { uid: parentUid } } : {}) } }) }
+  const editResource = (item: Item, mode: 'edit' | 'delete') => { setError(''); setNotice(''); setEditor({ mode, item }) }
   const detailPanel = useRef<HTMLElement>(null)
   const lastTaskButton = useRef<HTMLButtonElement | null>(null)
   const [uid, setUid] = useState(new URLSearchParams(location.search).get('task') ?? '')
@@ -42,7 +48,7 @@ export default function ProjectmanPage() {
   selectedTask.current = uid
   const eventSelection = useRef('')
   eventSelection.current = `${uid}:${selectedRun || detail?.execution?.workflow?.run?.id || ''}`
-  const fail = useCallback((cause: unknown) => { if (cause instanceof ConsoleError && cause.status === 401) setAuthenticated(false); setError(cause instanceof Error ? cause.message : '연결에 실패했습니다.') }, [])
+  const fail = useCallback((cause: unknown) => { if (cause instanceof ConsoleError && cause.status === 401) { setAuthenticated(false); setEditor(null) } setError(cause instanceof Error ? cause.message : '연결에 실패했습니다.') }, [])
   const refresh = useCallback(async (signal?: AbortSignal) => {
     const [tasks, children, ws, ps] = await Promise.all([list('task', '', signal), list('subtask', '', signal), list('workspace', '', signal), list('project', '', signal)])
     if (!signal?.aborted) { setItems([...tasks.items, ...children.items]); setWorkspaces(ws.items); setProjects(ps.items); setLoaded(true) }
@@ -113,10 +119,17 @@ export default function ProjectmanPage() {
   const runId = selectedRun || workflow?.run?.id
   const runs = [...new Set([...(detail?.logs ?? []).map(log => log.detail?.attributes.result?.workflow?.run?.id).filter((id): id is string => Boolean(id)), ...(workflow?.run?.id ? [workflow.run.id] : [])])]
   return <main className={`pm-page ${authenticated ? 'pm-page--console' : ''}`}>
-    <header className="pm-header"><div><h1>작업과 결정</h1><p>프로젝트 진행 상황과 검토가 필요한 작업을 확인하세요.</p></div>{authenticated && <button onClick={() => { void request('/logout', { method: 'POST' }).then(() => { setAuthenticated(false); setItems([]); setDetail(null) }).catch(fail) }}>로그아웃</button>}</header>
+    <header className="pm-header"><div><h1>작업과 결정</h1><p>프로젝트 진행 상황과 검토가 필요한 작업을 확인하세요.</p></div>{authenticated && <button onClick={() => { void request('/logout', { method: 'POST' }).then(() => { setAuthenticated(false); setItems([]); setDetail(null); setEditor(null) }).catch(fail) }}>로그아웃</button>}</header>
     {error && <div role="alert" className="pm-error">{error}{pending.current && <button disabled={busy} onClick={() => { void mutate(pending.current!.operation) }}>같은 요청 확인·재시도</button>}</div>}
     {notice && <p role="status" className="pm-notice">{notice}</p>}
     {checking ? <p>사용자 세션 확인 중…</p> : sessionUnavailable ? <section className="pm-login"><h2>콘솔에 연결할 수 없습니다.</h2><p>Projectman 콘솔 서버와 PH-CMS가 실행 중인지 확인하세요.</p><button onClick={() => setSessionAttempt(value => value + 1)}>연결 다시 시도</button></section> : !authenticated ? <form className="pm-login" onSubmit={event => { event.preventDefault(); setBusy(true); setError(''); void request('/login', { method: 'POST', body: JSON.stringify({ email, password }) }).then(() => { setPassword(''); setAuthenticated(true) }).catch(fail).finally(() => setBusy(false)) }}><h2>PH-CMS 사용자 로그인</h2><p>사람의 결정은 사용자 계정으로 기록합니다.</p><label>이메일<input autoComplete="username" type="email" required value={email} onChange={event => setEmail(event.target.value)} /></label><label>비밀번호<input autoComplete="current-password" type="password" required value={password} onChange={event => setPassword(event.target.value)} /></label><button className="pm-primary" disabled={busy}>로그인</button></form> : <>
+      <div className="pm-actions pm-resource-actions"><button disabled={busy} onClick={() => createResource('workspace')}>워크스페이스 만들기</button></div>
+      {editor && <div ref={resourceForm}><ResourceForm key={`${editor.mode}:${editor.item.type}:${editor.item.uid}:${editor.item.parent?.uid}`} editor={editor} onClose={() => setEditor(null)} onError={fail} onSaved={async deleted => {
+        setEditor(null); setError(''); setNotice(deleted ? '목록에서 삭제했습니다. 데이터와 작업 로그는 보존됩니다.' : '저장했습니다.')
+        if (deleted && selectedTask.current === editor.item.uid) closeDetail()
+        if (deleted && editor.item.type === 'workspace' && workspace === editor.item.uid) selectWorkspace('')
+        await refresh(); if (!deleted && selectedTask.current === editor.item.uid) await refreshDetail()
+      }} /></div>}
       <div className="pm-workspace-layout">
         <nav className="pm-workspaces" aria-label="워크스페이스">
           <h2>워크스페이스</h2>
@@ -126,11 +139,13 @@ export default function ProjectmanPage() {
         </nav>
         <div className="pm-workspace-content">
           <div className="pm-board-heading"><div><h2>{workspaceTitle}</h2><p>{scopedProjects.length}개 프로젝트 · {scopedItems.length}개 작업</p></div><button onClick={() => { setError(''); void Promise.all([refresh(), refreshDetail()]).catch(fail) }}>새로고침</button></div>
+          {workspace && workspaces.find(item => item.uid === workspace) && <section aria-label="워크스페이스 관리"><p className="pm-text">{workspaces.find(item => item.uid === workspace)?.detail?.text}</p><div className="pm-actions pm-resource-actions"><button disabled={busy} onClick={() => createResource('project', workspace)}>프로젝트 만들기</button><button disabled={busy} onClick={() => editResource(workspaces.find(item => item.uid === workspace)!, 'edit')}>워크스페이스 수정</button><button disabled={busy} className="pm-danger" onClick={() => editResource(workspaces.find(item => item.uid === workspace)!, 'delete')}>워크스페이스 삭제</button></div></section>}
           <div className="pm-stats"><button className="pm-human-filter" aria-pressed={humanOnly} onClick={() => setHumanOnly(value => !value)}><strong>{waiting}</strong><span>인간 결정 대기</span><small>{humanOnly ? '전체 작업 보기' : '대기 요청만 보기'}</small></button><div><strong>{scopedItems.filter(item => item.detail?.attributes.state === 'doing').length}</strong><span>실행 중</span></div><div><strong>{scopedItems.filter(item => item.detail?.attributes.state === 'review').length}</strong><span>결과 검토</span></div></div>
           {groups.length > 1 && <nav className="pm-project-jumps" aria-label="프로젝트 바로가기">{groups.map(group => <a key={group.uid} href={`#project-${group.uid}`}>{group.title}<span>{group.items.length}</span></a>)}</nav>}
           <div className="pm-projects" aria-label="프로젝트별 작업 보드">
             {!loaded ? <p className="pm-empty">워크스페이스를 불러오는 중…</p> : !groups.length ? <p className="pm-empty">{humanOnly ? '인간 결정 대기 중인 작업이 없습니다.' : '표시할 프로젝트나 작업이 없습니다.'}</p> : groups.map(group => <section key={group.uid} className="pm-project" id={`project-${group.uid}`} aria-label={group.title}>
-              <header><h3>{group.title}</h3><span>{group.items.length}개 작업</span></header>
+              <header><h3>{group.title}</h3><span>{group.items.length}개 작업</span>{projects.find(item => item.uid === group.uid) && <div className="pm-actions"><button disabled={busy} onClick={() => createResource('task', group.uid)}>작업 만들기</button><button disabled={busy} onClick={() => editResource(projects.find(item => item.uid === group.uid)!, 'edit')}>프로젝트 수정</button><button disabled={busy} className="pm-danger" onClick={() => editResource(projects.find(item => item.uid === group.uid)!, 'delete')}>프로젝트 삭제</button></div>}</header>
+              {projects.find(item => item.uid === group.uid)?.detail?.text && <p className="pm-project-text pm-text">{projects.find(item => item.uid === group.uid)?.detail?.text}</p>}
               <div className="pm-status-board">{Object.entries(labels).map(([state, label]) => {
                 const tasks = group.items.filter(item => (item.detail?.attributes.state ?? 'todo') === state)
                 return <section className={`pm-lane pm-lane--${state}`} aria-label={`${group.title} · ${label}`} key={state}><h4>{label}<span>{tasks.length}</span></h4><div className="pm-lane-tasks">{tasks.length ? tasks.map(item => <button className={`pm-task ${uid === item.uid ? 'selected' : ''}`} key={item.uid} onClick={event => select(item.uid, event.currentTarget)}><strong>{item.title}</strong>{item.detail?.attributes.workflow?.review?.pending && <span className="pm-question-badge">{needsHuman(item) ? '인간 결정 필요' : '매니저 확인 필요'}</span>}<small>{item.type === 'subtask' ? `하위 작업 · ${itemById.get(item.parent?.uid ?? '')?.title ?? ''}` : ({ manager: '매니저', developer: '개발 에이전트', human: '사람' }[responsibleRole(item)])}</small></button>) : <p className="pm-lane-empty">—</p>}</div></section>
@@ -141,6 +156,7 @@ export default function ProjectmanPage() {
       </div>
       {uid && <div className="pm-layout"><article aria-label="작업 상세" ref={detailPanel}><div className="pm-detail-toolbar"><h2>작업 상세</h2><button onClick={closeDetail}>보드로 돌아가기</button></div>{!detail ? <p className="pm-empty">작업을 불러오는 중…</p> : <>
         <div className="pm-detail-head"><span className="pm-status">{reviewLabel(detail)}</span><h2>{detail.item.title}</h2><small>{detail.item.uid} · 버전 {workflow?.revision ?? 0}</small></div>
+        <div className="pm-actions pm-resource-actions">{detail.item.type === 'task' && <button disabled={busy} onClick={() => createResource('subtask', detail.item.uid)}>하위 작업 만들기</button>}<button disabled={busy || Boolean(workflow)} onClick={() => editResource(detail.item, 'edit')}>작업 수정</button><button disabled={busy} className="pm-danger" onClick={() => editResource(detail.item, 'delete')}>작업 삭제</button></div>
         <section><h3>원래 요청</h3><p className="pm-text">{detail.item.detail?.text || '등록된 요청 본문이 없습니다.'}</p></section>
         {detail.execution.state === 'todo' && <section><h3>일 시작 전 · 매니저 검토</h3><p>요구사항의 누락·충돌·의문은 매니저가 먼저 확인하고 사용자 답변을 작업에 반영합니다. 최종 승인 후에는 개발 에이전트가 범위 안에서 스스로 결정하며 진행합니다.</p>{detail.execution.preflightReviewed ? <><p>매니저 사전 검토 완료 · 최종 승인 대기</p><p className="pm-text">{detail.item.detail?.attributes.s8Preflight?.summary}</p></> : <p>매니저 사전 검토가 끝나야 최종 승인할 수 있습니다.</p>}</section>}
         {workflow?.spec && <section><h3>실행 계획과 완료 조건</h3><ul>{workflow.spec.completionCriteria.map((value, i) => <li key={i}>{value}</li>)}</ul><dl><dt>저장소</dt><dd>{workflow.spec.repoPath}</dd><dt>실행 계획</dt><dd className="pm-text">{workflow.spec.plan}</dd><dt>계획 버전</dt><dd>{workflow.planVersion} · {workflow.planHash}</dd><dt>대화·결정 근거</dt><dd>{workflow.spec.decisionRefs.join(', ')}</dd><dt>명령</dt><dd>{workflow.spec.commandNames.join(', ') || '없음'}</dd><dt>선행 작업</dt><dd>{workflow.spec.dependsOn.join(', ') || '없음'}</dd></dl>{!workflow.grant && detail.execution.state === 'todo' && detail.execution.preflightReviewed && <><label className="pm-check"><input type="checkbox" checked={confirmed} onChange={event => setConfirmedRevision(event.target.checked ? workflow.revision : null)} />매니저와 논의한 최종 계획을 확인하고 이 버전으로 실행을 요청합니다.</label><button disabled={busy || !confirmed} className="pm-primary" onClick={() => { void mutate({ action: 'authorize', planHash: workflow.planHash, message: '사람과 매니저의 논의를 반영한 최종 계획을 확인하고 실행을 요청합니다.' }) }}>최종 계획 확정 · 실행</button></>}</section>}

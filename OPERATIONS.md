@@ -60,6 +60,14 @@ Pi 창이 열리면 `/login`을 실행한다. credential과 세션은 `.pi-runti
 - 롤백은 신규 등록을 중지하고 S8 intake 도구/지침을 이전 버전으로 돌린 뒤 PH-CMS 코드를 되돌린다. 신규 테이블·컬럼이 없어 역마이그레이션은 필요 없다. 기존 등록 콘텐츠·원문·상태는 삭제하거나 초기화하지 않는다. 이전 서버에 새 도구를 호출해 404가 나면 중단하고 임의 API로 우회하지 않는다.
 - S8 검증: `node --test pi/test/*.test.mjs apps/telegram-gateway/gateway.test.mjs` 및 `git diff --check`. PH-CMS의 전용 `vitest.intake.config.ts`는 비어 있는 일회용 DB만 허용하며 기존 테스트/운영 DB를 reset하지 않는다. fixture 실행 절차는 PH-CMS Projectman README를 참고한다.
 
+## Projectman 리소스 관리
+
+- 관리 UI에서 워크스페이스·프로젝트·작업·하위 작업을 생성하고 제목·본문을 수정하거나 삭제한다. 프로젝트 생성에는 저장소 절대 경로가 필요하며, 작업은 `todo`, 자동 실행 꺼짐으로 등록한다. 위임된 작업의 제목·본문은 기존 서버 규칙에 따라 수정할 수 없다.
+- 삭제는 현재 제목 재입력이 필요하다. 하위 리소스는 먼저 삭제하며 자동 연쇄 삭제하지 않는다. 작업 로그와 원본 데이터는 보존하는 soft delete이고 UI 복원 기능은 없다. 위임된 작업은 완료·취소 상태이며 실행 종료까지 확인되어야 삭제할 수 있다. `cancel_requested`·복구 필요 상태는 삭제를 차단하므로 실행 상태부터 운영자가 확인한다.
+- PH-CMS의 안전 삭제 가드와 `capabilities.safeResourceDelete=true`를 먼저 적용한다. 지원하지 않는 서버에서는 콘솔이 삭제를 거부한다. 이후 S8 콘솔을 재시작하고 frontend를 빌드한다. 환경변수·스키마·데이터 이관은 없다. 기존 workflow v2 호환 조건도 그대로 유지한다.
+- 쓰기 실패·응답 유실은 자동 재시도하지 않는다. 목록 재조회로 반영 여부를 확인한다. 롤백은 UI/콘솔 코드를 되돌리되 서버 안전 가드는 유지한다. 삭제 복구가 필요하면 운영자가 감사·하위 관계·실행 상태를 확인한 뒤 별도로 처리하며 DB 초기화하지 않는다.
+- 검증: `node --test pi/test/projectman-client.test.mjs pi/test/projectman-console.test.mjs`, `npm run test:run --prefix frontend`, `npm run build --prefix frontend`, `git diff --check`. 서버 삭제 회귀는 기존 격리 DB 전용 intake suite에서 검증한다. 운영 DB에는 테스트 fixture/reset을 실행하지 않는다.
+
 ## Projectman 지시 잡 운영
 
 - `scheduler`에서 `kind=projectman`, `projectUid`, `intervalMinutes=5`로 생성한다. 대화형 승인 정책은 유지한다. 쉘 잡과 혼용할 수 있다.

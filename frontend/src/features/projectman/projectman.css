@@ -81,6 +81,13 @@
 .pm-layout .pm-review { margin: 24px 0; padding: 24px; background: #f4f4f4; border: 0; border-left: 3px solid #161616; }
 .pm-review textarea { width: 100%; margin-top: 8px; background: #fff; line-height: 1.7; }
 .pm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pm-resource-actions { margin: 16px 0; }
+.pm-resource-form { display: grid; gap: 16px; max-width: 800px; padding: 24px; margin: 24px 0; border: 1px solid #c6c6c6; background: #fff; scroll-margin-top: 24px; }
+.pm-resource-form h2, .pm-resource-form p { margin: 0; }
+.pm-resource-form p { line-height: 1.7; }
+.pm-page .pm-danger { color: #a2191f; border-color: #a2191f; }
+.pm-project > header { flex-wrap: wrap; }
+.pm-project-text { padding: 0 16px; font-size: 14px; }
 .pm-hint, .pm-empty { color: #525252; font-size: 14px; line-height: 1.7; }
 .pm-empty { margin: 0; padding: 24px 16px; background: #f4f4f4; border-left: 2px solid #8d8d8d; }
 .pm-error { padding: 16px; margin: 16px 0; background: #fff1f1; border-left: 3px solid #a2191f; color: #750e13; font-size: 14px; }

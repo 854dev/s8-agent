@@ -25,6 +25,26 @@ test('refuses an item outside the projectman channel', async () => {
   await assert.rejects(client.get('other-channel-task'), /not found/);
 });
 
+test('human resource writes preserve attributes, scope UIDs, and accept empty DELETE responses', async () => {
+  const calls = [];
+  const client = new ProjectmanClient('https://cms.example/api', 'fixture-token', async (url, init) => {
+    calls.push({ path: new URL(url).pathname, init });
+    if (init.method === 'DELETE') return { ok: true, status: 204, json: () => assert.fail('204 has no JSON') };
+    if (init.method) return response(item('ws', 'workspace'));
+    return response({ content: [item('ws', 'workspace')], last: true });
+  });
+  await client.createWorkspace('팀', '본문');
+  assert.equal(JSON.parse(calls[0].init.body).type, 'workspace');
+  await client.editResource('ws', '수정', '새 본문');
+  assert.deepEqual(JSON.parse(calls[2].init.body), { title: '수정', text: '새 본문' });
+  await client.deleteResource('ws');
+  assert.equal(calls.at(-1).init.method, 'DELETE');
+  assert.equal(calls.at(-1).path, '/api/contents/ws');
+  const outsider = new ProjectmanClient('https://cms.example/api', 'fixture-token', async (_url, init) => { assert.equal(init.method, undefined); return response({ content: [], last: true }); });
+  await assert.rejects(outsider.deleteResource('other'), /404/);
+  await assert.rejects(outsider.editResource('other', 'title', 'text'), /404/);
+});
+
 test('creates a non-autonomous task without enabling execution', async () => {
   const calls = [];
   const client = new ProjectmanClient('http://127.0.0.1:8000/api/v2', 'token', async (url, init) => {

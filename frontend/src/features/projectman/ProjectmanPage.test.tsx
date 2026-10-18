@@ -169,6 +169,51 @@ test('workspace links restore scope after refresh and browser navigation', async
 })
 
 
+test('creates a workspace and edits a selected workspace without sending managed attributes', async () => {
+  const f = boardFixture(); const user = userEvent.setup(); render(<ProjectmanPage />)
+  await user.click(await screen.findByRole('button', { name: '워크스페이스 만들기' }))
+  let form = screen.getByRole('form', { name: '워크스페이스 만들기' })
+  await user.type(within(form).getByLabelText('제목'), '새 팀')
+  await user.type(within(form).getByLabelText('본문'), '팀 설명')
+  await user.click(within(form).getByRole('button', { name: '저장' }))
+  await waitFor(() => expect(screen.queryByRole('form')).not.toBeInTheDocument())
+  const create = f.fetcher.mock.calls.find(([, init]) => init?.method === 'POST')!
+  expect(JSON.parse(String(create[1]?.body))).toEqual({ type: 'workspace', title: '새 팀', text: '팀 설명' })
+  await user.click(screen.getByRole('button', { name: /팀 A/ }))
+  await user.click(screen.getByRole('button', { name: '워크스페이스 수정' }))
+  form = screen.getByRole('form', { name: '워크스페이스 수정' })
+  await user.clear(within(form).getByLabelText('제목')); await user.type(within(form).getByLabelText('제목'), '팀 A 수정')
+  await user.click(within(form).getByRole('button', { name: '저장' }))
+  await waitFor(() => expect(f.fetcher.mock.calls.some(([url, init]) => url.endsWith('/items/ws-a') && init?.method === 'PATCH')).toBe(true))
+})
+
+test('deletion needs an exact title and clears the deleted workspace URL after success', async () => {
+  const f = boardFixture(); const user = userEvent.setup(); render(<ProjectmanPage />)
+  await user.click(await screen.findByRole('button', { name: /팀 B/ }))
+  await user.click(screen.getByRole('button', { name: '워크스페이스 삭제' }))
+  const form = screen.getByRole('form', { name: '워크스페이스 삭제' }), confirm = within(form).getByRole('button', { name: '삭제 확정' })
+  expect(confirm).toBeDisabled()
+  await user.type(within(form).getByLabelText('삭제 확인: 제목을 그대로 입력'), '팀 B')
+  await user.click(confirm)
+  await waitFor(() => expect(new URLSearchParams(location.search).has('workspace')).toBe(false))
+  const call = f.fetcher.mock.calls.find(([, init]) => init?.method === 'DELETE')!
+  expect(call[0]).toBe('/api/projectman/items/ws-b')
+  expect(JSON.parse(String(call[1]?.body))).toEqual({ title: '팀 B' })
+})
+
+test('a blocked task deletion keeps its detail and confirmation for inspection', async () => {
+  const f = fixture(); const original = f.fetcher; const user = userEvent.setup()
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => init?.method === 'DELETE' ? Response.json({ error: '실행을 종료하세요.' }, { status: 409 }) : original(url, init)))
+  render(<ProjectmanPage />)
+  await user.click(await screen.findByRole('button', { name: '작업 삭제' }))
+  const form = screen.getByRole('form', { name: '작업 삭제' })
+  await user.type(within(form).getByLabelText('삭제 확인: 제목을 그대로 입력'), f.detail.item.title)
+  await user.click(within(form).getByRole('button', { name: '삭제 확정' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('실행을 종료하세요.')
+  expect(screen.getByRole('heading', { name: '카운터 구현' })).toBeInTheDocument()
+  expect(form).toBeInTheDocument()
+})
+
 test('pre-start work belongs to manager and cannot be authorized before review', async () => {
   const { detail } = fixture()
   detail.execution.state = 'todo'
