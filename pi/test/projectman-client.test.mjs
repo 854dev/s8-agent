@@ -25,7 +25,7 @@ test('refuses an item outside the projectman channel', async () => {
   await assert.rejects(client.get('other-channel-task'), /not found/);
 });
 
-test('creates a non-autonomous task and transitions via the atomic endpoint', async () => {
+test('creates a non-autonomous task without enabling execution', async () => {
   const calls = [];
   const client = new ProjectmanClient('http://127.0.0.1:8000/api/v2', 'token', async (url, init) => {
     calls.push({ url: new URL(url), body: JSON.parse(init.body) });
@@ -34,15 +34,10 @@ test('creates a non-autonomous task and transitions via the atomic endpoint', as
   await client.create('project-1', 'task', 'Feature', 'Acceptance criteria', ['kind:feature']);
   assert.deepEqual(calls[0].body.attributes, { state: 'todo', autorun: false });
   assert.equal(calls[0].body.parentUid, 'project-1');
-  await client.transition('created', 'todo', 'ready', 'Planned', 'updated', '9ba3ed43-5282-4b52-b034-cb07bbbf721a');
-  assert.equal(calls[1].url.pathname, '/api/v2/projectman/items/created/transitions');
-  assert.equal(calls[1].body.requestId, '9ba3ed43-5282-4b52-b034-cb07bbbf721a');
-  assert.equal(calls[1].body.nextState, 'ready');
 });
 
-test('retired phase template never creates fixed inspection/planning subtasks', async () => {
+test('creation requires an existing parent and a repository path for projects', async () => {
   const client = new ProjectmanClient('https://cms.example/api', 'token', async () => { assert.fail('No requests expected'); });
-  await assert.rejects(client.ensurePhases('task-1'), /Fixed phase templates are retired/);
   await assert.rejects(client.create(undefined, 'workspace', 'Organization', ''), /cannot create workspaces/);
   await assert.rejects(client.create('ws', 'project', 'Code', ''), /repoPath/);
 });

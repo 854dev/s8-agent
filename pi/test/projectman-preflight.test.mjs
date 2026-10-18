@@ -4,7 +4,7 @@ import { ProjectmanClient } from '../lib/projectman-client.ts';
 import { hasReviewedPreflight, preflightFingerprint } from '../lib/projectman-preflight.mjs';
 
 function fixture({ beforePut = () => {}, afterPut = () => {} } = {}) {
-  const workflow = { revision: 2, specHash: 'scope-1', spec: { allowedPaths: ['src'], completionCriteria: ['Minimum zero'], commandNames: ['test'] } };
+  const workflow = { revision: 2, specHash: 'scope-1', spec: { completionCriteria: ['Minimum zero'], commandNames: ['test'] } };
   const task = { uid: 'task-1', state: 'todo', workflow };
   const item = { uid: task.uid, title: 'Counter', type: 'task', parent: { uid: 'project-1' }, detail: { text: 'Minimum zero, no negative values', attributes: { state: 'todo', autorun: false, workflow, unrelated: 'preserved' } } };
   const writes = [];
@@ -40,7 +40,7 @@ test('manager preflight persists resolved decisions on the work before final aut
 });
 
 test('changed requirements, scope, title or parent invalidate the manager review', async () => {
-  for (const mutate of [f => { f.item.detail.text = 'Allow negatives'; }, f => { f.workflow.spec.allowedPaths.push('test'); }, f => { f.workflow.specHash = 'scope-2'; }, f => { f.item.title = 'New counter'; }, f => { f.item.parent.uid = 'project-2'; }]) {
+  for (const mutate of [f => { f.item.detail.text = 'Allow negatives'; }, f => { f.workflow.specHash = 'scope-2'; }, f => { f.item.title = 'New counter'; }, f => { f.item.parent.uid = 'project-2'; }]) {
     const f = fixture(); await f.client.reviewPreflight('task-1', 2, 'Resolved scope'); mutate(f);
     assert.equal(hasReviewedPreflight(f.item, f.workflow), false);
     // Server checks the explicitly confirmed planHash; manager notes are not authorization.
@@ -56,7 +56,7 @@ test('review cannot complete with stale revision, pending questions, grant or mi
   await assert.rejects(fixture().client.reviewPreflight('task-1', 2, ' '), /summary required/);
 });
 
-test('concurrent transition rejects the write without restoring the old state', async () => {
+test('concurrent state change rejects the write without restoring the old state', async () => {
   const f = fixture({ beforePut: ({ item, task }) => { item.detail.attributes.state = task.state = 'ready'; } });
   await assert.rejects(f.client.reviewPreflight('task-1', 2, 'Resolved scope'), /409/);
   assert.equal(f.writes.length, 0);
@@ -73,7 +73,6 @@ test('changes during saving cannot be reported as a successful preflight review'
     ({ item }) => { item.detail.attributes.state = 'ready'; },
     ({ item }) => { item.detail.text = 'Allow negatives'; },
     ({ workflow }) => { workflow.specHash = 'scope-2'; },
-    ({ workflow }) => { workflow.spec.allowedPaths.push('test'); },
     ({ item }) => { item.detail.attributes.s8Preflight.summary = 'Another manager review'; },
     ({ item }) => { delete item.detail.attributes.s8Preflight; },
   ]) {

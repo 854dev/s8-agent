@@ -7,8 +7,6 @@ import { boundedCommand, SMOKE_IMAGE } from './development-smoke.mjs';
 
 const exec = promisify(execFile);
 export const safePath = value => typeof value === 'string' && value.length > 0 && !path.isAbsolute(value) && !value.includes('\\') && value.split('/').every(part => part && part !== '..' && part !== '.' && !/secret/i.test(part) && !['.git', '.env', '.pi-runtime', '.s8-runtime', 'auth.json', 'firebase.json', 'node_modules'].includes(part) && (!part.startsWith('.env.') || part === '.env.example')) && !/\.(pem|key)$/i.test(value);
-// Legacy signature retained; plan path lists no longer constrain execution.
-export const permittedWrite = value => safePath(value);
 const git = (cwd, args) => exec('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args], { cwd, maxBuffer: 1024 * 1024, timeout: 15000 });
 
 export async function prepareWorktree({ root, uid, repoPath }) {
@@ -34,9 +32,9 @@ export async function prepareWorktree({ root, uid, repoPath }) {
   return { worktree, ...info };
 }
 
-export function developmentWorkspace(root, allowedPaths) {
+export function developmentWorkspace(root) {
   async function resolve(relative, writing) {
-    if (!safePath(relative) || (writing && !permittedWrite(relative, allowedPaths))) throw new Error('Protected or invalid workspace path');
+    if (!safePath(relative)) throw new Error('Protected or invalid workspace path');
     let cursor = await realpath(root);
     const parts = relative.split('/');
     for (let i = 0; i < parts.length; i++) {
@@ -69,7 +67,7 @@ export function developmentWorkspace(root, allowedPaths) {
       return { path: relative, bytes: Buffer.byteLength(content) };
     },
     async remove(relative) {
-      if (!permittedWrite(relative, allowedPaths)) throw new Error('Protected or invalid workspace path');
+      if (!safePath(relative)) throw new Error('Protected or invalid workspace path');
       const file = await resolve(relative, false);
       if (!(await lstat(file)).isFile()) throw new Error('Only regular files may be removed');
       await unlink(file);
@@ -78,27 +76,27 @@ export function developmentWorkspace(root, allowedPaths) {
   };
 }
 
-export async function workspaceChanges(worktree, allowedPaths) {
+export async function workspaceChanges(worktree) {
   const tracked = (await git(worktree, ['diff', '--name-only', 'HEAD', '-z'])).stdout.split('\0').filter(Boolean);
   const untracked = (await git(worktree, ['ls-files', '--others', '--exclude-standard', '-z'])).stdout.split('\0').filter(Boolean);
   const changedFiles = [...new Set([...tracked, ...untracked])];
-  if (changedFiles.some(file => !permittedWrite(file, allowedPaths))) throw new Error('Changes contain protected paths');
+  if (changedFiles.some(file => !safePath(file))) throw new Error('Changes contain protected paths');
   const fingerprints = [];
   for (const file of changedFiles) {
-    try { fingerprints.push({ path: file, hash: createHash('sha256').update((await developmentWorkspace(worktree, allowedPaths).read(file)).content).digest('hex') }); }
+    try { fingerprints.push({ path: file, hash: createHash('sha256').update((await developmentWorkspace(worktree).read(file)).content).digest('hex') }); }
     catch (error) { if (error.code === 'ENOENT') fingerprints.push({ path: file, deleted: true }); else throw error; }
   }
   return { changedFiles, fingerprints };
 }
 
-export async function workspacePatch(worktree, allowedPaths, baseline = 'HEAD') {
+export async function workspacePatch(worktree, baseline = 'HEAD') {
   await git(worktree, ['read-tree', baseline]);
-  const { changedFiles } = await workspaceChanges(worktree, allowedPaths);
+  const { changedFiles } = await workspaceChanges(worktree);
   if (!changedFiles.length) return '';
   let patch = (await git(worktree, ['diff', '--binary', baseline, '--', ...changedFiles])).stdout;
   const fresh = (await git(worktree, ['ls-files', '--others', '--exclude-standard', '-z'])).stdout.split('\0').filter(Boolean);
   for (const file of fresh) {
-    if (!permittedWrite(file, allowedPaths)) throw new Error('Protected patch path');
+    if (!safePath(file)) throw new Error('Protected patch path');
     try { patch += (await git(worktree, ['diff', '--no-index', '--binary', '--', '/dev/null', file])).stdout; }
     catch (error) { if (error.code !== 1) throw error; patch += error.stdout; }
   }

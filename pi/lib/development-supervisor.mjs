@@ -180,7 +180,7 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
     }
     const changes = await workspaceChanges(run.workspace);
     stage = 'artifact export';
-    await writeFile(path.join(directory, 'task.patch'), await workspacePatch(run.workspace, undefined, inputTree), { mode: 0o600 });
+    await writeFile(path.join(directory, 'task.patch'), await workspacePatch(run.workspace, inputTree), { mode: 0o600 });
     await writeFile(path.join(directory, 'changes.patch'), await workspacePatch(run.workspace), { mode: 0o600 });
     let report = reportForServer({ ...outcome.report, baseCommit: workspace.baseCommit, changedFiles: changes.changedFiles });
     if (controller.signal.aborted) report = reportForServer({ ...report, status: controller.stopReason ? 'failed' : 'continue', checkpoint: report.checkpoint || 'Resume saved workspace and execution events.', summary: `Execution stopped; inspect the checkpoint before resuming. ${report.summary}`.slice(0, 8000), changedFiles: changes.changedFiles, verification: report.verification });
@@ -211,7 +211,7 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
 
 export async function developmentTick({ root, client, policy, signal, worker, allowedRoot, projectUid }) {
   await flushDevelopmentOutbox({ root, client });
-  let candidates = [...await client.list('task', undefined, { state: 'ready' }), ...await client.list('subtask', undefined, { state: 'ready' })].filter(item => item.detail?.attributes.workflow?.grant);
+  let candidates = [...await client.list('task', undefined, { state: 'ready' }), ...await client.list('subtask', undefined, { state: 'ready' })].filter(item => item.detail?.attributes.workflow?.version === 2 && item.detail.attributes.workflow.grant);
   if (projectUid) {
     const selected = [];
     for (const candidate of candidates) {

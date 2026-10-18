@@ -17,7 +17,6 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
       if (args.action === 'intake_source' && args.sourcePath !== undefined) throw new Error('Manager cannot read source files; capture a user message instead');
       return tool.execute(id, args, ...rest);
     } });
-    if (key === 'registerCommand') return (name, options) => { if (name !== 'autopilot') target.registerCommand(name, options); };
     const value = Reflect.get(target, key);
     return typeof value === 'function' ? value.bind(target) : value;
   } }));

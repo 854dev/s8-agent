@@ -19,7 +19,6 @@ export const projectmanJson = (value: unknown) => JSON.stringify(value, (key, da
   key === 'intake' && data?.manifest ? { ...data, manifest: { stored: true, readWith: 'projectman intake_get using requestId' } } : data);
 
 type Page = { content: ProjectmanContent[]; last: boolean };
-type State = 'todo' | 'ready' | 'doing' | 'blocked' | 'review' | 'done' | 'canceled';
 
 export class ProjectmanClient {
   private base: string;
@@ -85,7 +84,7 @@ export class ProjectmanClient {
     const state = item.detail?.attributes.state;
     if (state !== 'todo' || task.state !== state || task.workflow?.grant || task.workflow?.review?.pending || !task.workflow?.specHash || task.workflow.revision !== expectedRevision) throw new Error('PH-CMS request failed (HTTP 409): Unapproved delegation required');
     const s8Preflight = { status: 'reviewed', specHash: task.workflow.specHash, fingerprint: preflightFingerprint(item, task.workflow), summary: summary.trim() };
-    // Generic content updates require the observed state; the server checks it again under the transition row lock.
+    // Generic content updates require the observed state; the server checks it again under the workflow row lock.
     await this.request(`contents/${encodeURIComponent(uid)}`, { method: 'PUT', body: JSON.stringify({ attributes: { state, s8Preflight } }) });
     const [saved, fresh] = await Promise.all([this.get(uid), this.getWorkflow(uid)]);
     const savedPreflight = saved.detail?.attributes.s8Preflight as typeof s8Preflight | undefined;
@@ -94,7 +93,7 @@ export class ProjectmanClient {
   }
 
   async capabilities() {
-    return this.request<{ workflowVersion: number; humanDecisions: boolean; atomicClaims: boolean; idempotentReports: boolean; actorType?: string }>('projectman/capabilities');
+    return this.request<{ workflowVersion: 2; humanDecisions: boolean; atomicClaims: boolean; idempotentReports: boolean; actorType?: string }>('projectman/capabilities');
   }
 
   async workflow(uid: string, operation: Record<string, unknown>) {
@@ -116,16 +115,13 @@ export class ProjectmanClient {
     return this.request(`projectman/intakes/${requestId}`);
   }
 
-  async create(parentUid: string | undefined, type: 'workspace' | 'project' | 'task' | 'subtask', title: string, text: string, tags: string[] = [], phase?: string, repoPath?: string) {
+  async create(parentUid: string | undefined, type: 'workspace' | 'project' | 'task' | 'subtask', title: string, text: string, tags: string[] = [], repoPath?: string) {
     if (type === 'workspace') throw new Error('Agents cannot create workspaces; select an existing workspace UID');
     if (!parentUid) throw new Error('Workspace is a root; other content requires a parent UID');
     if (type === 'project' && (!repoPath || !repoPath.startsWith('/'))) throw new Error('New projects require an absolute repoPath');
-    if (phase && (type !== 'subtask' || !['inspect', 'plan', 'implement', 'verify', 'review_blockers', 'report'].includes(phase))) {
-      throw new Error('Invalid subtask phase');
-    }
     return this.request<ProjectmanContent>('contents', { method: 'POST', body: JSON.stringify({
       channelSlug: 'ph-projectman', parentUid, type, title, text, tags, status: 'published',
-      attributes: ['task', 'subtask'].includes(type) ? { state: 'todo', autorun: false, ...(type === 'subtask' ? { timeBudgetMinutes: 20 } : {}), ...(phase ? { phase } : {}) } : type === 'project' ? { repoPath } : {},
+      attributes: ['task', 'subtask'].includes(type) ? { state: 'todo', autorun: false, ...(type === 'subtask' ? { timeBudgetMinutes: 20 } : {}) } : type === 'project' ? { repoPath } : {},
     }) });
   }
 
@@ -141,17 +137,6 @@ export class ProjectmanClient {
     const state = item.detail?.attributes.state;
     if (!['task', 'subtask'].includes(item.type) || !['todo', 'ready'].includes(String(state))) throw new Error('Only unstarted tasks can be scheduled');
     return this.request<ProjectmanContent>(`contents/${encodeURIComponent(uid)}`, { method: 'PUT', body: JSON.stringify({ attributes: { state, scheduledAt: scheduledAt === null ? null : new Date(scheduledAt).toISOString() } }) });
-  }
-
-  async ensurePhases(_taskUid: string) {
-    throw new Error('Fixed phase templates are retired. Discuss the plan and create one-shot subtasks explicitly.');
-  }
-
-  async transition(uid: string, expectedState: State, nextState: State, message: string, event: string, requestId: string = randomUUID()) {
-    return this.request<{ uid: string; fromState: State; toState: State; workLogUid: string; requestId: string }>(
-      `projectman/items/${encodeURIComponent(uid)}/transitions`,
-      { method: 'POST', body: JSON.stringify({ requestId, expectedState, nextState, event, message }) },
-    );
   }
 
   async resume(uid: string) {

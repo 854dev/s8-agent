@@ -120,7 +120,6 @@ test('Projectman tool requires UI confirmation, restores previews on the current
   assert.equal(f.bodies[0].plan.source.text, input().source.text);
   const stored = JSON.parse((await agent.execute({ action: 'intake_get', requestId: id })).content[0].text);
   assert.equal(stored.origin, 'projectman');
-  await assert.rejects(agent.execute({ action: 'transition', uid: 'task', expectedState: 'todo', nextState: 'doing', event: 'started', message: 'start' }), /User confirmation required/);
   const next = JSON.parse((await agent.execute({ action: 'intake_preview', sourceId: captured.sourceId, plan: draft })).content[0].text).requestId;
   await assert.rejects(agent.execute({ action: 'intake_register', requestId: next }, agent.ctx(false)), /canceled/);
   agent = setup(); await agent.start();

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PiOutput } from '../lib/pi-output.mjs';
-import { runBoundedProcess } from '../lib/projectman-autopilot.ts';
+import { runBoundedProcess } from '../lib/bounded-process.mjs';
 const frame = value => JSON.stringify(value) + '\n';
 const end = (text, reason = 'stop') => ({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }], stopReason: reason } });
 
@@ -34,7 +34,7 @@ test('real child timeout retains public progress without persisting raw tool out
   emit({type:'tool_execution_end',toolCallId:'call1',isError:false,result:{content:[{type:'text',text:'fixture-private-tool-body'}]}});
   emit({type:'message_update',assistantMessageEvent:{type:'text_delta',contentIndex:1,delta:'검토 A 완료; 다음 단계 B'}});
   setInterval(()=>{},1000);`;
-  const result = await runBoundedProcess(process.execPath, ['-e', script], process.cwd(), 300, new AbortController().signal, process.cwd(), true, true);
+  const result = await runBoundedProcess(process.execPath, ['-e', script], process.cwd(), 300, new AbortController().signal, true, true);
   assert.equal(result.status, 'timeout');
   assert.match(result.output, /read README.md/);
   assert.match(result.output, /검토 A 완료; 다음 단계 B/);
@@ -45,7 +45,7 @@ test('a JSON-mode zero exit is not completion on token limit or missing settleme
   for (const [reason, settled, expected] of [['stop', true, 'completed'], ['length', true, 'timeout'], ['stop', false, 'failed']]) {
     const text = JSON.stringify({ status: 'completed', summary: 'checked' });
     const records = frame(end(text, reason)) + (settled ? frame({ type: 'agent_settled' }) : '');
-    const result = await runBoundedProcess(process.execPath, ['-e', `process.stdout.write(${JSON.stringify(records)})`], process.cwd(), 5000, new AbortController().signal, process.cwd(), true, true);
+    const result = await runBoundedProcess(process.execPath, ['-e', `process.stdout.write(${JSON.stringify(records)})`], process.cwd(), 5000, new AbortController().signal, true, true);
     assert.equal(result.status, expected);
     assert.equal(result.stopReason, reason);
     assert.equal(result.output, text);

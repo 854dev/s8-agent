@@ -30,7 +30,7 @@ async function fixture(t) {
     }
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token || state.expired.has(token)) return send(401, { message: 'Expired fixture access' });
-    if (req.url === '/api/v2/projectman/capabilities') { if (state.capStarted) state.capStarted(); if (state.capGate) await state.capGate; return send(200, { workflowVersion: 1, actorType: state.agent ? 'agent' : 'human' }); }
+    if (req.url === '/api/v2/projectman/capabilities') { if (state.capStarted) state.capStarted(); if (state.capGate) await state.capGate; return send(200, { workflowVersion: 2, actorType: state.agent ? 'agent' : 'human' }); }
     if (req.url.startsWith('/api/v2/contents?')) return send(200, { content: [], last: true });
     if (req.url.endsWith('/workflow')) { state.actions.push(input); return send(200, { uid: 'task-1', state: 'ready' }); }
     return send(404, {});

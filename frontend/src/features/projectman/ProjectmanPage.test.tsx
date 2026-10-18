@@ -6,7 +6,7 @@ import type { Detail } from './api'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); history.replaceState(null, '', '/') })
 function fixture() {
-  const workflow = { revision: 4, spec: { repoPath: '/tmp/repo', allowedPaths: ['src'], commandNames: ['test'], completionCriteria: ['counter works'], dependsOn: [] }, review: { id: 'review-1', pending: true, audience: 'human', question: '음수를 허용할까요?', reason: '요구사항이 없습니다.', options: ['허용', '금지'], draft: '' } }
+  const workflow = { version: 2 as const, revision: 4, planVersion: 1, planHash: 'a'.repeat(64), specHash: 'a'.repeat(64), spec: { repoPath: '/tmp/repo', plan: 'Implement and verify the counter', decisionRefs: ['conversation:final-plan'], commandNames: ['test'], completionCriteria: ['counter works'], dependsOn: [] }, review: { id: 'review-1', pending: true, audience: 'human', question: '음수를 허용할까요?', reason: '요구사항이 없습니다.', options: ['허용', '금지'], draft: '' } }
   const item = { uid: 'task-1', title: '카운터 구현', type: 'task', detail: { text: 'React Vite 카운터', attributes: { state: 'blocked', workflow } } }
   const detail: Detail = { item, execution: { state: 'blocked', workflow }, logs: [] }
   const operations: Record<string, unknown>[] = []
@@ -105,7 +105,7 @@ test('a delayed response from the previous task cannot replace the current task 
 test('run links survive refresh and browser navigation restores the selected historical run', async () => {
   const f = fixture()
   f.detail.execution.workflow!.run = { id: 'new-run', status: 'finished', startedAt: '2026-10-16' }
-  f.detail.logs = [{ uid: 'log-old', type: 'work_log', title: 'Previous execution', detail: { attributes: { result: { workflow: { revision: 2, run: { id: 'old-run', status: 'finished', startedAt: '2026-10-15' } } } } } }]
+  f.detail.logs = [{ uid: 'log-old', type: 'work_log', title: 'Previous execution', detail: { attributes: { result: { workflow: { version: 2, revision: 2, planHash: 'old-plan', planVersion: 1, specHash: 'old-spec', run: { id: 'old-run', status: 'finished', startedAt: '2026-10-15' } } } } } }]
   history.replaceState(null, '', '/s8/?task=task-1&run=old-run')
   render(<ProjectmanPage />)
   const selector = await screen.findByRole('combobox', { name: '실행 선택' })

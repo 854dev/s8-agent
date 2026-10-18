@@ -7,10 +7,10 @@ import os from 'node:os';
 import { preflightFingerprint } from '../lib/projectman-preflight.mjs';
 import { createProjectmanConsole } from '../lib/projectman-console.mjs';
 
-async function fixture(t, { capabilities = async () => ({ workflowVersion: 1, actorType: 'human' }), reviewed = false } = {}) {
+async function fixture(t, { capabilities = async () => ({ workflowVersion: 2, actorType: 'human' }), reviewed = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-console-'));
   const operations = [];
-  const workflow = { revision: 2, specHash: 'scope', spec: { allowedPaths: ['src'] } };
+  const workflow = { revision: 2, specHash: 'scope', spec: { plan: 'Finalized plan', decisionRefs: ['conversation:final-plan'] } };
   const item = { uid: 'task-1', title: 'Counter', detail: { text: 'Minimum zero', attributes: {} } };
   if (reviewed) item.detail.attributes.s8Preflight = { status: 'reviewed', specHash: workflow.specHash, fingerprint: preflightFingerprint(item, workflow), summary: 'Resolved scope' };
   const server = createProjectmanConsole({ root, authFactory: () => ({ login: async () => ({ accessToken: 'fixture.user.token', refreshToken: 'fixture.refresh.token' }) }), clientFactory: token => {
@@ -50,7 +50,7 @@ test('decisions reject cross-origin writes and propagate version conflicts witho
 test('expired sessions and agent-role JWTs cannot read tasks or submit human decisions', async t => {
   for (const [capabilities, status] of [
     [async () => { throw new Error('PH-CMS request failed (HTTP 401)') }, 401],
-    [async () => ({ workflowVersion: 1, actorType: 'agent' }), 403],
+    [async () => ({ workflowVersion: 2, actorType: 'agent' }), 403],
   ]) {
     const { base, headers, operations } = await fixture(t, { capabilities })
     assert.equal((await fetch(`${base}/api/projectman/items?type=task`, { headers })).status, status)

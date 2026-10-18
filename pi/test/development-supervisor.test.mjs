@@ -18,7 +18,7 @@ async function fixture(t, count = 1) {
   await mkdir(root); await mkdir(repo); await mkdir(path.join(repo, 'src'));
   await writeFile(path.join(repo, 'src/base.txt'), 'base');
   for (const args of [['init'], ['add', '.'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture']]) await exec('git', args, { cwd: repo });
-  const rows = new Map(Array.from({ length: count }, (_, i) => [`task${i}`, { uid: `task${i}`, title: 'Fixture', text: 'Write isolated file', state: 'ready', workflow: { version: 2, planVersion: 1, planHash: 'fixture', confirmation: { planVersion: 1, planHash: 'fixture', actorUid: 'human' }, revision: 2, spec: { plan: 'Requirements and scope resolved before final approval.', repoPath: repo, allowedPaths: ['src'], commandNames: [], dependsOn: [], timeBudgetMinutes: 1 }, grant: { specHash: 'fixture' }, specHash: 'fixture' } }]));
+  const rows = new Map(Array.from({ length: count }, (_, i) => [`task${i}`, { uid: `task${i}`, title: 'Fixture', text: 'Write isolated file', state: 'ready', workflow: { version: 2, planVersion: 1, planHash: 'fixture', confirmation: { planVersion: 1, planHash: 'fixture', actorUid: 'human' }, revision: 2, spec: { plan: 'Requirements and scope resolved before final approval.', repoPath: repo, commandNames: [], dependsOn: [], timeBudgetMinutes: 1 }, grant: { specHash: 'fixture' }, specHash: 'fixture' } }]));
   const content = row => ({ uid: row.uid, title: row.title, detail: { text: row.text, attributes: { state: row.state, workflow: row.workflow, s8Preflight: row.s8Preflight } } });
   for (const row of rows.values()) row.s8Preflight = { status: 'reviewed', specHash: row.workflow.specHash, fingerprint: preflightFingerprint(content(row), row.workflow), summary: 'Requirements and scope resolved before final approval.' };
   const applied = new Map(), reports = [];
@@ -50,7 +50,7 @@ test('two real Git worktrees run concurrently without changing the source reposi
   const worker = async request => {
     assert.match(request.preflight.summary, /Requirements and scope resolved/);
     max = Math.max(max, ++active);
-    await developmentWorkspace(request.run.workspace, ['src']).write(`src/${request.task.uid}.txt`, request.task.uid);
+    await developmentWorkspace(request.run.workspace).write(`src/${request.task.uid}.txt`, request.task.uid);
     await new Promise(resolve => setTimeout(resolve, 80)); active--;
     return { report: { status: 'completed', summary: 'Changed isolated workspace', verification: [] } };
   };
@@ -59,7 +59,7 @@ test('two real Git worktrees run concurrently without changing the source reposi
   assert.deepEqual([...f.rows.values()].map(row => row.state), ['review', 'review']);
   assert.equal((await exec('git', ['status', '--porcelain'], { cwd: f.repo })).stdout, '');
   assert.equal((await readdir(path.join(f.repo, 'src'))).length, 1);
-  for (const result of results) assert.equal((await workspaceChanges(result.worktree, ['src'])).changedFiles.length, 1);
+  for (const result of results) assert.equal((await workspaceChanges(result.worktree)).changedFiles.length, 1);
   for (const result of results) await exec('git', ['apply', '--check', path.join(f.root, '.s8-runtime/runs', result.runId, 'changes.patch')], { cwd: f.repo });
 });
 
@@ -118,7 +118,7 @@ test('independent verification failure resumes repair without asking the human o
 test('dirty source repository does not block execution or change user files', async t => {
   const f = await fixture(t); await writeFile(path.join(f.repo, 'src/base.txt'), 'user changes');
   const result = await runDevelopmentTask({ ...f, candidate: { uid: 'task0' }, worker: async request => {
-    const workspace = developmentWorkspace(request.run.workspace, ['src']);
+    const workspace = developmentWorkspace(request.run.workspace);
     await workspace.write('other/new.txt', 'Outside the old allowlist');
     await workspace.write('.github/workflows/test.yml', 'name: test');
     return { report: { status: 'completed', summary: 'done' } };
@@ -179,10 +179,10 @@ test('per-repository concurrency one serializes otherwise independent tasks', as
   assert.equal(max, 1)
 })
 
-test('scoped removal exports an applicable deletion patch and refuses unapproved files and directories', async t => {
+test('deletion patches preserve protected file and directory checks', async t => {
   const f = await fixture(t)
   const result = await runDevelopmentTask({ ...f, allowedRoot: f.base, candidate: { uid: 'task0' }, worker: async request => {
-    const workspace = developmentWorkspace(request.run.workspace, ['src'])
+    const workspace = developmentWorkspace(request.run.workspace)
     await assert.rejects(workspace.remove('.git'), /Protected/)
     await assert.rejects(workspace.remove('src'), /regular files/)
     await workspace.remove('src/base.txt')

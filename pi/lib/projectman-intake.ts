@@ -4,7 +4,7 @@ import path from 'node:path';
 import { constants, realpathSync } from 'node:fs';
 import { open, lstat } from 'node:fs/promises';
 import { protectedPath } from '../extensions/s8-guard.ts';
-import { permittedRepoPath } from './projectman-run.ts';
+import { permittedRepoPath } from './projectman-path.ts';
 import { Type, type Static } from 'typebox';
 import type { ProjectmanClient } from './projectman-client.ts';
 import { visible } from '../../apps/telegram-gateway/gateway.mjs';

@@ -144,10 +144,7 @@ export async function runScheduler({ root, cwd = process.cwd(), bash, env = proc
           try { if (await readFile(cancelFile, 'utf8') === runId) controller.abort('user_stop'); } catch {}
         }, 250);
         try {
-          const config = env.S8_PI_CONFIG_ROOT;
-          if (!config || !env.S8_PI_BINARY) throw new Error('Run through start-pi.sh --service scheduler');
-          const outcome = await projectmanTurn({ projectUid: job.projectUid, deadline, signal: controller.signal,
-            paths: { cwd, binary: env.S8_PI_BINARY, guard: path.join(config, 'extensions/s8-guard.ts'), scopeExtension: path.join(config, 'extensions/projectman-read-scope.ts'), systemPrompt: path.resolve(config, '../agents/developer/SYSTEM.md') },
+          const outcome = await projectmanTurn({ root, projectUid: job.projectUid, deadline, signal: controller.signal,
             notify: async ({ stage, uid, message }) => {
               state.jobs[job.id].workUid = uid;
               state.jobs[job.id].notificationStatus = 'pending';

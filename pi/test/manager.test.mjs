@@ -34,7 +34,7 @@ test('KB only reads Markdown inside root and rejects hidden, symlink, hardlink a
   await assert.rejects(managerKb(path.join(root, 'missing')).search('query'));
 });
 
-test('manager enables general tools, omits autopilot and rejects shell schedule mutations', async t => {
+test('manager enables general tools and rejects shell schedule mutations', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'manager-role-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const previous = process.env.S8_PI_CONFIG_ROOT;
@@ -44,7 +44,6 @@ test('manager enables general tools, omits autopilot and rejects shell schedule 
   let active;
   manager({ on(name, fn) { handlers.set(name, [...(handlers.get(name) ?? []), fn]); }, registerTool(tool) { tools.set(tool.name, tool); }, registerCommand(name) { commands.push(name); }, setActiveTools(names) { active = names; } });
   assert.deepEqual([...tools.keys()].sort(), [...MANAGER_EXTENSION_TOOLS].sort());
-  assert.ok(!commands.includes('autopilot'));
   const guard = handlers.get('tool_call').at(-1);
   for (const toolName of MANAGER_TOOLS) assert.equal(guard({ toolName }), undefined);
   assert.equal(guard({ toolName: 'unknown_tool' }).block, true);

@@ -56,7 +56,7 @@ test('manager streams through the installed Pi SDK and executes its bash tool', 
 
 test('developer SDK streams a scoped workspace write and records the real tool result', async t => {
   const f = await fixture(t, { name: 'workspace', args: { path: 'src/result.txt', content: 'developer-sdk-ok' } });
-  const workspace = developmentWorkspace(f.root, ['src']);
+  const workspace = developmentWorkspace(f.root);
   const tool = { name: 'workspace', label: 'Workspace', description: 'Write a fixture file within the approved src directory.', parameters: Type.Object({ path: Type.String(), content: Type.String() }), async execute(_id, args) { return { content: [{ type: 'text', text: JSON.stringify(await workspace.write(args.path, args.content)) }] }; } };
   const result = await smokeSession({ role: 'developer', prompt: 'Write the approved fixture file.', systemPrompt: 'Perform the approved task.', tools: [tool], runtime: f.runtime, model: f.model, run: { directory: f.root, workspace: f.root }, signal: AbortSignal.timeout(10000) });
   assert.equal(result, 'SDK 검증 완료');

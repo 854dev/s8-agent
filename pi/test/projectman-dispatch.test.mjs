@@ -5,11 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { runProjectmanTurn } from '../lib/projectman-dispatch.ts';
 
-test('scheduled Projectman polls use confirmed workflows and never legacy transitions', async t => {
+test('scheduled Projectman polls use confirmed workflows', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-plan-schedule-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  let transitions = 0;
-  const result = await runProjectmanTurn({ projectUid: 'project', paths: { systemPrompt: path.join(root, 'agents/developer/SYSTEM.md') }, policy: { maxConcurrency: 1 }, client: { list: async () => [], transition: () => { transitions++; } } });
+  const result = await runProjectmanTurn({ root, projectUid: 'project', policy: { maxConcurrency: 1 }, client: { list: async () => [] } });
   assert.equal(result.status, 'idle');
-  assert.equal(transitions, 0);
 });
