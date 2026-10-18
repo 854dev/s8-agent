@@ -35,7 +35,7 @@ export async function liveConsoleBrowser({ root, baseUrl, directory, login }) {
         await page.getByLabel('이메일', { exact: true }).fill(login.email);
         await page.getByLabel('비밀번호', { exact: true }).fill(login.password);
         await page.getByRole('button', { name: '로그인', exact: true }).click();
-        await page.getByRole('heading', { name: '작업 범위와 완료 조건' }).waitFor();
+        await page.getByRole('heading', { name: '실행 계획과 완료 조건' }).waitFor();
       },
       async operation(action, click) {
         const response = page.waitForResponse(response => response.url().endsWith('/workflow') && response.request().method() === 'POST' && JSON.parse(response.request().postData()).action === action);

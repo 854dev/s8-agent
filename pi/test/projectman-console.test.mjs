@@ -60,11 +60,11 @@ test('expired sessions and agent-role JWTs cannot read tasks or submit human dec
 })
 
 
-test('console final authorization requires the current manager preflight', async t => {
+test('console forwards explicit human plan confirmation to the server independently of manager notes', async t => {
   for (const reviewed of [false, true]) {
     const { base, headers, operations } = await fixture(t, { reviewed });
     const response = await fetch(`${base}/api/projectman/items/task-1/workflow`, { method: 'POST', headers, body: JSON.stringify({ action: 'authorize', expectedRevision: 2 }) });
-    assert.equal(response.status, reviewed ? 200 : 409);
-    assert.equal(operations.length, reviewed ? 1 : 0);
+    assert.equal(response.status, 200);
+    assert.equal(operations.length, 1);
   }
 });

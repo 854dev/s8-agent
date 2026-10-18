@@ -12,7 +12,7 @@ import { visible } from '../../apps/telegram-gateway/gateway.mjs';
 const spec = { title: Type.String({ minLength: 1, maxLength: 200 }), text: Type.String({ minLength: 1, maxLength: 6000 }) };
 const selection = Type.Union([
   Type.Object({ uid: Type.String(), version: Type.Optional(Type.String({ pattern: '^[a-f0-9]{64}$', description: 'Omit on input; server binds the current parent fingerprint during preview' })) }, { additionalProperties: false }),
-  Type.Object(spec, { additionalProperties: false }),
+  Type.Object({ ...spec, repoPath: Type.String({ minLength: 1, maxLength: 1000 }) }, { additionalProperties: false }),
 ]);
 const work = {
   key: Type.String({ pattern: '^[a-z][a-z0-9_-]{0,39}$' }), ...spec,
@@ -20,7 +20,7 @@ const work = {
   dependsOn: Type.Optional(Type.Array(Type.String(), { maxItems: 30 })),
 };
 const draftFields = {
-  workspace: selection, project: selection,
+  workspace: Type.Object({ uid: Type.String(), version: Type.Optional(Type.String({ pattern: '^[a-f0-9]{64}$' })) }, { additionalProperties: false }), project: selection,
   works: Type.Array(Type.Object({ ...work, subtasks: Type.Optional(Type.Array(Type.Object(work, { additionalProperties: false }), { maxItems: 20 })) }, { additionalProperties: false }), { minItems: 1, maxItems: 30 }),
 };
 export const IntakeDraftSchema = Type.Object(draftFields, { additionalProperties: false });
@@ -87,6 +87,7 @@ export function checkPreview(preview: IntakePreview) {
 }
 
 export async function previewIntake(client: ProjectmanClient, input: Static<typeof IntakeInputSchema>, requestId: string = randomUUID()) {
+  if (!input.workspace?.uid) throw new Error('Select an existing workspace; agents cannot create workspaces');
   const serialized = JSON.stringify(input);
   if (Buffer.byteLength(serialized) > 200000) throw new Error('Split request into smaller intakes (maximum 200KB)');
   if (visible(serialized) !== serialized) throw new Error('Possible credentials in request; remove them before preview');
@@ -96,7 +97,7 @@ export async function previewIntake(client: ProjectmanClient, input: Static<type
 export function describeIntake(preview: IntakePreview) {
   checkPreview(preview);
   const plan = preview.plan;
-  const container = (name: string, value: IntakePlan['workspace'], title: string) => `${name}: ${title} · ${'uid' in value ? `기존 ${value.uid} (${value.version ?? '미수정'})` : `신규\n${value.text}`}`;
+  const container = (name: string, value: IntakePlan['project'], title: string) => `${name}: ${title} · ${'uid' in value ? `기존 ${value.uid} (${value.version ?? '미수정'})` : `신규\n${value.text}`}`;
   const lines = [
     `등록 요청: ${plan.requestId}`, `출처: ${plan.source.label}`, `원문 SHA-256: ${preview.sourceHash}`, `등록안 SHA-256: ${preview.hash}`,
     container('워크스페이스', plan.workspace, preview.containers.workspace), container('프로젝트', plan.project, preview.containers.project),
@@ -115,7 +116,7 @@ export async function registerIntake(client: ProjectmanClient, preview: IntakePr
   checkPreview(preview);
   const result = await client.registerIntake(preview.plan, preview.hash);
   if (result.requestId !== preview.plan.requestId || result.hash !== preview.hash || result.sourceHash !== preview.sourceHash || !Array.isArray(result.items)) throw new Error('Invalid intake registration response; inspect Projectman before retry');
-  const expected: Array<{ type: string; parent: number | null; selection: IntakePlan['workspace'] }> = [
+  const expected: Array<{ type: string; parent: number | null; selection: IntakePlan['project'] }> = [
     { type: 'workspace', parent: null, selection: preview.plan.workspace }, { type: 'project', parent: 0, selection: preview.plan.project },
   ];
   for (const work of preview.plan.works) {

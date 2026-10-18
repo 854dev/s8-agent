@@ -39,7 +39,7 @@ export function consoleSessions({ baseUrl, clientFactory, authFactory = sdkAuthe
   async function checkedClient(token) {
     const client = clientFactory(token);
     const capabilities = await client.capabilities();
-    if (capabilities.workflowVersion !== 1) throw failure(503);
+    if (![1, 2].includes(capabilities.workflowVersion)) throw failure(503);
     if (capabilities.actorType !== 'human') throw failure(403);
     return client;
   }

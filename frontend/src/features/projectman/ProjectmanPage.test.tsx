@@ -178,7 +178,7 @@ test('pre-start work belongs to manager and cannot be authorized before review',
   render(<ProjectmanPage />)
   expect(await screen.findByRole('heading', { name: '일 시작 전 · 매니저 검토' })).toBeInTheDocument()
   expect(screen.getByText('매니저 사전 검토가 끝나야 최종 승인할 수 있습니다.')).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: '이 범위의 개발 실행 승인' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '최종 계획 확정 · 실행' })).not.toBeInTheDocument()
 })
 
 test('reviewed work displays resolved decisions and allows explicit final approval', async () => {
@@ -187,15 +187,18 @@ test('reviewed work displays resolved decisions and allows explicit final approv
   detail.execution.preflightReviewed = true
   detail.item.detail!.attributes.state = 'todo'
   delete detail.execution.workflow!.review
+  detail.execution.workflow!.version = 2
+  detail.execution.workflow!.planHash = 'a'.repeat(64)
+  detail.execution.workflow!.planVersion = 1
   detail.execution.workflow!.specHash = 'scope-1'
   detail.item.detail!.attributes.s8Preflight = { status: 'reviewed', specHash: 'scope-1', summary: '사용자 확정: 최솟값 0. 구현 방식은 개발자가 결정.' }
   expect(responsibleRole(detail.item)).toBe('human')
   render(<ProjectmanPage />)
-  const button = await screen.findByRole('button', { name: '이 범위의 개발 실행 승인' })
+  const button = await screen.findByRole('button', { name: '최종 계획 확정 · 실행' })
   expect(button).toBeDisabled()
   expect(screen.getByText('사용자 확정: 최솟값 0. 구현 방식은 개발자가 결정.')).toBeInTheDocument()
   const user = userEvent.setup()
-  await user.click(screen.getByRole('checkbox', { name: '위 저장소·파일·명령의 실행 범위를 확인했습니다.' }))
+  await user.click(screen.getByRole('checkbox', { name: '매니저와 논의한 최종 계획을 확인하고 이 버전으로 실행을 요청합니다.' }))
   await user.click(button)
   await waitFor(() => expect(operations[0]?.action).toBe('authorize'))
 })

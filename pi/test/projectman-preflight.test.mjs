@@ -26,8 +26,7 @@ function fixture({ beforePut = () => {}, afterPut = () => {} } = {}) {
 
 test('manager preflight persists resolved decisions on the work before final authorization', async () => {
   const f = fixture();
-  await assert.rejects(f.client.workflow('task-1', { action: 'authorize' }), /409/);
-  assert.equal(f.writes.length, 0);
+  assert.equal(hasReviewedPreflight(f.item, f.workflow), false);
   await f.client.reviewPreflight('task-1', 2, 'User confirmed minimum zero. Developer chooses implementation. Run tests.');
   assert.equal(f.task.state, 'todo');
   assert.equal(hasReviewedPreflight(f.item, f.workflow), true);
@@ -44,7 +43,7 @@ test('changed requirements, scope, title or parent invalidate the manager review
   for (const mutate of [f => { f.item.detail.text = 'Allow negatives'; }, f => { f.workflow.spec.allowedPaths.push('test'); }, f => { f.workflow.specHash = 'scope-2'; }, f => { f.item.title = 'New counter'; }, f => { f.item.parent.uid = 'project-2'; }]) {
     const f = fixture(); await f.client.reviewPreflight('task-1', 2, 'Resolved scope'); mutate(f);
     assert.equal(hasReviewedPreflight(f.item, f.workflow), false);
-    await assert.rejects(f.client.workflow('task-1', { action: 'authorize' }), /409/);
+    // Server checks the explicitly confirmed planHash; manager notes are not authorization.
   }
 });
 

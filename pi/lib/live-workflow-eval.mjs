@@ -27,7 +27,7 @@ export async function liveWorkflowEval({ root, baseUrl, managerToken, humanToken
   for (const args of [['init'], ['add', '.'], ['-c', 'user.name=Workflow fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'isolated counter fixture']]) await exec('git', args, { cwd: repo });
   const manager = new ProjectmanClient(baseUrl, managerToken), human = new ProjectmanClient(baseUrl, humanToken);
   const runtime = await smokeRuntime(), policy = await loadDevelopmentPolicy(root);
-  const spec = { repoPath: repo, completionCriteria: ['React + Vite counter, current value aria-label="카운터"', 'Buttons exactly 증가, 감소, 초기화', 'Minimum is zero; negative values are not allowed (confirmed before final approval)', 'Existing independent tests and build pass'], allowedPaths: ['src', 'package-lock.json'], commandNames: ['install', 'test', 'build'], dependsOn: [], timeBudgetMinutes: 8 };
+  const spec = { plan: 'Implement the discussed React/Vite counter with minimum zero; verify tests and build.', decisionRefs: ['conversation:minimum-zero'], repoPath: repo, completionCriteria: ['React + Vite counter, current value aria-label="카운터"', 'Buttons exactly 증가, 감소, 초기화', 'Minimum is zero; negative values are not allowed (confirmed before final approval)', 'Existing independent tests and build pass'], commandNames: ['install', 'test', 'build'], dependsOn: [], timeBudgetMinutes: 8 };
   let taskUid;
   let browser;
   const evidence = [];
@@ -77,9 +77,9 @@ export async function liveWorkflowEval({ root, baseUrl, managerToken, humanToken
     check('manager prepared final delegation without self-authorization', current.state === 'todo' && current.workflow?.spec && !current.workflow.grant);
     check('manager recorded resolved decisions on the work', Boolean((await manager.get(taskUid)).detail?.attributes.s8Preflight));
     if (browser) {
-      await browser.page.getByRole('checkbox', { name: '위 저장소·파일·명령의 실행 범위를 확인했습니다.' }).check();
-      await browser.operation('authorize', () => browser.page.getByRole('button', { name: '이 범위의 개발 실행 승인' }).click());
-    } else await human.workflow(taskUid, { action: 'authorize', expectedRevision: current.workflow.revision, requestId: randomUUID() });
+      await browser.page.getByRole('checkbox', { name: '매니저와 논의한 최종 계획을 확인하고 이 버전으로 실행을 요청합니다.' }).check();
+      await browser.operation('authorize', () => browser.page.getByRole('button', { name: '최종 계획 확정 · 실행' }).click());
+    } else await human.workflow(taskUid, { action: 'authorize', planHash: current.workflow.planHash, message: 'Confirmed the discussed counter plan', expectedRevision: current.workflow.revision, requestId: randomUUID() });
     const first = await developmentTick({ root, client: manager, policy, allowedRoot: fixture });
     current = await manager.getWorkflow(taskUid);
     check('approved developer implemented and verified without asking', current.state === 'review' && !current.workflow.review?.pending && current.workflow.result.status === 'completed' && ['test', 'build'].every(name => current.workflow.result.verification.some(item => item.name === name && item.ok)));

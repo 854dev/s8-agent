@@ -2,7 +2,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { readFile, lstat } from 'node:fs/promises';
 import { ProjectmanClient } from './projectman-client.ts';
-import { hasReviewedPreflight, requireReviewedPreflight } from './projectman-preflight.mjs';
+import { hasReviewedPreflight } from './projectman-preflight.mjs';
 import { consoleSessions } from './projectman-session.mjs';
 
 const json = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(data)); };
@@ -49,8 +49,7 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
       const action = /^\/api\/projectman\/items\/([a-zA-Z0-9_-]+)\/workflow$/.exec(url.pathname);
       if (req.method === 'POST' && action) {
         const input = await body(req);
-        if (!['authorize', 'draft', 'decide', 'cancel', 'complete', 'recover'].includes(input.action)) return json(res, 400, { error: '지원하지 않는 사용자 결정입니다.' });
-        if (input.action === 'authorize') await requireReviewedPreflight(client, action[1]);
+        if (!['authorize', 'draft', 'decide', 'cancel', 'complete', 'recover', 'retry'].includes(input.action)) return json(res, 400, { error: '지원하지 않는 사용자 결정입니다.' });
         return json(res, 200, await client.workflow(action[1], input));
       }
       const events = /^\/api\/projectman\/runs\/([a-f0-9-]{36})\/events$/.exec(url.pathname);

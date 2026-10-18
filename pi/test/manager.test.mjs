@@ -91,8 +91,8 @@ test('persistent manager SDK session exposes general tools alongside Projectman'
   await session.close();
   const [record] = (await readFile(path.join(directory, 'manager.events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
   assert.deepEqual([...record.tools].sort(), [...MANAGER_TOOLS].sort());
-  assert.match(record.systemPrompt, /일반 대화는 도구 없이 바로 답한다/);
-  assert.match(record.systemPrompt, /기능 구현.*Projectman 작업으로 위임한다/);
+  assert.match(record.systemPrompt, /일반 대화/);
+  assert.match(record.systemPrompt, /기능 구현.*Projectman work/);
 });
 
 test('KB CRUD requires policy and current document version; protected paths remain denied', async t => {

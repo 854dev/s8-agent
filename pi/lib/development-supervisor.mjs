@@ -1,14 +1,14 @@
-import { requireReviewedPreflight } from './projectman-preflight.mjs';
+import { requireConfirmedPlan } from './projectman-preflight.mjs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, readdir, open, rm, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { saveJson, boundedCommand } from './development-smoke.mjs';
-import { prepareWorktree, workspaceChanges, workspacePatch, developmentCommand } from './development-workspace.mjs';
+import { prepareWorktree, workspaceChanges, workspacePatch, developmentCommand, importDevelopmentResults } from './development-workspace.mjs';
 
-async function projectGuidelines(worktree, allowedPaths) {
+async function projectGuidelines(worktree) {
   const instructions = []; let visited = 0;
-  const relevant = dir => !dir || allowedPaths.some(prefix => dir === prefix || dir.startsWith(`${prefix}/`) || prefix.startsWith(`${dir}/`));
+  const relevant = () => true;
   async function visit(dir) {
     if (++visited > 1000) throw new Error('Project instruction scope too large');
     for (const filename of ['AGENTS.md', 'CLAUDE.md']) {
@@ -28,6 +28,8 @@ async function projectGuidelines(worktree, allowedPaths) {
 
 export async function loadDevelopmentPolicy(root) {
   const policy = JSON.parse(await readFile(path.join(root, 'agents/developer/policy.json'), 'utf8'));
+  policy.workerId ??= 's8-developer';
+  if (!/^[a-zA-Z0-9_-]{1,100}$/.test(policy.workerId)) throw new Error('Invalid worker ID');
   policy.maxRuns ??= 6; policy.maxModelTokens ??= 100000;
   if (!Number.isInteger(policy.maxRuns) || policy.maxRuns < 1 || policy.maxRuns > 6 || !Number.isInteger(policy.maxModelTokens) || policy.maxModelTokens < 1000 || policy.maxModelTokens > 200000) throw new Error('Invalid execution/model budget');
   if (![policy.maxConcurrency, policy.perRepoConcurrency].every(value => Number.isInteger(value) && value >= 1 && value <= 8) || !Number.isInteger(policy.maxTimeMinutes) || policy.maxTimeMinutes < 1 || policy.maxTimeMinutes > 20 || !Number.isInteger(policy.maxCommandSeconds) || policy.maxCommandSeconds < 1 || policy.maxCommandSeconds > 300) throw new Error('Invalid trusted development policy');
@@ -37,12 +39,11 @@ export async function loadDevelopmentPolicy(root) {
 }
 const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; } };
-function reportForServer(value) {
-  const report = { status: ['completed', 'continue', 'blocked', 'failed'].includes(value?.status) ? value.status : 'failed', summary: String(value?.summary ?? '').trim().slice(0, 8000) || 'No valid development summary was returned.', changedFiles: value?.changedFiles ?? [], verification: (value?.verification ?? []).slice(-20).map(item => ({ name: String(item.name).slice(0, 100), ok: item.ok === true, summary: String(item.summary ?? '').slice(0, 1000) })) };
-  if (['failed', 'blocked'].includes(report.status)) {
-    report.status = 'blocked';
-    report.question = { question: '매니저가 실행 장애와 저장된 검증 결과를 확인하세요.', reason: report.summary.slice(0, 3000), audience: 'manager', options: [], impact: '실제 실행 장애가 해결될 때까지 해당 작업을 보존합니다.', recommendation: '기록과 승인 범위를 먼저 조사하고 복구하세요. 구현 선택에 대한 사용자 반문은 하지 않습니다.' };
-  }
+export function reportForServer(value) {
+  const strings = values => (Array.isArray(values) ? values : []).slice(0, 100).map(item => String(item).trim().slice(0, 3000)).filter(Boolean);
+  const report = { status: ['completed', 'continue', 'blocked', 'failed'].includes(value?.status) ? value.status : 'failed', summary: String(value?.summary ?? '').trim().slice(0, 8000) || 'No valid development summary was returned.', changedFiles: value?.changedFiles ?? [], verification: (value?.verification ?? []).slice(-20).map(item => ({ name: String(item.name).slice(0, 100), ok: item.ok === true, summary: String(item.summary ?? '').slice(0, 1000) })), remainingItems: strings(value?.remainingItems), decisions: strings(value?.decisions), executionErrors: strings(value?.executionErrors), checkpoint: String(value?.checkpoint ?? '').slice(0, 16000), ...(value?.baseCommit ? { baseCommit: value.baseCommit } : {}) };
+  if (['failed', 'blocked'].includes(report.status) && !report.executionErrors.length) report.executionErrors = [report.summary.slice(0, 3000)];
+  if (report.status === 'completed' && (report.remainingItems.length || report.executionErrors.length || report.verification.some(check => !check.ok))) report.status = 'continue';
   return report;
 }
 
@@ -108,24 +109,46 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true });
-  let poll, timeout, directory, claimed, prepared;
+  let poll, timeout, directory, claimed, workspace, inputTree, stage = 'prepare';
   try {
     await lock.writeFile(JSON.stringify({ runId, supervisorPid: process.pid }));
     const task = await client.getWorkflow(candidate.uid);
-    prepared = task;
-    if (task.state !== 'ready' || !task.workflow?.grant || task.workflow.review?.pending || (task.workflow.review && task.workflow.followup?.reviewId !== task.workflow.review.id)) return { status: 'idle', uid: candidate.uid };
+    if (task.executionAllowed === false || task.state !== 'ready' || !task.workflow?.grant || task.workflow.review?.pending || (task.workflow.review && task.workflow.followup?.reviewId !== task.workflow.review.id)) return { status: 'idle', uid: candidate.uid };
     let preflight;
-    try { preflight = await requireReviewedPreflight(client, candidate.uid); } catch (error) { if (/HTTP 409/.test(error.message)) return { status: 'preflight_required', uid: candidate.uid }; throw error; }
-    if (task.workflow.spec.commandNames.some(name => !Object.hasOwn(policy.commands, name))) throw new Error('Command policy not configured');
-    if ((task.workflow.runCount ?? 0) >= (policy.maxRuns ?? 6)) throw new Error('Execution budget exhausted');
+    try { preflight = await requireConfirmedPlan(client, candidate.uid); } catch (error) { if (/HTTP 409/.test(error.message)) return { status: 'preflight_required', uid: candidate.uid }; throw error; }
+    if ((task.workflow.runCount ?? 0) >= (task.workflow.spec.maxRuns ?? policy.maxRuns ?? 6)) return { status: 'budget_exhausted', uid: candidate.uid };
     if (signal?.aborted) return { status: 'stopped', uid: candidate.uid };
-    const workspace = await prepareWorktree({ root, uid: candidate.uid, repoPath: task.workflow.spec.repoPath, ...(allowedRoot ? { allowedRoot } : {}) });
     directory = path.join(root, '.s8-runtime/runs', runId);
     await mkdir(directory, { recursive: true, mode: 0o700 });
-    claimed = await client.workflow(candidate.uid, { action: 'claim', expectedRevision: task.workflow.revision, requestId: randomUUID(), runId, workerId: `s8-${process.pid}` });
+    claimed = await client.workflow(candidate.uid, { action: 'claim', expectedRevision: task.workflow.revision, requestId: randomUUID(), runId, workerId: policy.workerId ?? 's8-developer' });
+    await saveJson(path.join(directory, 'request.json'), { task: { ...task, workflow: claimed.workflow }, run: { runId, directory } });
+    stage = 'workspace';
+    workspace = await prepareWorktree({ root, uid: candidate.uid, repoPath: task.workflow.spec.repoPath });
+    stage = 'dependency artifacts';
+    const children = claimed.workflow.integration ? await client.list('subtask', candidate.uid) : [];
+    const requested = [...(task.workflow.spec.dependsOn ?? []), ...children.filter(child => child.detail?.attributes.state === 'done').map(child => child.uid)];
+    const ordered = [], visited = new Set();
+    async function visit(uid) {
+      if (visited.has(uid)) return;
+      visited.add(uid);
+      if (visited.size > 200) throw new Error('Dependency context too large');
+      const dependency = await client.getWorkflow(uid);
+      for (const prior of dependency.workflow?.spec?.dependsOn ?? []) await visit(prior);
+      if (dependency.workflow?.spec?.repoPath === task.workflow.spec.repoPath) ordered.push(dependency);
+    }
+    for (const uid of requested) await visit(uid);
+    inputTree = await importDevelopmentResults({ root, worktree: workspace.worktree, tasks: ordered });
     const run = { runId, directory, workspace: workspace.worktree };
-    const projectInstructions = await projectGuidelines(workspace.worktree, task.workflow.spec.allowedPaths);
-    const request = { root, run, task: { ...task, workflow: claimed.workflow }, preflight: preflight.preflight, policy, previous: task.workflow.result, projectInstructions };
+    const projectInstructions = await projectGuidelines(workspace.worktree);
+    let executionNotes = '';
+    const previousId = task.workflow.run?.id;
+    if (previousId && /^[a-f0-9-]{36}$/.test(previousId)) {
+      try {
+        const events = (await readFile(path.join(root, '.s8-runtime/runs', previousId, 'developer.events.jsonl'), 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line));
+        executionNotes = events.filter(event => event.type === 'assistant' && event.text).map(event => event.text).join('\n').slice(-8000);
+      } catch { /* Durable result remains available if the previous transcript is missing. */ }
+    }
+    const request = { root, run, task: { ...task, workflow: { ...claimed.workflow, runs: undefined, result: undefined } }, preflight: preflight.preflight, policy, previous: { ...task.workflow.result, executionNotes }, baseCommit: workspace.baseCommit, projectInstructions };
     await saveJson(path.join(directory, 'request.json'), request);
     timeout = setTimeout(abort, Math.min(policy.maxTimeMinutes, task.workflow.spec.timeBudgetMinutes) * 60000);
     let failures = 0, polling = false;
@@ -133,41 +156,51 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
       if (polling) return; polling = true;
       try {
         const fresh = await client.getWorkflow(candidate.uid);
-        if (fresh.state !== 'doing' || fresh.workflow.run?.id !== runId || fresh.executionAllowed === false) abort();
+        if (fresh.state !== 'doing' || fresh.workflow.run?.id !== runId || fresh.executionAllowed === false) { controller.stopReason = 'revoked'; abort(); }
         failures = 0;
-      } catch { if (++failures >= 3) abort(); }
+      } catch { if (++failures >= 3) { controller.stopReason = 'connection'; abort(); } }
       finally { polling = false; }
     }, 1500);
+    stage = 'developer execution';
     const outcome = await worker(request, { signal: controller.signal });
     if (outcome.report.status === 'completed' && !controller.signal.aborted) {
-      const results = []; let baseline = await workspaceChanges(run.workspace, task.workflow.spec.allowedPaths);
+      stage = 'independent verification';
+      const results = []; let baseline = await workspaceChanges(run.workspace);
       for (const name of task.workflow.spec.commandNames) {
-        const checked = await command({ root, worktree: run.workspace, name, allowedNames: task.workflow.spec.commandNames, policy, runId, signal: controller.signal });
+        const checked = await command({ root, worktree: run.workspace, name, policy, runId, signal: controller.signal });
         results.push({ name, ...checked });
         if (!checked.ok) break;
-        if (name === 'install') baseline = await workspaceChanges(run.workspace, task.workflow.spec.allowedPaths);
+        if (name === 'install') baseline = await workspaceChanges(run.workspace);
       }
-      const afterChecks = await workspaceChanges(run.workspace, task.workflow.spec.allowedPaths);
+      const afterChecks = await workspaceChanges(run.workspace);
       const stable = !baseline || JSON.stringify(baseline) === JSON.stringify(afterChecks);
       await saveJson(path.join(directory, 'verification.json'), { stable, results, finalFingerprints: afterChecks.fingerprints });
-      outcome.report.verification = results.map(item => ({ name: item.name, ok: item.ok, summary: item.output.slice(-1000) }));
-      if (!stable || results.length !== task.workflow.spec.commandNames.length || results.some(item => !item.ok)) { outcome.report.status = 'continue'; outcome.report.summary = 'Independent supervisor verification failed or final source changed during checks. Repair the saved workspace and rerun approved checks in the next execution.'; }
+      outcome.report.verification = [...new Map([...(outcome.report.verification ?? []), ...results.map(item => ({ name: item.name, ok: item.ok, summary: item.output.slice(-1000) }))].map(check => [check.name, check])).values()];
+      if (!stable || results.length !== task.workflow.spec.commandNames.length || results.some(item => !item.ok)) { outcome.report.status = 'continue'; outcome.report.summary = 'Independent supervisor verification failed or final source changed during checks. Repair the saved workspace and rerun the planned checks in the next execution.'; }
     }
-    const changes = await workspaceChanges(run.workspace, task.workflow.spec.allowedPaths);
-    await writeFile(path.join(directory, 'changes.patch'), await workspacePatch(run.workspace, task.workflow.spec.allowedPaths), { mode: 0o600 });
-    let report = reportForServer({ ...outcome.report, changedFiles: changes.changedFiles });
-    if (controller.signal.aborted) report = reportForServer({ status: 'failed', summary: `Execution stopped; inspect the checkpoint before resuming. ${report.summary}`.slice(0, 8000), changedFiles: changes.changedFiles, verification: report.verification });
+    const changes = await workspaceChanges(run.workspace);
+    stage = 'artifact export';
+    await writeFile(path.join(directory, 'task.patch'), await workspacePatch(run.workspace, undefined, inputTree), { mode: 0o600 });
+    await writeFile(path.join(directory, 'changes.patch'), await workspacePatch(run.workspace), { mode: 0o600 });
+    let report = reportForServer({ ...outcome.report, baseCommit: workspace.baseCommit, changedFiles: changes.changedFiles });
+    if (controller.signal.aborted) report = reportForServer({ ...report, status: controller.stopReason ? 'failed' : 'continue', checkpoint: report.checkpoint || 'Resume saved workspace and execution events.', summary: `Execution stopped; inspect the checkpoint before resuming. ${report.summary}`.slice(0, 8000), changedFiles: changes.changedFiles, verification: report.verification });
     await saveJson(path.join(directory, 'outbox.json'), { uid: candidate.uid, runId, report, operation: { action: 'report', requestId: randomUUID(), expectedRevision: claimed.workflow.revision, runId, report } });
     await flushDevelopmentOutbox({ root, client });
     return { status: report.status, uid: candidate.uid, runId, worktree: run.workspace };
   } catch (error) {
     if (claimed && directory) {
-      const report = reportForServer({ status: 'failed', summary: 'Supervisor stopped before successful result handoff; manager operational review required.', changedFiles: [], verification: [] });
+      let changes = { changedFiles: [] };
+      if (workspace) {
+        try {
+          changes = await workspaceChanges(workspace.worktree);
+          await writeFile(path.join(directory, 'changes.patch'), await workspacePatch(workspace.worktree), { mode: 0o600 });
+        } catch { /* Preserve the workspace for inspection when export itself failed. */ }
+      }
+      const report = reportForServer({ status: 'failed', summary: `Supervisor stopped during ${stage}; saved workspace and events remain available.`, executionErrors: [`Execution failed during ${stage}`], remainingItems: ['Inspect saved artifacts and finish the confirmed plan'], changedFiles: changes.changedFiles, verification: [] });
       await saveJson(path.join(directory, 'outbox.json'), { uid: candidate.uid, runId, report, operation: { action: 'report', requestId: randomUUID(), expectedRevision: claimed.workflow.revision, runId, report } });
       await flushDevelopmentOutbox({ root, client });
-    } else if (prepared?.state === 'ready' && !/HTTP 409/.test(error.message)) {
-      await client.workflow(candidate.uid, { action: 'request_review', requestId: randomUUID(), expectedRevision: prepared.workflow.revision, question: { audience: 'manager', question: '매니저가 개발 실행 준비 장애를 확인하세요.', reason: '저장소 청결 상태·허용 경로·명령 정책·worktree 준비 중 검증에 실패했습니다. 실행하지 않았습니다.', options: ['설정·저장소를 확인한 뒤 재개', '취소'], impact: '이 작업만 대기합니다.', recommendation: '설정과 저장소 변경을 확인한 후 재개하세요.' } }).catch(() => {});
     }
+
     return { status: /HTTP 409/.test(error.message) ? 'conflict' : 'blocked', uid: candidate.uid };
   } finally {
     clearInterval(poll); clearTimeout(timeout);
@@ -176,9 +209,18 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
   }
 }
 
-export async function developmentTick({ root, client, policy, signal, worker, allowedRoot }) {
+export async function developmentTick({ root, client, policy, signal, worker, allowedRoot, projectUid }) {
   await flushDevelopmentOutbox({ root, client });
-  const candidates = [...await client.list('task', undefined, { state: 'ready' }), ...await client.list('subtask', undefined, { state: 'ready' })].filter(item => item.detail?.attributes.workflow?.grant);
+  let candidates = [...await client.list('task', undefined, { state: 'ready' }), ...await client.list('subtask', undefined, { state: 'ready' })].filter(item => item.detail?.attributes.workflow?.grant);
+  if (projectUid) {
+    const selected = [];
+    for (const candidate of candidates) {
+      const content = await client.get(candidate.uid);
+      const project = content.type === 'task' ? content.parent?.uid : content.parent?.uid ? (await client.get(content.parent.uid)).parent?.uid : undefined;
+      if (project === projectUid) selected.push(candidate);
+    }
+    candidates = selected;
+  }
   const pending = [...candidates], active = new Set(), counts = new Map(), results = [];
   while ((pending.length || active.size) && !signal?.aborted) {
     for (let index = 0; index < pending.length && active.size < policy.maxConcurrency;) {

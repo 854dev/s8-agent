@@ -9,7 +9,7 @@ import { captureIntakeSource, previewIntake, registerIntake, describeIntake, che
 import attach from '../extensions/projectman.ts';
 
 const digest = text => createHash('sha256').update(text).digest('hex');
-const input = () => ({ source: { label: '요청.md', text: 'KB 확장만 삭제. 경로가 충돌하면 다른 경로에 복원.' }, workspace: { title: 'PH-CMS', text: '제품' }, project: { title: 'KB', text: '구현' }, works: [{ key: 'db', title: 'DB', text: '확장 작성', acceptance: ['검증 통과'] }] });
+const input = () => ({ source: { label: '요청.md', text: 'KB 확장만 삭제. 경로가 충돌하면 다른 경로에 복원.' }, workspace: { uid: 'ws' }, project: { title: 'KB', text: '구현', repoPath: '/tmp/kb' }, works: [{ key: 'db', title: 'DB', text: '확장 작성', acceptance: ['검증 통과'] }] });
 const preview = plan => ({ plan, hash: digest(JSON.stringify(plan)), sourceHash: digest(plan.source.text), containers: { workspace: 'PH-CMS', project: 'KB' }, related: [], relatedMayBeTruncated: false });
 function fixture() {
   let commits = 0, loseResponse = false;
@@ -26,7 +26,7 @@ function fixture() {
       if (!records.has(plan.requestId)) {
         commits++;
         records.set(plan.requestId, { requestId: plan.requestId, hash, sourceHash: digest(plan.source.text), items: [
-          { key: 'workspace', uid: 'ws', type: 'workspace', parentUid: null, existing: false },
+          { key: 'workspace', uid: 'ws', type: 'workspace', parentUid: null, existing: true },
           { key: 'project', uid: 'project', type: 'project', parentUid: 'ws', existing: false },
           { key: 'work-db', uid: 'task', type: 'task', parentUid: 'project', existing: false },
         ] });

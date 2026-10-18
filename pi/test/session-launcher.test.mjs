@@ -48,7 +48,7 @@ console.log(JSON.stringify(process.argv.slice(2)));
   const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: dir, PHCMS_API_URL: 'http://127.0.0.1:8000/api/v2', PHCMS_ACCESS_TOKEN: key } };
   await writeFile(path.join(dir, 'tmux'), '#!/bin/sh\nprintf s8-fixture\n', { mode: 0o755 });
   options.env.PATH = `${dir}:${process.env.PATH}`;
-  const output = execFileSync('bash', [script, '--managed', '--no-scheduler', '--no-supervisor'], options);
+  const output = execFileSync('bash', [script, '--mode', 'project', '--managed', '--no-scheduler', '--no-supervisor'], options);
   assert.equal(output.includes(key), false);
   const args = JSON.parse(output);
   const tools = args[args.indexOf('--tools') + 1].split(',');
@@ -59,9 +59,9 @@ console.log(JSON.stringify(process.argv.slice(2)));
   assert.ok(args.includes('--no-extensions'));
   assert.ok(args.includes('--no-context-files'));
   assert.ok(args.includes(path.join(dir, 'pi/extensions/managed-session.mjs')));
-  const standalone = JSON.parse(execFileSync('bash', [script, '--managed', '--no-telegram'], options));
-  assert.ok(!standalone.some(arg => /extensions\/(managed-session|telegram)\.mjs$/.test(arg)));
-  assert.throws(() => execFileSync('bash', [script, '--managed', '--tools', 'read'], { ...options, stdio: 'pipe' }));
+  const standalone = JSON.parse(execFileSync('bash', [script, '--mode', 'project', '--managed', '--no-telegram'], options));
+  assert.ok(standalone.includes(path.join(dir, 'pi/extensions/managed-session.mjs')));
+  assert.throws(() => execFileSync('bash', [script, '--mode', 'project', '--managed', '--tools', 'read'], { ...options, stdio: 'pipe' }));
 });
 
 test('launcher dispatches background runtime options and keeps utility commands in the foreground', async t => {
@@ -78,14 +78,14 @@ test('launcher dispatches background runtime options and keeps utility commands 
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), '#!/usr/bin/env node\nconsole.log(JSON.stringify({pi:process.argv.slice(2)}));\n', { mode: 0o755 });
   const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: dir } };
   for (const input of [[], ['--telegram'], ['--no-telegram'], ['--no-scheduler', '--no-supervisor'], ['--model', 'fixture model', '--no-supervisor'], ['--session', 'work', '--telegram']]) {
-    const result = JSON.parse(execFileSync('bash', [script, ...input], options));
-    const expected = [...input.filter(arg => !['--telegram', '--no-telegram'].includes(arg)), input.includes('--no-telegram') ? '--no-telegram' : '--telegram'];
+    const result = JSON.parse(execFileSync('bash', [script, '--mode', 'project', ...input], options));
+    const expected = ['--mode', 'project', '--cwd', process.cwd(), ...input.filter(arg => !['--telegram', '--no-telegram'].includes(arg)), ...(input.includes('--no-telegram') ? ['--telegram', 'off'] : input.includes('--telegram') ? ['--telegram', 'take'] : [])];
     assert.deepEqual([...result.runtime].sort(), expected.sort());
     assert.ok(!result.runtime.includes(''));
   }
   assert.match(execFileSync('bash', [script, '--help'], options), /자동 접속 없음/);
   for (const input of [['--version'], ['--print'], ['list']]) {
-    const result = JSON.parse(execFileSync('bash', [script, ...input], options));
+    const result = JSON.parse(execFileSync('bash', [script, '--mode', 'project', ...input], options));
     assert.ok(result.pi);
     assert.equal(result.runtime, undefined);
   }

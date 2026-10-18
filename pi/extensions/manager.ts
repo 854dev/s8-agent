@@ -59,14 +59,15 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
           const workflow = item.detail?.attributes.workflow as any;
           if (!workflow) continue;
           const key = `${item.uid}:${workflow.revision}`;
-          const needsPreflight = ['todo', 'ready'].includes(String(item.detail?.attributes.state)) && !hasReviewedPreflight(item, workflow);
+          const needsPreflight = item.detail?.attributes.state === 'todo' && !hasReviewedPreflight(item, workflow);
           const needsReview = item.detail?.attributes.state === 'review' && !workflow.managerReview;
           const needsFollowup = item.detail?.attributes.state === 'ready' && workflow.review?.decision === 'resume' && workflow.followup?.reviewId !== workflow.review.id;
           const humanQuestion = workflow.review?.pending;
-          if (!seen.has(key) && (needsPreflight || needsReview || needsFollowup || humanQuestion)) {
+          const incomplete = item.detail?.attributes.state === 'blocked' && workflow.result && !workflow.review?.pending;
+          if (!seen.has(key) && (needsPreflight || needsReview || needsFollowup || humanQuestion || incomplete)) {
             seen.add(key);
             if (seen.size > 1000) seen.delete(seen.values().next().value!);
-            pi.sendMessage({ customType: 'projectman-update', content: `Projectman 작업 ${item.uid}에 새 결과 또는 검토 상태가 있습니다. workflow_get으로 실제 상태를 확인하세요. 일 시작 전 검토가 없으면 매니저가 원문·코드·지침을 검토하고 작은 의문도 사용자에게 확인한 뒤 최종 범위의 preflight_review를 기록하세요. 승인 후 개발자의 구현 결정을 사용자 질문으로 돌리지 마세요. 사람의 질문은 대신 결정하지 말고 알리세요. 결정이 확정되었으면 근거를 인용한 followup, 완료 결과는 review_result로 검토를 기록하세요.`, display: true }, { triggerTurn: true, deliverAs: 'followUp' });
+            pi.sendMessage({ customType: 'projectman-update', content: `Projectman 작업 ${item.uid}에 새 계획·결과·장애가 있습니다. workflow_get으로 확인하세요. 실행 전 사람과 대화하고 최종 계획을 확정하세요. 확정 후 개발자의 구현 결정을 질문으로 돌리지 마세요. 미완료·판단·실행 장애·체크포인트를 검토하고 기존 계획이면 retry로 복구하며, 예산 소진 시 결과를 보존하세요. 파일·명령 범위 제한이나 부모 권한 검증은 요구하지 마세요. 완료 결과는 review_result로 검토하고 최종 완료와 구분하세요.`, display: true }, { triggerTurn: true, deliverAs: 'followUp' });
             break;
           }
         }

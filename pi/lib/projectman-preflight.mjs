@@ -15,3 +15,10 @@ export async function requireReviewedPreflight(client, uid) {
   if (!hasReviewedPreflight(item, task.workflow)) throw new Error('PH-CMS request failed (HTTP 409): Manager preflight review required');
   return { ...task, preflight: item.detail.attributes.s8Preflight };
 }
+
+export async function requireConfirmedPlan(client, uid) {
+  const task = await client.getWorkflow(uid);
+  const w = task.workflow;
+  if (w?.version !== 2 || !w.planHash || w.confirmation?.planHash !== w.planHash || w.confirmation?.planVersion !== w.planVersion || w.grant?.specHash !== w.specHash) throw new Error('PH-CMS request failed (HTTP 409): Human plan confirmation required');
+  return { ...task, preflight: { summary: w.spec.plan, confirmation: w.confirmation } };
+}

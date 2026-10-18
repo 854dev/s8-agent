@@ -16,7 +16,7 @@ else {
       let capabilities;
       try { capabilities = await client.capabilities(); } catch { capabilities = { workflowVersion: 0 }; }
       console.log(JSON.stringify({ projectmanAuthenticated: true, workspaces: workspaces.length, capabilities, maxConcurrency: policy.maxConcurrency }));
-      process.exitCode = capabilities.workflowVersion === 1 ? 0 : 1;
+      process.exitCode = capabilities.workflowVersion === 2 ? 0 : 1;
     } else {
     releaseOwner = await supervisorOwner(root);
     await recoverDevelopmentRuns({ root, client });

@@ -27,17 +27,17 @@ export async function parallelWorkflowEval({ root, directory, repo, fixture, man
         return { content: [{ type: 'text', text: JSON.stringify(response) }], details: undefined };
       },
     };
-    const plans = outputs.map(output => ({ title: `Independent ${mode} ${output.text}`, text: `Write the file ${output.file} with exactly ${output.text} (optional trailing newline). This is a fully decided independent task: no questions and no command execution are needed.`, spec: { repoPath: repo, completionCriteria: [`${output.file} contains exactly ${output.text}`], allowedPaths: [output.file], commandNames: [], dependsOn: [], timeBudgetMinutes: 3 } }));
+    const plans = outputs.map(output => ({ title: `Independent ${mode} ${output.text}`, text: `Write the file ${output.file} with exactly ${output.text} (optional trailing newline). This is a fully decided independent task: no questions and no command execution are needed.`, spec: { plan: `Write ${output.file} with ${output.text} and verify its contents.`, decisionRefs: ['conversation:independent-files'], repoPath: repo, completionCriteria: [`${output.file} contains exactly ${output.text}`], commandNames: [], dependsOn: [], timeBudgetMinutes: 3 } }));
     const invoke = (role, prompt) => smokeSession({ ...runtime, role, prompt, systemPrompt, tools: [tool], run: { directory, workspace: repo }, signal: AbortSignal.timeout(120000) });
     await invoke(`manager-${mode}-plan`, `아래 두 개의 독립 작업을 각각 create하고 delegate하라. 총 2개 모두 위임하고 workflow_get으로 revision을 조회한 뒤 preflight_review로 확정 요구사항·허용 범위·검증 방법을 기록해야 한다. spec과 텍스트를 그대로 사용하고 작업 생성 응답의 uid와 revision을 전달한다. 승인과 실행은 평가 감독자가 담당한다.\n${JSON.stringify(plans)}`);
     if (ids.length !== 2) throw new Error('Manager did not prepare two independent tasks');
     const tasks = await Promise.all(ids.map(uid => manager.getWorkflow(uid)));
-    if (new Set(tasks.map(task => task.workflow?.spec?.allowedPaths?.[0])).size !== 2) throw new Error('Independent scopes must be distinct');
+    if (new Set(tasks.map(task => task.workflow?.spec?.completionCriteria?.[0])).size !== 2) throw new Error('Independent scopes must be distinct');
     for (let i = 0; i < tasks.length; i++) {
       const task = tasks[i];
-      const plan = plans.find(plan => plan.spec.allowedPaths[0] === task.workflow?.spec?.allowedPaths?.[0]);
-      if (!plan || JSON.stringify(task.workflow.spec.allowedPaths) !== JSON.stringify(plan.spec.allowedPaths) || task.workflow.spec.repoPath !== repo || task.workflow.spec.commandNames.length || task.workflow.spec.dependsOn.length || task.workflow.grant) throw new Error('Manager changed an independent task scope');
-      await human.workflow(task.uid, { action: 'authorize', expectedRevision: task.workflow.revision, requestId: randomUUID() });
+      const plan = plans.find(plan => plan.spec.completionCriteria[0] === task.workflow?.spec?.completionCriteria?.[0]);
+      if (!plan || JSON.stringify(task.workflow.spec.completionCriteria) !== JSON.stringify(plan.spec.completionCriteria) || task.workflow.spec.repoPath !== repo || task.workflow.spec.commandNames.length || task.workflow.spec.dependsOn.length || task.workflow.grant) throw new Error('Manager changed an independent task scope');
+      await human.workflow(task.uid, { action: 'authorize', planHash: task.workflow.planHash, message: 'Confirmed the independent file plan', expectedRevision: task.workflow.revision, requestId: randomUUID() });
     }
     const started = Date.now();
     const runs = await developmentTick({ root, client: manager, allowedRoot: fixture, policy: { ...policy, maxConcurrency: mode === 'parallel' ? 2 : 1, perRepoConcurrency: mode === 'parallel' ? 2 : 1 } });
@@ -48,7 +48,7 @@ export async function parallelWorkflowEval({ root, directory, repo, fixture, man
     const intervals = [];
     for (let i = 0; i < ids.length; i++) {
       const run = runs.find(run => run.uid === ids[i]);
-      const expected = outputs.find(output => output.file === current[i].workflow.spec.allowedPaths[0]);
+      const expected = outputs.find(output => current[i].workflow.spec.completionCriteria[0].startsWith(output.file + ' '));
       if (!expected || (await readFile(path.join(run.worktree, expected.file), 'utf8')).trim() !== expected.text) throw new Error('Independent output failed quality check');
       const frames = (await readFile(path.join(root, '.s8-runtime/runs', run.runId, 'developer.events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
       tokens += frames.filter(event => event.type === 'assistant').reduce((sum, event) => sum + Object.values(event.usage ?? {}).reduce((subtotal, value) => subtotal + Number(value), 0), 0);

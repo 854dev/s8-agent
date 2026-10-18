@@ -1,20 +1,19 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readFile, writeFile, lstat, readdir, realpath, unlink } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, lstat, readdir, realpath, unlink, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { boundedCommand, SMOKE_IMAGE } from './development-smoke.mjs';
 
 const exec = promisify(execFile);
-export const safePath = value => typeof value === 'string' && value.length > 0 && !path.isAbsolute(value) && !value.includes('\\') && value.split('/').every(part => part && part !== '..' && !/secret/i.test(part) && (!part.startsWith('.') || ['.env.example', '.gitignore'].includes(part)) && !['auth.json', 'firebase.json', 'AGENTS.md', 'CLAUDE.md', 'node_modules'].includes(part)) && !/\.(pem|key)$/i.test(value);
-export const permittedWrite = (value, allowed) => safePath(value) && allowed.some(prefix => value === prefix || value.startsWith(`${prefix}/`));
+export const safePath = value => typeof value === 'string' && value.length > 0 && !path.isAbsolute(value) && !value.includes('\\') && value.split('/').every(part => part && part !== '..' && part !== '.' && !/secret/i.test(part) && !['.git', '.env', '.pi-runtime', '.s8-runtime', 'auth.json', 'firebase.json', 'node_modules'].includes(part) && (!part.startsWith('.env.') || part === '.env.example')) && !/\.(pem|key)$/i.test(value);
+// Legacy signature retained; plan path lists no longer constrain execution.
+export const permittedWrite = value => safePath(value);
 const git = (cwd, args) => exec('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args], { cwd, maxBuffer: 1024 * 1024, timeout: 15000 });
 
-export async function prepareWorktree({ root, uid, repoPath, allowedRoot = path.dirname(root) }) {
+export async function prepareWorktree({ root, uid, repoPath }) {
   if (!/^[a-zA-Z0-9_-]{1,120}$/.test(uid)) throw new Error('Invalid task ID');
-  const repo = await realpath(repoPath), scope = await realpath(allowedRoot);
-  const relative = path.relative(scope, repo);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || relative.split(path.sep).some(part => part.startsWith('.') || /secret/i.test(part))) throw new Error('Repository outside configured development root');
+  const repo = await realpath(repoPath);
   if ((await git(repo, ['rev-parse', '--show-toplevel'])).stdout.trim() !== repo) throw new Error('Repository root required');
   const worktree = path.join(root, '.s8-runtime/worktrees', uid);
   const meta = `${worktree}.json`;
@@ -26,7 +25,6 @@ export async function prepareWorktree({ root, uid, repoPath, allowedRoot = path.
     if (await realpath(path.resolve(worktree, common)) !== await realpath(path.join(repo, '.git'))) throw new Error('Worktree repository mismatch');
     return { worktree, ...info };
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  if ((await git(repo, ['status', '--porcelain'])).stdout.trim()) throw new Error('Base repository has uncommitted changes');
   const baseCommit = (await git(repo, ['rev-parse', 'HEAD'])).stdout.trim();
   const tracked = (await git(repo, ['ls-files', '-z'])).stdout.split('\0').filter(Boolean);
   if (tracked.some(file => !safePath(file) && !['AGENTS.md', 'CLAUDE.md', '.gitignore', '.gitattributes'].includes(file) && !file.startsWith('.github/'))) throw new Error('Repository contains protected tracked paths; prepare a clean development repository');
@@ -38,7 +36,7 @@ export async function prepareWorktree({ root, uid, repoPath, allowedRoot = path.
 
 export function developmentWorkspace(root, allowedPaths) {
   async function resolve(relative, writing) {
-    if (!safePath(relative) || (writing && !permittedWrite(relative, allowedPaths))) throw new Error('Path outside development permissions');
+    if (!safePath(relative) || (writing && !permittedWrite(relative, allowedPaths))) throw new Error('Protected or invalid workspace path');
     let cursor = await realpath(root);
     const parts = relative.split('/');
     for (let i = 0; i < parts.length; i++) {
@@ -71,7 +69,7 @@ export function developmentWorkspace(root, allowedPaths) {
       return { path: relative, bytes: Buffer.byteLength(content) };
     },
     async remove(relative) {
-      if (!permittedWrite(relative, allowedPaths)) throw new Error('Path outside development permissions');
+      if (!permittedWrite(relative, allowedPaths)) throw new Error('Protected or invalid workspace path');
       const file = await resolve(relative, false);
       if (!(await lstat(file)).isFile()) throw new Error('Only regular files may be removed');
       await unlink(file);
@@ -84,7 +82,7 @@ export async function workspaceChanges(worktree, allowedPaths) {
   const tracked = (await git(worktree, ['diff', '--name-only', 'HEAD', '-z'])).stdout.split('\0').filter(Boolean);
   const untracked = (await git(worktree, ['ls-files', '--others', '--exclude-standard', '-z'])).stdout.split('\0').filter(Boolean);
   const changedFiles = [...new Set([...tracked, ...untracked])];
-  if (changedFiles.some(file => !permittedWrite(file, allowedPaths))) throw new Error('Changes exceeded approved paths');
+  if (changedFiles.some(file => !permittedWrite(file, allowedPaths))) throw new Error('Changes contain protected paths');
   const fingerprints = [];
   for (const file of changedFiles) {
     try { fingerprints.push({ path: file, hash: createHash('sha256').update((await developmentWorkspace(worktree, allowedPaths).read(file)).content).digest('hex') }); }
@@ -93,24 +91,57 @@ export async function workspaceChanges(worktree, allowedPaths) {
   return { changedFiles, fingerprints };
 }
 
-export async function workspacePatch(worktree, allowedPaths) {
+export async function workspacePatch(worktree, allowedPaths, baseline = 'HEAD') {
+  await git(worktree, ['read-tree', baseline]);
   const { changedFiles } = await workspaceChanges(worktree, allowedPaths);
   if (!changedFiles.length) return '';
-  let patch = (await git(worktree, ['diff', '--binary', 'HEAD', '--', ...changedFiles])).stdout;
+  let patch = (await git(worktree, ['diff', '--binary', baseline, '--', ...changedFiles])).stdout;
   const fresh = (await git(worktree, ['ls-files', '--others', '--exclude-standard', '-z'])).stdout.split('\0').filter(Boolean);
   for (const file of fresh) {
-    if (!permittedWrite(file, allowedPaths)) throw new Error('Unapproved patch path');
+    if (!permittedWrite(file, allowedPaths)) throw new Error('Protected patch path');
     try { patch += (await git(worktree, ['diff', '--no-index', '--binary', '--', '/dev/null', file])).stdout; }
     catch (error) { if (error.code !== 1) throw error; patch += error.stdout; }
   }
   return patch;
 }
 
-export async function developmentCommand({ root, worktree, name, allowedNames, policy, runId, signal }) {
-  if (!allowedNames.includes(name) || !Object.hasOwn(policy.commands, name)) throw new Error('Command was not authorized');
-  const command = policy.commands[name];
+export async function developmentCommand({ root, worktree, name, command: shell, policy, runId, signal }) {
+  const command = shell ? { argv: ['sh', '-lc', shell], network: 'bridge' } : policy.commands[name] ?? { argv: ['sh', '-lc', name], network: 'bridge' };
+  if (!command.argv?.length || command.argv.some(arg => typeof arg !== 'string' || arg.includes('\0'))) throw new Error('Invalid command');
   const containerName = `s8-dev-${runId}`;
   const args = ['run', '--rm', '--init', '--name', containerName, '--user', `${process.getuid()}:${process.getgid()}`, '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '128', '--cpus', '2', '--memory', '2g', '--read-only', '--tmpfs', '/tmp:rw,nosuid,size=512m', '--network', command.network, '--mount', `type=bind,source=${worktree},target=/work`, '--workdir', '/work', '--env', 'npm_config_cache=/tmp/npm-cache', command.image ?? policy.image ?? SMOKE_IMAGE, ...command.argv];
   try { return await boundedCommand('docker', args, { cwd: root, signal, timeoutMs: policy.maxCommandSeconds * 1000 }); }
   finally { await boundedCommand('docker', ['rm', '-f', containerName], { timeoutMs: 10000 }); }
+}
+
+/** Import incremental task patches in dependency order; keep a durable input tree. */
+export async function importDevelopmentResults({ root, worktree, tasks }) {
+  const manifestPath = path.join(root, '.s8-runtime', 'imports', `${path.basename(worktree)}.json`);
+  let manifest = { runs: [], tree: 'HEAD' };
+  try { manifest = JSON.parse(await readFile(manifestPath, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  for (const task of tasks) {
+    const runId = task.workflow?.run?.id;
+    if (!runId || !/^[a-f0-9-]{36}$/.test(runId)) throw new Error('Dependency has no durable run artifact');
+    if (manifest.runs.includes(runId)) continue;
+    const directory = path.join(root, '.s8-runtime/runs', runId);
+    const report = JSON.parse(await readFile(path.join(directory, 'result.json'), 'utf8'));
+    if (report.status !== 'completed' || report.changedFiles.some(file => !safePath(file))) throw new Error('Dependency artifact is incomplete or contains protected paths');
+    const patch = path.join(directory, 'task.patch');
+    if ((await readFile(patch, 'utf8')).length) {
+      try { await git(worktree, ['apply', '--check', patch]); await git(worktree, ['apply', patch]); }
+      catch {
+        try { await git(worktree, ['apply', '--reverse', '--check', patch]); }
+        catch { throw new Error('Dependency patch conflicts with the saved workspace'); }
+      }
+    }
+    const changes = await workspaceChanges(worktree);
+    if (changes.changedFiles.length) await git(worktree, ['add', '--', ...changes.changedFiles]);
+    manifest.tree = (await git(worktree, ['write-tree'])).stdout.trim();
+    manifest.runs.push(runId);
+    await mkdir(path.dirname(manifestPath), { recursive: true, mode: 0o700 });
+    await writeFile(`${manifestPath}.tmp`, JSON.stringify(manifest), { mode: 0o600 });
+    await rename(`${manifestPath}.tmp`, manifestPath);
+  }
+  await git(worktree, ['read-tree', 'HEAD']);
+  return manifest.tree;
 }

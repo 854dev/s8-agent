@@ -1,4 +1,9 @@
 node_modules/
+# Generated build outputs (all services)
+dist/
+build/
+test-dist/
+*.tsbuildinfo
 .env
 # Local non-credential Telegram IDs and notification target
 /s8-config.yml

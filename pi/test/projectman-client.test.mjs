@@ -40,21 +40,11 @@ test('creates a non-autonomous task and transitions via the atomic endpoint', as
   assert.equal(calls[1].body.nextState, 'ready');
 });
 
-test('creates missing phase subtasks and skips existing phases on rerun', async () => {
-  const created = [];
-  const client = new ProjectmanClient('https://cms.example/api', 'token', async (url, init) => {
-    const parsed = new URL(url);
-    if (init.method === 'POST') {
-      const payload = JSON.parse(init.body);
-      created.push(payload);
-      return response(item(`sub-${created.length}`, 'subtask'));
-    }
-    if (parsed.searchParams.get('uids')) return response({ content: [item('task-1')], last: true });
-    return response({ content: created.map((payload, i) => ({ ...item(`sub-${i + 1}`, 'subtask'), detail: { text: '', attributes: payload.attributes } })), last: true });
-  });
-  assert.equal((await client.ensurePhases('task-1')).created.length, 6);
-  assert.equal((await client.ensurePhases('task-1')).created.length, 0);
-  assert.ok(created.every(payload => payload.attributes.timeBudgetMinutes === 20 && payload.attributes.autorun === false));
+test('retired phase template never creates fixed inspection/planning subtasks', async () => {
+  const client = new ProjectmanClient('https://cms.example/api', 'token', async () => { assert.fail('No requests expected'); });
+  await assert.rejects(client.ensurePhases('task-1'), /Fixed phase templates are retired/);
+  await assert.rejects(client.create(undefined, 'workspace', 'Organization', ''), /cannot create workspaces/);
+  await assert.rejects(client.create('ws', 'project', 'Code', ''), /repoPath/);
 });
 
 test('sets or clears scheduledAt without replacing unrelated attributes', async () => {

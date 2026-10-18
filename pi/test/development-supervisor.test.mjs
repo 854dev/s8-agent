@@ -18,7 +18,7 @@ async function fixture(t, count = 1) {
   await mkdir(root); await mkdir(repo); await mkdir(path.join(repo, 'src'));
   await writeFile(path.join(repo, 'src/base.txt'), 'base');
   for (const args of [['init'], ['add', '.'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture']]) await exec('git', args, { cwd: repo });
-  const rows = new Map(Array.from({ length: count }, (_, i) => [`task${i}`, { uid: `task${i}`, title: 'Fixture', text: 'Write isolated file', state: 'ready', workflow: { revision: 2, spec: { repoPath: repo, allowedPaths: ['src'], commandNames: [], dependsOn: [], timeBudgetMinutes: 1 }, grant: { specHash: 'fixture' }, specHash: 'fixture' } }]));
+  const rows = new Map(Array.from({ length: count }, (_, i) => [`task${i}`, { uid: `task${i}`, title: 'Fixture', text: 'Write isolated file', state: 'ready', workflow: { version: 2, planVersion: 1, planHash: 'fixture', confirmation: { planVersion: 1, planHash: 'fixture', actorUid: 'human' }, revision: 2, spec: { plan: 'Requirements and scope resolved before final approval.', repoPath: repo, allowedPaths: ['src'], commandNames: [], dependsOn: [], timeBudgetMinutes: 1 }, grant: { specHash: 'fixture' }, specHash: 'fixture' } }]));
   const content = row => ({ uid: row.uid, title: row.title, detail: { text: row.text, attributes: { state: row.state, workflow: row.workflow, s8Preflight: row.s8Preflight } } });
   for (const row of rows.values()) row.s8Preflight = { status: 'reviewed', specHash: row.workflow.specHash, fingerprint: preflightFingerprint(content(row), row.workflow), summary: 'Requirements and scope resolved before final approval.' };
   const applied = new Map(), reports = [];
@@ -78,10 +78,10 @@ test('lost report response is replayed from durable outbox without running the d
   assert.equal(executions, 1);
 });
 
-test('missing or outdated preflight never starts an approved worker', async t => {
+test('missing or outdated human plan confirmation never starts a worker', async t => {
   const f = await fixture(t);
   const row = f.rows.get('task0');
-  for (const invalidate of [() => { row.text = 'Changed requirements'; }, () => { delete row.s8Preflight; }]) {
+  for (const invalidate of [() => { row.workflow.planHash = 'changed'; }, () => { delete row.workflow.confirmation; }]) {
     invalidate();
     const result = await runDevelopmentTask({ ...f, allowedRoot: f.base, candidate: { uid: 'task0' }, worker: async () => { assert.fail('Must not execute before manager review'); } });
     assert.equal(result.status, 'preflight_required');
@@ -115,11 +115,17 @@ test('independent verification failure resumes repair without asking the human o
   assert.equal(row.state, 'review');
 });
 
-test('unprepared dirty repository becomes a manager operational review instead of silently retrying forever', async t => {
+test('dirty source repository does not block execution or change user files', async t => {
   const f = await fixture(t); await writeFile(path.join(f.repo, 'src/base.txt'), 'user changes');
-  const result = await runDevelopmentTask({ ...f, allowedRoot: f.base, candidate: { uid: 'task0' }, worker: async () => { throw new Error('Must not run'); } });
-  assert.equal(result.status, 'blocked'); assert.equal(f.rows.get('task0').state, 'blocked');
-  assert.equal(f.rows.get('task0').workflow.review.audience, 'manager');
+  const result = await runDevelopmentTask({ ...f, candidate: { uid: 'task0' }, worker: async request => {
+    const workspace = developmentWorkspace(request.run.workspace, ['src']);
+    await workspace.write('other/new.txt', 'Outside the old allowlist');
+    await workspace.write('.github/workflows/test.yml', 'name: test');
+    return { report: { status: 'completed', summary: 'done' } };
+  } });
+  assert.equal(result.status, 'completed');
+  assert.equal(await readFile(path.join(f.repo, 'src/base.txt'), 'utf8'), 'user changes');
+  assert.deepEqual(f.reports[0].report.changedFiles, ['.github/workflows/test.yml', 'other/new.txt']);
 });
 
 test('restart recovers a dead worker checkpoint and never executes an orphan again', async t => {
@@ -143,20 +149,21 @@ test('revoked execution aborts a running worker and preserves the stopped report
     await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }))
     return { report: { status: 'completed', summary: 'Must not be accepted as complete', verification: [] } }
   } })
-  assert.equal(result.status, 'blocked')
+  assert.equal(result.status, 'failed')
   assert.equal(f.rows.get('task0').state, 'blocked')
-  assert.equal(f.reports[0].report.question.audience, 'manager')
+  assert.equal(f.reports[0].report.question, undefined)
+  assert.ok(f.reports[0].report.executionErrors.length)
   assert.match(f.reports[0].report.summary, /Execution stopped/)
 })
 
-test('exhausted run budget asks for manager operational review without invoking a worker', async t => {
+test('exhausted run budget preserves work without a question or new execution', async t => {
   const f = await fixture(t)
   f.rows.get('task0').workflow.runCount = 6
   let invoked = false
   const result = await runDevelopmentTask({ ...f, allowedRoot: f.base, candidate: { uid: 'task0' }, worker: async () => { invoked = true } })
-  assert.equal(result.status, 'blocked')
+  assert.equal(result.status, 'budget_exhausted')
   assert.equal(invoked, false)
-  assert.equal(f.rows.get('task0').workflow.review.audience, 'manager')
+  assert.equal(f.rows.get('task0').workflow.review, undefined)
 })
 
 test('per-repository concurrency one serializes otherwise independent tasks', async t => {
@@ -176,7 +183,7 @@ test('scoped removal exports an applicable deletion patch and refuses unapproved
   const f = await fixture(t)
   const result = await runDevelopmentTask({ ...f, allowedRoot: f.base, candidate: { uid: 'task0' }, worker: async request => {
     const workspace = developmentWorkspace(request.run.workspace, ['src'])
-    await assert.rejects(workspace.remove('.git'), /permissions/)
+    await assert.rejects(workspace.remove('.git'), /Protected/)
     await assert.rejects(workspace.remove('src'), /regular files/)
     await workspace.remove('src/base.txt')
     return { report: { status: 'completed', summary: 'Removed approved obsolete file', verification: [] } }
@@ -187,3 +194,39 @@ test('scoped removal exports an applicable deletion patch and refuses unapproved
   await exec('git', ['apply', '--check', patch], { cwd: f.repo })
   assert.equal(await readFile(path.join(f.repo, 'src/base.txt'), 'utf8'), 'base')
 })
+
+
+test('incremental dependency patches compose into a parent integration and survive retry', async t => {
+  const f = await fixture(t, 3);
+  const run = async (uid, worker) => runDevelopmentTask({ ...f, candidate: { uid }, worker });
+  const first = await run('task0', async request => {
+    await developmentWorkspace(request.run.workspace).write('src/shared.txt', 'first\n');
+    return { report: { status: 'completed', summary: 'First feature' } };
+  });
+  assert.equal(first.status, 'completed'); f.rows.get('task0').state = 'done';
+  f.rows.get('task1').workflow.spec.dependsOn = ['task0'];
+  const second = await run('task1', async request => {
+    const workspace = developmentWorkspace(request.run.workspace);
+    assert.equal((await workspace.read('src/shared.txt')).content, 'first\n');
+    await workspace.write('src/shared.txt', 'first\nsecond\n');
+    return { report: { status: 'completed', summary: 'Second feature' } };
+  });
+  assert.equal(second.status, 'completed'); f.rows.get('task1').state = 'done';
+  const parent = f.rows.get('task2'); parent.workflow.spec.dependsOn = ['task0', 'task1'];
+  for (const status of ['continue', 'completed']) {
+    const integrated = await run('task2', async request => {
+      assert.equal((await developmentWorkspace(request.run.workspace).read('src/shared.txt')).content, 'first\nsecond\n');
+      return { report: { status, summary: 'Combined feature verification' } };
+    });
+    assert.equal(integrated.status, status);
+  }
+  assert.equal((await exec('git', ['status', '--porcelain'], { cwd: f.repo })).stdout, '');
+});
+
+test('failed worker verification is preserved even when no named supervisor checks exist', async t => {
+  const f = await fixture(t);
+  const result = await runDevelopmentTask({ ...f, candidate: { uid: 'task0' }, worker: async () => ({ report: { status: 'completed', summary: 'Claimed complete', verification: [{ name: 'custom test', ok: false, summary: 'failed' }] } }) });
+  assert.equal(result.status, 'continue');
+  assert.equal(f.reports[0].report.verification[0].ok, false);
+  assert.equal(f.reports[0].report.question, undefined);
+});

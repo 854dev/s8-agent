@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { preflightFingerprint, hasReviewedPreflight, requireReviewedPreflight } from './projectman-preflight.mjs';
+import { preflightFingerprint, hasReviewedPreflight } from './projectman-preflight.mjs';
 import type { IntakePlan, IntakePreview, IntakeResult } from './projectman-intake.ts';
 
 export type ProjectmanContent = {
@@ -98,7 +98,6 @@ export class ProjectmanClient {
   }
 
   async workflow(uid: string, operation: Record<string, unknown>) {
-    if (operation.action === 'authorize') await requireReviewedPreflight(this, uid);
     return this.request<any>(`projectman/items/${encodeURIComponent(uid)}/workflow`, { method: 'POST', body: JSON.stringify(operation) });
   }
 
@@ -117,15 +116,23 @@ export class ProjectmanClient {
     return this.request(`projectman/intakes/${requestId}`);
   }
 
-  async create(parentUid: string | undefined, type: 'workspace' | 'project' | 'task' | 'subtask', title: string, text: string, tags: string[] = [], phase?: string) {
-    if (type === 'workspace' ? Boolean(parentUid) : !parentUid) throw new Error('Workspace is a root; other content requires a parent UID');
+  async create(parentUid: string | undefined, type: 'workspace' | 'project' | 'task' | 'subtask', title: string, text: string, tags: string[] = [], phase?: string, repoPath?: string) {
+    if (type === 'workspace') throw new Error('Agents cannot create workspaces; select an existing workspace UID');
+    if (!parentUid) throw new Error('Workspace is a root; other content requires a parent UID');
+    if (type === 'project' && (!repoPath || !repoPath.startsWith('/'))) throw new Error('New projects require an absolute repoPath');
     if (phase && (type !== 'subtask' || !['inspect', 'plan', 'implement', 'verify', 'review_blockers', 'report'].includes(phase))) {
       throw new Error('Invalid subtask phase');
     }
     return this.request<ProjectmanContent>('contents', { method: 'POST', body: JSON.stringify({
       channelSlug: 'ph-projectman', parentUid, type, title, text, tags, status: 'published',
-      attributes: ['task', 'subtask'].includes(type) ? { state: 'todo', autorun: false, ...(type === 'subtask' ? { timeBudgetMinutes: 20 } : {}), ...(phase ? { phase } : {}) } : {},
+      attributes: ['task', 'subtask'].includes(type) ? { state: 'todo', autorun: false, ...(type === 'subtask' ? { timeBudgetMinutes: 20 } : {}), ...(phase ? { phase } : {}) } : type === 'project' ? { repoPath } : {},
     }) });
+  }
+
+  async bindProject(uid: string, repoPath: string) {
+    const item = await this.get(uid);
+    if (item.type !== 'project' || !repoPath.startsWith('/')) throw new Error('Project UID and absolute repoPath required');
+    return this.request<ProjectmanContent>(`contents/${encodeURIComponent(uid)}`, { method: 'PUT', body: JSON.stringify({ attributes: { repoPath } }) });
   }
 
   async schedule(uid: string, scheduledAt: string | null) {
@@ -136,23 +143,8 @@ export class ProjectmanClient {
     return this.request<ProjectmanContent>(`contents/${encodeURIComponent(uid)}`, { method: 'PUT', body: JSON.stringify({ attributes: { state, scheduledAt: scheduledAt === null ? null : new Date(scheduledAt).toISOString() } }) });
   }
 
-  async ensurePhases(taskUid: string) {
-    const task = await this.get(taskUid);
-    if (task.type !== 'task') throw new Error('Phase template requires a task UID');
-    const phases = [
-      ['inspect', '관련 문서와 코드 흐름 확인'], ['plan', '구현 계획 작성'],
-      ['implement', '20분 이내 구현 단위'], ['verify', '테스트와 diff 확인'],
-      ['review_blockers', '출시 차단 결함 확인'], ['report', '변경·검증 결과 보고'],
-    ] as const;
-    const existing = await this.list('subtask', taskUid);
-    const created = [];
-    // ponytail: single runner only; add server-side idempotent create if parallel agents need templates.
-    for (const [phase, title] of phases) {
-      if (existing.some(item => item.detail?.attributes.phase === phase)) continue;
-      const subtask = await this.create(taskUid, 'subtask', title, `최대 20분(재시도 포함). 완료 또는 중단 시 결과를 work_log에 기록한다. 20분을 초과할 작업은 더 나눈다.`, [], phase);
-      created.push(subtask.uid);
-    }
-    return { taskUid, created, existing: existing.length };
+  async ensurePhases(_taskUid: string) {
+    throw new Error('Fixed phase templates are retired. Discuss the plan and create one-shot subtasks explicitly.');
   }
 
   async transition(uid: string, expectedState: State, nextState: State, message: string, event: string, requestId: string = randomUUID()) {
