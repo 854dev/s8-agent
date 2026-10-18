@@ -12,12 +12,12 @@ test('explicit job conversion requires a capable daemon and preserves expiry, ac
   const agent = await mkdtemp(path.join(os.tmpdir(), 's8-job-conversion-'));
   t.after(() => rm(agent, { recursive: true, force: true }));
   await mkdir(path.join(agent, 'pi/bin'), { recursive: true });
-  await mkdir(path.join(agent, 'pi/lib'));
+  for (const role of ['projectman', 'scheduler', 'config']) await mkdir(path.join(agent, 'pi/lib', role), { recursive: true });
   await copyFile(new URL('../bin/projectman-job.mjs', import.meta.url), path.join(agent, 'pi/bin/projectman-job.mjs'));
-  await copyFile(new URL('../lib/projectman-client.ts', import.meta.url), path.join(agent, 'pi/lib/projectman-client.ts'));
-  await copyFile(new URL('../lib/projectman-preflight.mjs', import.meta.url), path.join(agent, 'pi/lib/projectman-preflight.mjs'));
-  await copyFile(new URL('../lib/scheduler-store.mjs', import.meta.url), path.join(agent, 'pi/lib/scheduler-store.mjs'));
-  await writeFile(path.join(agent, 'pi/lib/telegram-config.mjs'), `export const agentRoot = ${JSON.stringify(agent)};`);
+  await copyFile(new URL('../lib/projectman/client.ts', import.meta.url), path.join(agent, 'pi/lib/projectman/client.ts'));
+  await copyFile(new URL('../lib/projectman/preflight.mjs', import.meta.url), path.join(agent, 'pi/lib/projectman/preflight.mjs'));
+  await copyFile(new URL('../lib/scheduler/store.mjs', import.meta.url), path.join(agent, 'pi/lib/scheduler/store.mjs'));
+  await writeFile(path.join(agent, 'pi/lib/config/s8-config.mjs'), `export const agentRoot = ${JSON.stringify(agent)};`);
   let writes = 0;
   const server = createServer((req, res) => {
     if (req.method !== 'GET') { writes++; res.writeHead(400).end(); return; }

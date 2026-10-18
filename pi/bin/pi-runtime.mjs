@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
-import { restartPiRuntime } from '../lib/pi-runtime-restart.mjs';
-import { managerArgs } from '../lib/manager-launch.mjs';
-import { validSession, listSessions } from '../lib/managed-sessions.mjs';
+import { restartPiRuntime } from '../lib/runtime/restart.mjs';
+import { managerArgs } from '../lib/manager/launch.mjs';
+import { validSession, listSessions } from '../lib/runtime/managed-sessions.mjs';
 const root = fileURLToPath(new URL('../..', import.meta.url));
 try {
   if (process.argv[2] === '--sessions') {

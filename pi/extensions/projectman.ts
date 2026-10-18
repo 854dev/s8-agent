@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { Type } from 'typebox';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { IntakeDraftSchema, captureIntakeSource, checkIntakeSource, previewIntake, describeIntake, registerIntake, checkPreview, type IntakePreview, type IntakeSource } from '../lib/projectman-intake.ts';
-import { projectmanFromEnv, projectmanJson, type ProjectmanClient } from '../lib/projectman-client.ts';
+import { IntakeDraftSchema, captureIntakeSource, checkIntakeSource, previewIntake, describeIntake, registerIntake, checkPreview, type IntakePreview, type IntakeSource } from '../lib/projectman/intake.ts';
+import { projectmanFromEnv, projectmanJson, type ProjectmanClient } from '../lib/projectman/client.ts';
 
 const fields = Type.Object({
   action: Type.Union([Type.Literal('list'), Type.Literal('get'), Type.Literal('create'), Type.Literal('resume'), Type.Literal('schedule'), Type.Literal('intake_source'), Type.Literal('intake_preview'), Type.Literal('intake_register'), Type.Literal('intake_get'), Type.Literal('workflow_get'), Type.Literal('project_path'), Type.Literal('preflight_review'), Type.Literal('delegate'), Type.Literal('review_result'), Type.Literal('request_review'), Type.Literal('answer'), Type.Literal('escalate')]),

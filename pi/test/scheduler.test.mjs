@@ -5,9 +5,9 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
-import { isDue, validateJob } from '../lib/scheduler-store.mjs';
-import { runScheduler, sendTelegram } from '../lib/scheduler-daemon.mjs';
-import { controlSchedules } from '../lib/scheduler-control.mjs';
+import { isDue, validateJob } from '../lib/scheduler/store.mjs';
+import { runScheduler, sendTelegram } from '../lib/scheduler/daemon.mjs';
+import { controlSchedules } from '../lib/scheduler/control.mjs';
 
 const job = { id: 'morning', time: '09:00', timezone: 'Asia/Seoul', enabled: true, script: 'echo hello' };
 
@@ -61,7 +61,7 @@ test('SIGHUP shuts down the scheduler and releases its owner lock', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-scheduler-hangup-'));
   const lockFile = path.join(root, 'owner.lock');
   await writeFile(path.join(root, 'jobs.json'), JSON.stringify({ version: 1, jobs: [] }));
-  const moduleUrl = new URL('../lib/scheduler-daemon.mjs', import.meta.url).href;
+  const moduleUrl = new URL('../lib/scheduler/daemon.mjs', import.meta.url).href;
   const child = spawn(process.execPath, [
     '--input-type=module',
     '-e',

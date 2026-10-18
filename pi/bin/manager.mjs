@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { managerArgs } from '../lib/manager-launch.mjs';
+import { managerArgs } from '../lib/manager/launch.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 try {

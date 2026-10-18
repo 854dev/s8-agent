@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ProjectmanClient } from '../lib/projectman-client.ts';
-import { hasReviewedPreflight, preflightFingerprint } from '../lib/projectman-preflight.mjs';
+import { ProjectmanClient } from '../lib/projectman/client.ts';
+import { hasReviewedPreflight, preflightFingerprint } from '../lib/projectman/preflight.mjs';
 
 function fixture({ beforePut = () => {}, afterPut = () => {} } = {}) {
   const workflow = { revision: 2, specHash: 'scope-1', spec: { completionCriteria: ['Minimum zero'], commandNames: ['test'] } };

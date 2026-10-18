@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { runScheduler } from '../lib/scheduler-daemon.mjs';
-import { controlSchedules } from '../lib/scheduler-control.mjs';
+import { runScheduler } from '../lib/scheduler/daemon.mjs';
+import { controlSchedules } from '../lib/scheduler/control.mjs';
 
 test('stop cancels the current shell batch but leaves its schedule enabled', async t => {
   if (process.platform === 'win32') return t.skip('Windows process-tree termination requires Windows');

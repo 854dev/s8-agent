@@ -2,9 +2,9 @@
 // Explicit migration only; never resets tasks, ledger, expiry, or activation state.
 import { open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { agentRoot } from '../lib/telegram-config.mjs';
-import { scheduleRoot, validId, validateJob } from '../lib/scheduler-store.mjs';
-import { projectmanFromEnv } from '../lib/projectman-client.ts';
+import { agentRoot } from '../lib/config/s8-config.mjs';
+import { scheduleRoot, validId, validateJob } from '../lib/scheduler/store.mjs';
+import { projectmanFromEnv } from '../lib/projectman/client.ts';
 
 try {
   const [id, projectUid] = process.argv.slice(2);

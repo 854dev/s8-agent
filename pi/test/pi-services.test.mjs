@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promi
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { startPiServices, supervisorOwner } from '../lib/pi-services.mjs';
+import { startPiServices, supervisorOwner } from '../lib/runtime/services.mjs';
 const exec = promisify(execFile);
 const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
 async function fixture(t) {
@@ -105,7 +105,7 @@ test('legacy service sessions are linked without restarting their process', asyn
 });
 
 test('worker pool uses configured count and canonical checkout identity across launchers', async t => {
-  const { ensureWorkerPool } = await import('../lib/worker-pool.mjs');
+  const { ensureWorkerPool } = await import('../lib/development/worker-pool.mjs');
   const f = await fixture(t);
   await writeFile(path.join(f.root, 's8-config.yml'), 'telegram: {}\nworkers:\n  count: 3\n');
   const first = await ensureWorkerPool(f.root, { run: f.run });

@@ -20,4 +20,4 @@ SQL
 role_created=true
 docker exec -i postgres psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE $test_database OWNER $test_role" >/dev/null
 database_created=true
-env -i PATH="$PATH" HOME="$HOME" NODE_ENV=test DB_PORT=5432 SERVICE_KEY_TEST_DB="$test_database" SERVICE_KEY_TEST_USER="$test_role" SERVICE_KEY_TEST_PASSWORD="$test_password" ./node_modules/.bin/vitest run --config "$s8_root/pi/test/support/projectman-worker.vitest.config.mjs"
+env -i PATH="$PATH" HOME="$HOME" NODE_ENV=test DB_PORT=5432 SERVICE_KEY_TEST_DB="$test_database" SERVICE_KEY_TEST_USER="$test_role" SERVICE_KEY_TEST_PASSWORD="$test_password" ./node_modules/.bin/vitest run --config "$s8_root/pi/test/integration/worker-pool/vitest.config.mjs"

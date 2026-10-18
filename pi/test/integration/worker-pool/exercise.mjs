@@ -8,17 +8,17 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
-import { ProjectmanClient } from '../../lib/projectman-client.ts';
-import { startDeveloperWorker } from '../../lib/worker-daemon.mjs';
-import { executeDeveloper } from '../../lib/developer-session.mjs';
-import { developmentTick, waitForDevelopmentRuns, flushDevelopmentOutbox } from '../../lib/development-supervisor.mjs';
-import { drainManagerInbox } from '../../lib/manager-inbox.mjs';
-import { sendTelegram } from '../../lib/telegram-notify.mjs';
-import { liveConsoleBrowser } from '../../lib/live-console-browser.mjs';
+import { ProjectmanClient } from '../../../lib/projectman/client.ts';
+import { startDeveloperWorker } from '../../../lib/development/worker-daemon.mjs';
+import { executeDeveloper } from '../../../lib/development/worker-session.mjs';
+import { developmentTick, waitForDevelopmentRuns, flushDevelopmentOutbox } from '../../../lib/development/supervisor.mjs';
+import { drainManagerInbox } from '../../../lib/manager/inbox.mjs';
+import { sendTelegram } from '../../../lib/telegram/notify.mjs';
+import { liveConsoleBrowser } from '../../../lib/evaluation/live-console-browser.mjs';
 
 /** Full DB/HTTP/browser/SDK/socket flow; external model and Telegram accounts are never used. */
 export async function exerciseProjectmanWorkerPool({ baseUrl, managerToken, workspaceUid, login }) {
-  const sourceRoot = path.resolve(fileURLToPath(new URL('../../..', import.meta.url)));
+  const sourceRoot = path.resolve(fileURLToPath(new URL('../../../..', import.meta.url)));
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-full-worker-'));
   const repo = path.join(root, 'repo'), directory = path.join(root, 'evidence');
   const exec = promisify(execFile), client = new ProjectmanClient(baseUrl, managerToken);

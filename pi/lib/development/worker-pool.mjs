@@ -2,8 +2,8 @@ import net from 'node:net';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, realpath } from 'node:fs/promises';
-import { ensureWindow, windows, withTmuxLock, runTmux, quote } from './tmux-windows.mjs';
-import { loadS8Config } from './telegram-config.mjs';
+import { ensureWindow, windows, withTmuxLock, runTmux, quote } from '../runtime/tmux-windows.mjs';
+import { loadS8Config } from '../config/s8-config.mjs';
 
 export const workerDirectory = root => path.join(root, '.s8-runtime/workers');
 export const workerSocket = (root, id) => path.join(workerDirectory(root), `${id}.sock`);

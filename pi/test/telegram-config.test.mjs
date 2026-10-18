@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { loadTelegramConfig } from '../lib/telegram-config.mjs';
-import { runScheduler } from '../lib/scheduler-daemon.mjs';
+import { loadTelegramConfig } from '../lib/config/s8-config.mjs';
+import { runScheduler } from '../lib/scheduler/daemon.mjs';
 
 const legacy = { TELEGRAM_ALLOWED_USER_IDS: '123,123', TELEGRAM_ALLOWED_GROUP_IDS: '-456', S8_SCHEDULE_TELEGRAM_CHAT_ID: '123' };
 
@@ -54,11 +54,11 @@ test('migration copies inherited IDs only, never credentials, and refuses to ove
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-config-migrate-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, 'pi/bin'), { recursive: true });
-  await mkdir(path.join(root, 'pi/lib'));
+  await mkdir(path.join(root, 'pi/lib/config'), { recursive: true });
   await mkdir(path.join(root, 'pi/node_modules'));
   await symlink(fileURLToPath(new URL('../node_modules/yaml', import.meta.url)), path.join(root, 'pi/node_modules/yaml'), process.platform === 'win32' ? 'junction' : 'dir');
   await copyFile(new URL('../bin/s8-config.mjs', import.meta.url), path.join(root, 'pi/bin/s8-config.mjs'));
-  await copyFile(new URL('../lib/telegram-config.mjs', import.meta.url), path.join(root, 'pi/lib/telegram-config.mjs'));
+  await copyFile(new URL('../lib/config/s8-config.mjs', import.meta.url), path.join(root, 'pi/lib/config/s8-config.mjs'));
   const env = { ...legacy, TELEGRAM_BOT_TOKEN: 'fixture-bot-not-for-yaml', PHCMS_ACCESS_TOKEN: 'fixture-service-not-for-yaml' };
   const cli = path.join(root, 'pi/bin/s8-config.mjs');
   const output = execFileSync(process.execPath, [cli, 'init'], { env, encoding: 'utf8' });
@@ -97,7 +97,7 @@ test('scheduler delivery uses the shared YAML target, never legacy IDs, and inva
 });
 
 test('shared config validates worker count and public work URL without changing Telegram settings', async t => {
-  const { loadS8Config } = await import('../lib/telegram-config.mjs');
+  const { loadS8Config } = await import('../lib/config/s8-config.mjs');
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-workers-config-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   assert.equal(loadS8Config(root, {}).workers.count, 2);

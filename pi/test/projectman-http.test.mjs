@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { createProjectmanConsole } from '../lib/projectman-console.mjs';
+import { createProjectmanConsole } from '../lib/projectman/console.mjs';
 
 // Reuse PH-CMS's installed parser, not a permissive fetch/client mock. No env loader or DB is used.
 // Domain/auth responses below are fixtures; full PH-CMS DB/business-policy tests remain separate.

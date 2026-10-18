@@ -1,12 +1,13 @@
-import { requireConfirmedPlan } from './projectman-preflight.mjs';
+import { saveJson } from '../storage/json-file.mjs';
+import { requireConfirmedPlan } from '../projectman/preflight.mjs';
 import { workerRequest, workerStates, processAlive } from './worker-pool.mjs';
-import { loadS8Config } from './telegram-config.mjs';
-import { sendTelegram } from './telegram-notify.mjs';
+import { loadS8Config } from '../config/s8-config.mjs';
+import { sendTelegram } from '../telegram/notify.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, readdir, open, rm, lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { saveJson } from './development-smoke.mjs';
-import { prepareWorktree, workspaceChanges, workspacePatch, importDevelopmentResults } from './development-workspace.mjs';
+
+import { prepareWorktree, workspaceChanges, workspacePatch, importDevelopmentResults } from './workspace.mjs';
 
 async function projectGuidelines(worktree) {
   const instructions = []; let visited = 0;

@@ -1,6 +1,6 @@
 import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { validId } from './scheduler-store.mjs';
+import { validId } from './store.mjs';
 
 async function read(file, fallback) {
   try { return JSON.parse(await readFile(file, 'utf8')); }

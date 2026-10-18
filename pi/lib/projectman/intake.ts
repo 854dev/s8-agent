@@ -3,11 +3,11 @@ import { stripVTControlCharacters } from 'node:util';
 import path from 'node:path';
 import { constants, realpathSync } from 'node:fs';
 import { open, lstat } from 'node:fs/promises';
-import { protectedPath } from '../extensions/s8-guard.ts';
-import { permittedRepoPath } from './projectman-path.ts';
+import { protectedPath } from '../../extensions/s8-guard.ts';
+import { permittedRepoPath } from './path.ts';
 import { Type, type Static } from 'typebox';
-import type { ProjectmanClient } from './projectman-client.ts';
-import { visible } from '../../apps/telegram-gateway/gateway.mjs';
+import type { ProjectmanClient } from './client.ts';
+import { visible } from '../../../apps/telegram-gateway/gateway.mjs';
 
 const spec = { title: Type.String({ minLength: 1, maxLength: 200 }), text: Type.String({ minLength: 1, maxLength: 6000 }) };
 const selection = Type.Union([

@@ -1,9 +1,9 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { startPiRuntime } from '../lib/pi-runtime.mjs';
-import { saveRestartResult } from '../lib/pi-runtime-restart.mjs';
-import { runFullRestart, notifyFullRestart } from '../lib/full-restart.mjs';
+import { startPiRuntime } from '../lib/runtime/runtime.mjs';
+import { saveRestartResult } from '../lib/runtime/restart.mjs';
+import { runFullRestart, notifyFullRestart } from '../lib/runtime/full-restart.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const id = process.argv[2];

@@ -18,7 +18,8 @@ async function fixture(t) {
   t.after(async () => { await run(['kill-server']).catch(() => {}); await rm(root, { recursive: true, force: true }); });
   for (const directory of ['pi/bin', 'pi/lib', 'pi/node_modules/.bin', 'tools']) await mkdir(path.join(root, directory), { recursive: true });
   await copyFile(new URL('../../start-pi.sh', import.meta.url), path.join(root, 'start-pi.sh'));
-  for (const file of ['bin/pi-runtime.mjs', 'bin/telegram-status.mjs', 'bin/pi-runtime-worker.mjs', 'bin/manager-options.mjs', 'lib/pi-runtime-restart.mjs', 'lib/full-restart.mjs', 'lib/pi-runtime.mjs', 'lib/pi-services.mjs', 'lib/tmux-windows.mjs', 'lib/managed-sessions.mjs', 'lib/manager-launch.mjs', 'lib/telegram-status.mjs', 'lib/worker-pool.mjs', 'lib/telegram-config.mjs']) {
+  for (const file of ['bin/pi-runtime.mjs', 'bin/telegram-status.mjs', 'bin/pi-runtime-worker.mjs', 'bin/manager-options.mjs', 'lib/runtime/restart.mjs', 'lib/runtime/full-restart.mjs', 'lib/runtime/runtime.mjs', 'lib/runtime/services.mjs', 'lib/runtime/tmux-windows.mjs', 'lib/runtime/managed-sessions.mjs', 'lib/manager/launch.mjs', 'lib/telegram/status.mjs', 'lib/development/worker-pool.mjs', 'lib/config/s8-config.mjs']) {
+    await mkdir(path.dirname(path.join(root, 'pi', file)), { recursive: true });
     await copyFile(new URL(`../${file}`, import.meta.url), path.join(root, 'pi', file));
   }
   await symlink(new URL('../node_modules/yaml', import.meta.url).pathname, path.join(root, 'pi/node_modules/yaml'));

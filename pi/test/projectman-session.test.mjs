@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createProjectmanConsole } from '../lib/projectman-console.mjs';
+import { createProjectmanConsole } from '../lib/projectman/console.mjs';
 
 async function listen(server) { server.listen(0, '127.0.0.1'); await once(server, 'listening'); return `http://127.0.0.1:${server.address().port}`; }
 async function close(server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

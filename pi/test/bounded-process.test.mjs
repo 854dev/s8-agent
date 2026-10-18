@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { runBoundedProcess } from '../lib/bounded-process.mjs';
+import { runBoundedProcess } from '../lib/runtime/process.mjs';
 
 test('child process completes or is stopped at its deadline', async () => {
   const cwd = process.cwd();

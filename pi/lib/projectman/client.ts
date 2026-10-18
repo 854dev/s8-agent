@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { preflightFingerprint, hasReviewedPreflight } from './projectman-preflight.mjs';
-import type { IntakePlan, IntakePreview, IntakeResult } from './projectman-intake.ts';
+import { preflightFingerprint, hasReviewedPreflight } from './preflight.mjs';
+import type { IntakePlan, IntakePreview, IntakeResult } from './intake.ts';
 
 export type ProjectmanContent = {
   uid: string;

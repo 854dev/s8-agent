@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ensureWindow, stopWindow, windows, withTmuxLock, runTmux, quote } from './tmux-windows.mjs';
-import { ensureWorkerPool, workerStates } from './worker-pool.mjs';
+import { ensureWorkerPool, workerStates } from '../development/worker-pool.mjs';
 import { validSession } from './managed-sessions.mjs';
 import { readFile, mkdir, open, rm, realpath } from 'node:fs/promises';
 import path from 'node:path';

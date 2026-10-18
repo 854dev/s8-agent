@@ -1,5 +1,6 @@
+import { loadModelRuntime } from '../lib/runtime/model.mjs';
 import { fileURLToPath } from 'node:url';
-import { runCounterSmoke, smokeRuntime } from '../lib/development-smoke.mjs';
+import { runCounterSmoke } from '../lib/evaluation/development-smoke.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const args = process.argv.slice(2);
@@ -17,7 +18,7 @@ if (args[0] === '--help') {
       } else throw new Error('Unsupported smoke option');
     }
     if (check) {
-      const { model } = await smokeRuntime(options);
+      const { model } = await loadModelRuntime(options);
       console.log(JSON.stringify({ authenticated: true, provider: model.provider, model: model.id }));
     } else {
       const result = await runCounterSmoke(options);

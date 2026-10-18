@@ -4,9 +4,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { startDeveloperWorker } from '../lib/worker-daemon.mjs';
-import { workerRequest } from '../lib/worker-pool.mjs';
-import { drainManagerInbox } from '../lib/manager-inbox.mjs';
+import { startDeveloperWorker } from '../lib/development/worker-daemon.mjs';
+import { workerRequest } from '../lib/development/worker-pool.mjs';
+import { drainManagerInbox } from '../lib/manager/inbox.mjs';
 
 const until = async check => { for (let i = 0; i < 100; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 10)); } assert.fail('condition timeout'); };
 
@@ -57,8 +57,8 @@ test('manager inbox has one consumer and persists receipt across restart', async
 test('two persistent workers dispatch three approved UIDs and reuse a free slot while the other is busy', async t => {
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
-  const { developmentTick, waitForDevelopmentRuns, recoverDevelopmentRuns } = await import('../lib/development-supervisor.mjs');
-  const { saveJson } = await import('../lib/development-smoke.mjs');
+  const { developmentTick, waitForDevelopmentRuns, recoverDevelopmentRuns } = await import('../lib/development/supervisor.mjs');
+  const { saveJson } = await import('../lib/storage/json-file.mjs');
   const exec = promisify(execFile);
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-pool-integration-'));
   const repo = path.join(root, 'repo');

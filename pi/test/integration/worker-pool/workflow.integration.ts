@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import jwt from 'jsonwebtoken';
 import { sql } from 'kysely';
-import { exerciseProjectmanWorkerPool } from './projectman-worker-integration.mjs';
+import { exerciseProjectmanWorkerPool } from './exercise.mjs';
 vi.mock('@/config/envConfig', () => {
 	const database = process.env.SERVICE_KEY_TEST_DB;
 	if (!database || !/^phcms_service_keys_test_[a-z0-9_]+$/.test(database)) throw new Error('Fresh isolated workflow DB required');

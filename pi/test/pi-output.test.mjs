@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PiOutput } from '../lib/pi-output.mjs';
-import { runBoundedProcess } from '../lib/bounded-process.mjs';
+import { PiOutput } from '../lib/runtime/output.mjs';
+import { runBoundedProcess } from '../lib/runtime/process.mjs';
 const frame = value => JSON.stringify(value) + '\n';
 const end = (text, reason = 'stop') => ({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }], stopReason: reason } });
 

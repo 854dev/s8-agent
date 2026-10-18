@@ -1,5 +1,5 @@
-import { visible } from '../../apps/telegram-gateway/gateway.mjs';
-import { telegramConfigFromEnv } from './telegram-config.mjs';
+import { visible } from '../../../apps/telegram-gateway/gateway.mjs';
+import { telegramConfigFromEnv } from '../config/s8-config.mjs';
 
 export const sendTelegram = async (text, env = process.env, fetchImpl = fetch, settings = telegramConfigFromEnv(env)) => {
   if (!env.TELEGRAM_BOT_TOKEN || !settings.scheduleChatId) return false;

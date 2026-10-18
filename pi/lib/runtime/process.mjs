@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
-import { PiOutput } from './pi-output.mjs';
+import { PiOutput } from './output.mjs';
 
 // Linux keeps GNU timeout as an independent deadline owner.
 // ponytail: macOS uses the Pi parent timer; add a detached watchdog if forced parent crashes leave orphaned children.

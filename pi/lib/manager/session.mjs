@@ -1,9 +1,9 @@
 import { readFile, appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
-import managerExtension from '../extensions/manager.ts';
-import { MANAGER_TOOLS } from './manager-launch.mjs';
-import { visible } from '../../apps/telegram-gateway/gateway.mjs';
+import managerExtension from '../../extensions/manager.ts';
+import { MANAGER_TOOLS } from './launch.mjs';
+import { visible } from '../../../apps/telegram-gateway/gateway.mjs';
 
 /** Persistent logical manager using the same tools/guards as the default Pi entrypoint. */
 export async function openManagerSession({ root, cwd, directory, modelRuntime, model, poll = true, persist = false }) {

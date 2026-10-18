@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-import { controlSchedules } from '../../pi/lib/scheduler-control.mjs';
-import { loadTelegramConfig } from '../../pi/lib/telegram-config.mjs';
+import { controlSchedules } from '../../pi/lib/scheduler/control.mjs';
+import { loadTelegramConfig } from '../../pi/lib/config/s8-config.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const visible = text => String(text)

@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { startPiServices } from '../lib/pi-services.mjs';
+import { startPiServices } from '../lib/runtime/services.mjs';
 const root = fileURLToPath(new URL('../..', import.meta.url));
 try {
   const index = process.argv.indexOf('--session');

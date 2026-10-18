@@ -22,7 +22,7 @@
 
 아래 기존 운영 안내의 서비스·Telegram 기본 동작은 `project` 모드 기준이다. 모드를 직접 지정하려면 실행 예시에 `--mode project`를 추가한다.
 
-`./start-pi.sh --mode project`는 범용 매니저와 스케줄러·개발 슈퍼바이저를 함께 시작한다. 매니저는 일반 대화·파일·Bash 작업을 직접 처리하고, 개발 요청은 Projectman을 통해 별도 감독 프로세스와 작업별 개발 CLI에 위임한다.
+`./start-pi.sh --mode project`는 범용 매니저와 스케줄러·개발 슈퍼바이저를 함께 시작한다. 매니저는 일반 대화·파일·Bash 작업을 직접 처리하고, 개발 요청은 Projectman을 통해 별도 감독 프로세스와 상시 개발 워커에 위임한다.
 
 - 매니저: 일반 대화·질문·글쓰기·문서 편집·파일 검색·로그 조회·일반 Bash 작업과 개발 위임·결과 검토. 요청 목적에 따라 처리 경로를 선택하므로 별도 모드 전환은 필요 없다.
 - 매니저 도구: `projectman`, `kb`, `scheduler`, `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`. TUI와 Telegram 매니저 세션에 동일하게 적용한다. 개발 목적의 코드 조사·수정·빌드·테스트는 Projectman에 위임한다. 범용 Bash 권한을 제공하므로 이 구분은 시스템 지침에 따른 동작 규칙이며 실행 격리 경계가 아니다.
@@ -53,17 +53,65 @@ dev_854/
 - Pi 장비별 런타임: `.pi-runtime/`
 - 관리 에이전트 실행 진입점: `start-pi.sh`
 - 개발 감독 실행 진입점: `start-pi.sh --service supervisor`
-- 역할 지침·개발 실행 정책: `agents/manager/`, `agents/developer/`
+- 역할 지침·워커 설정: `agents/manager/`, `agents/developer/`
 - 비공개 로컬 상태: `.s8-runtime/`
 - 비인증 Telegram ID·알림 대상 설정: `s8-config.yml` (예시: `s8-config.example.yml`)
 - 웹 콘솔·업로드·xterm.js 터미널: `frontend/`
 - 호스트 PTY·tmux 웹 터미널 게이트웨이: `apps/terminal-gateway/`
 - Telegram 명령·알림: `apps/telegram-gateway/`
 - 예약 작업 실행 진입점: `start-pi.sh --service scheduler`
-- 예약 CRUD·실행·배치 제어: `pi/extensions/scheduler.ts`, `pi/lib/scheduler-*.mjs`
+- 예약 CRUD·실행·배치 제어: `pi/extensions/scheduler.ts`, `pi/lib/scheduler/`
 - 지식베이스·업로드 API: `apps/kb-browser/`
 - MCP 허브: `apps/mcp-hub/`
 - Nginx와 Compose: `infra/nginx/`
+
+## 코드 위치와 역할
+
+`pi/bin`은 실행 명령, `pi/extensions`는 에이전트 도구 등록, `pi/lib`는 기능 구현이다. 기능 구현은 아래 역할별 폴더에 두며 파일명에서 반복되는 접두어를 줄였다.
+
+```text
+pi/
+├── bin/                     # CLI 진입점과 검증 실행 스크립트
+├── extensions/              # Pi 도구·이벤트 연결
+├── lib/
+│   ├── config/              # s8-config.yml 읽기·검증
+│   ├── development/         # UID 배정, 워커 풀·소켓, 작업 실행·결과 보존
+│   ├── manager/             # 매니저 세션·도구, KB 접근, 보고 수신함
+│   ├── projectman/          # PH-CMS API, 승인·사전 검토, 웹 콘솔·인증·이력
+│   ├── runtime/             # Pi·tmux 세션, 서비스 기동·재시작, 모델·프로세스
+│   ├── scheduler/           # 예약 저장·제어·실행
+│   ├── telegram/            # 알림 전송과 현재 연결 상태
+│   ├── storage/             # 민감 값 필터링·원자적 JSON 기록
+│   └── evaluation/          # 모델·브라우저 시나리오 검증
+└── test/
+    ├── *.test.mjs           # 기능별 회귀 테스트
+    └── integration/
+        └── worker-pool/     # 원본 PH-CMS·DB·브라우저·Pi SDK 전체 연동
+```
+
+| 찾으려는 기능 | 구현 위치 | 실행·연결 진입점 |
+| --- | --- | --- |
+| 승인된 UID 조회·claim·보고 outbox·복구 | [development/supervisor.mjs](pi/lib/development/supervisor.mjs) | `start-pi.sh --service supervisor` → `pi/bin/supervisor.mjs` |
+| tmux 워커 수·창·소켓 통신 | [development/worker-pool.mjs](pi/lib/development/worker-pool.mjs) | 런타임 서비스 기동·supervisor |
+| 상시 워커의 배정·상태·반환 | [development/worker-daemon.mjs](pi/lib/development/worker-daemon.mjs) | `start-pi.sh --service worker worker-N` → `pi/bin/developer.mjs` |
+| UID별 새 Pi 대화·get/report 도구 | [development/worker-session.mjs](pi/lib/development/worker-session.mjs) | worker-daemon |
+| worktree·변경 파일·패치·선행 결과 반영 | [development/workspace.mjs](pi/lib/development/workspace.mjs) | supervisor |
+| 완료보고 수신·매니저 검토 연결 | [manager/inbox.mjs](pi/lib/manager/inbox.mjs), [manager 확장](pi/extensions/manager.ts) | 매니저 시작·기존 polling |
+| Projectman API·콘솔 | [projectman/client.ts](pi/lib/projectman/client.ts), [projectman/console.mjs](pi/lib/projectman/console.mjs) | `pi/extensions/projectman.ts`, `pi/bin/projectman-console.mjs` |
+| Pi 세션·서비스 시작·재시작 | [runtime/](pi/lib/runtime/) | `start-pi.sh` → `pi/bin/pi-runtime.mjs` |
+| 설정·알림 | [config/s8-config.mjs](pi/lib/config/s8-config.mjs), [telegram/notify.mjs](pi/lib/telegram/notify.mjs) | `pi/bin/s8-config.mjs`, 보고 outbox |
+| 예약 실행 | [scheduler/](pi/lib/scheduler/) | `start-pi.sh --service scheduler`, `pi/extensions/scheduler.ts` |
+
+개발 흐름을 따라 읽을 때는 `supervisor → worker-pool → worker-daemon → worker-session` 순서로 본다. 결과는 supervisor의 outbox에서 Projectman API, manager/inbox, telegram/notify로 전달된다. 워커 반환과 사람의 최종 완료는 별도 단계다.
+
+회귀 테스트와 전체 연동 검증은 저장소 루트에서 실행한다. 전체 연동에는 인접 PH-CMS의 의존성, PostgreSQL 컨테이너와 Playwright Chromium이 필요하며 모델·Telegram은 로컬 fixture를 사용한다.
+
+```bash
+node --test pi/test/*.test.mjs apps/telegram-gateway/gateway.test.mjs
+npm run test:run --prefix frontend
+npm run build --prefix frontend
+bash pi/bin/test-projectman-worker-pool.sh ../ph-cms
+```
 
 ## 빠른 시작
 

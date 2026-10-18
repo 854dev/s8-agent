@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, appendFile, rm, symlink, link } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { readEventPage } from '../lib/projectman-events.mjs';
+import { readEventPage } from '../lib/projectman/events.mjs';
 
 async function fixture(t, text) {
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-events-'));

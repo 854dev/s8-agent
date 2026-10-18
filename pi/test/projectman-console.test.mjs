@@ -4,8 +4,8 @@ import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { preflightFingerprint } from '../lib/projectman-preflight.mjs';
-import { createProjectmanConsole } from '../lib/projectman-console.mjs';
+import { preflightFingerprint } from '../lib/projectman/preflight.mjs';
+import { createProjectmanConsole } from '../lib/projectman/console.mjs';
 
 async function fixture(t, { capabilities = async () => ({ workflowVersion: 2, safeResourceDelete: true, cascadeResourceDelete: true, actorType: 'human' }), reviewed = false, client = {} } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-console-'));

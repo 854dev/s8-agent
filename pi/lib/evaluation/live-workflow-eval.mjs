@@ -1,15 +1,17 @@
+import { saveJson } from '../storage/json-file.mjs';
+import { loadModelRuntime } from '../runtime/model.mjs';
 import { mkdir, mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { ProjectmanClient } from './projectman-client.ts';
-import { smokeRuntime, saveJson, SMOKE_DEPENDENCIES, SMOKE_DEV_DEPENDENCIES } from './development-smoke.mjs';
-import { loadDevelopmentPolicy, developmentTick } from './development-supervisor.mjs';
+import { ProjectmanClient } from '../projectman/client.ts';
+import { SMOKE_DEPENDENCIES, SMOKE_DEV_DEPENDENCIES } from './development-smoke.mjs';
+import { loadDevelopmentPolicy, developmentTick } from '../development/supervisor.mjs';
 import { liveConsoleBrowser } from './live-console-browser.mjs';
-import { ensureWorkerPool } from './worker-pool.mjs';
-import { openManagerSession } from './manager-session.mjs';
+import { ensureWorkerPool } from '../development/worker-pool.mjs';
+import { openManagerSession } from '../manager/session.mjs';
 
 const exec = promisify(execFile);
 export async function liveWorkflowEval({ root, baseUrl, managerToken, humanToken, projectUid, humanLogin }) {
@@ -26,7 +28,7 @@ export async function liveWorkflowEval({ root, baseUrl, managerToken, humanToken
   await writeFile(path.join(repo, 'test/counter.test.jsx'), "import React from 'react'; import {test,expect,afterEach} from 'vitest'; import {render,screen,cleanup} from '@testing-library/react'; import userEvent from '@testing-library/user-event'; import App from '../src/App.jsx'; afterEach(cleanup); test('initial zero',()=>{render(<App/>);expect(screen.getByLabelText('카운터').textContent.trim()).toBe('0')}); test('increment and reset',async()=>{const u=userEvent.setup();render(<App/>);await u.click(screen.getByRole('button',{name:'증가',exact:true}));expect(screen.getByLabelText('카운터').textContent.trim()).toBe('1');await u.click(screen.getByRole('button',{name:'초기화',exact:true}));expect(screen.getByLabelText('카운터').textContent.trim()).toBe('0')}); test('human decision: minimum is zero',async()=>{const u=userEvent.setup();render(<App/>);await u.click(screen.getByRole('button',{name:'감소',exact:true}));expect(screen.getByLabelText('카운터').textContent.trim()).toBe('0')});\n");
   for (const args of [['init'], ['add', '.'], ['-c', 'user.name=Workflow fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'isolated counter fixture']]) await exec('git', args, { cwd: repo });
   const manager = new ProjectmanClient(baseUrl, managerToken), human = new ProjectmanClient(baseUrl, humanToken);
-  const runtime = await smokeRuntime(), policy = await loadDevelopmentPolicy(root);
+  const runtime = await loadModelRuntime(), policy = await loadDevelopmentPolicy(root);
   const spec = { plan: 'Implement the discussed React/Vite counter with minimum zero; verify tests and build.', decisionRefs: ['conversation:minimum-zero'], repoPath: repo, completionCriteria: ['React + Vite counter, current value aria-label="카운터"', 'Buttons exactly 증가, 감소, 초기화', 'Minimum is zero; negative values are not allowed (confirmed before final approval)', 'Existing independent tests and build pass'], commandNames: ['install', 'test', 'build'], dependsOn: [] };
   let taskUid;
   let browser;

@@ -1,13 +1,13 @@
 import { fileURLToPath } from 'node:url';
-import { drainManagerInbox } from '../lib/manager-inbox.mjs';
+import { drainManagerInbox } from '../lib/manager/inbox.mjs';
 import { Type } from 'typebox';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import projectman from './projectman.ts';
 import { registerScheduler } from './scheduler.ts';
-import { managerKb } from '../lib/manager-kb.mjs';
-import { projectmanFromEnv } from '../lib/projectman-client.ts';
-import { hasReviewedPreflight } from '../lib/projectman-preflight.mjs';
-import { MANAGER_TOOLS } from '../lib/manager-launch.mjs';
+import { managerKb } from '../lib/manager/kb.mjs';
+import { projectmanFromEnv } from '../lib/projectman/client.ts';
+import { hasReviewedPreflight } from '../lib/projectman/preflight.mjs';
+import { MANAGER_TOOLS } from '../lib/manager/launch.mjs';
 
 export { MANAGER_TOOLS };
 export const MANAGER_EXTENSION_TOOLS = ['projectman', 'kb', 'scheduler'];

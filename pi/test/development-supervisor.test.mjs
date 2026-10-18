@@ -6,9 +6,9 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { preflightFingerprint } from '../lib/projectman-preflight.mjs';
-import { developmentTick, runDevelopmentTask, flushDevelopmentOutbox, recoverDevelopmentRuns } from '../lib/development-supervisor.mjs';
-import { developmentWorkspace, workspaceChanges } from '../lib/development-workspace.mjs';
+import { preflightFingerprint } from '../lib/projectman/preflight.mjs';
+import { developmentTick, runDevelopmentTask, flushDevelopmentOutbox, recoverDevelopmentRuns } from '../lib/development/supervisor.mjs';
+import { developmentWorkspace, workspaceChanges } from '../lib/development/workspace.mjs';
 
 const exec = promisify(execFile);
 async function fixture(t, count = 1) {

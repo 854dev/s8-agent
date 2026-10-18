@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument } from 'yaml';
 
-export const agentRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+export const agentRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 function normalize(telegram, source) {
   if (!telegram || typeof telegram !== 'object' || Array.isArray(telegram) || Object.keys(telegram).some(key => !['allowedUserIds', 'allowedGroupIds', 'scheduleChatId'].includes(key))) throw new Error('Invalid Telegram config fields; credentials must stay in environment variables');

@@ -1,10 +1,10 @@
 import http from 'node:http';
 import path from 'node:path';
 import { readFile, lstat } from 'node:fs/promises';
-import { ProjectmanClient } from './projectman-client.ts';
-import { hasReviewedPreflight } from './projectman-preflight.mjs';
-import { consoleSessions } from './projectman-session.mjs';
-import { readEventPage } from './projectman-events.mjs';
+import { ProjectmanClient } from './client.ts';
+import { hasReviewedPreflight } from './preflight.mjs';
+import { consoleSessions } from './session.mjs';
+import { readEventPage } from './events.mjs';
 
 const json = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(data)); };
 async function body(req) {

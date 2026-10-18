@@ -1,14 +1,16 @@
+import { saveJson } from '../storage/json-file.mjs';
+import { loadModelRuntime } from '../runtime/model.mjs';
 import path from 'node:path';
 import { readFile, appendFile } from 'node:fs/promises';
 import { Type } from 'typebox';
 import { createAgentSession, DefaultResourceLoader, SettingsManager, SessionManager, createCodingTools, createGrepTool, createFindTool, createLsTool } from '@earendil-works/pi-coding-agent';
-import { smokeRuntime, saveJson } from './development-smoke.mjs';
-import { projectmanFromEnv } from './projectman-client.ts';
-import guard from '../extensions/s8-guard.ts';
-import { visible } from '../../apps/telegram-gateway/gateway.mjs';
+
+import { projectmanFromEnv } from '../projectman/client.ts';
+import guard from '../../extensions/s8-guard.ts';
+import { visible } from '../../../apps/telegram-gateway/gateway.mjs';
 
 /** A fresh Pi conversation for each UID, inside a persistent worker process. */
-export async function executeDeveloper(request, { signal, client = projectmanFromEnv(), runtimeFactory = smokeRuntime } = {}) {
+export async function executeDeveloper(request, { signal, client = projectmanFromEnv(), runtimeFactory = loadModelRuntime } = {}) {
   const { root, run, task } = request;
   const settings = JSON.parse(await readFile(path.join(root, 'pi/settings.json'), 'utf8'));
   const runtime = await runtimeFactory({ authPath: path.join(root, '.pi-runtime/auth.json'), provider: settings.defaultProvider, modelId: settings.defaultModel });

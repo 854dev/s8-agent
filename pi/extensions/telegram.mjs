@@ -4,10 +4,10 @@ import { writeFile } from 'node:fs/promises';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { Bot, Gateway, sessionKey, tokenUsage } from '../../apps/telegram-gateway/gateway.mjs';
-import { agentRoot, loadTelegramConfig } from '../lib/telegram-config.mjs';
-import { queuePiRuntimeRestart } from '../lib/pi-runtime-restart.mjs';
-import { telegramOwner } from '../lib/telegram-status.mjs';
-import { validSession } from '../lib/managed-sessions.mjs';
+import { agentRoot, loadTelegramConfig } from '../lib/config/s8-config.mjs';
+import { queuePiRuntimeRestart } from '../lib/runtime/restart.mjs';
+import { telegramOwner } from '../lib/telegram/status.mjs';
+import { validSession } from '../lib/runtime/managed-sessions.mjs';
 
 async function requestFullRestart(notification) {
   if (!process.env.TMUX) throw new Error('전체 재시작은 start-pi 관리 세션에서 사용할 수 있습니다.');

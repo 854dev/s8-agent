@@ -91,7 +91,7 @@ test('older session can take ownership; off restores the waiting session and per
   await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
   const { port } = listener.address();
   await new Promise(resolve => listener.close(resolve));
-  const { telegramOwner } = await import('../lib/telegram-status.mjs');
+  const { telegramOwner } = await import('../lib/telegram/status.mjs');
   const controls = [], changes = [];
   const ctx = { mode: 'tui', isIdle: () => true, sessionManager: { getBranch: () => [] } };
   const fetchImpl = async (_url, options) => new Promise((_, reject) => {

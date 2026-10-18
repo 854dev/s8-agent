@@ -1,10 +1,10 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
-import { telegramOwner } from './telegram-status.mjs';
-import { managerArgs } from './manager-launch.mjs';
+import { telegramOwner } from '../telegram/status.mjs';
+import { managerArgs } from '../manager/launch.mjs';
 import { moveTelegram, validSession } from './managed-sessions.mjs';
-import { startPiServices } from './pi-services.mjs';
+import { startPiServices } from './services.mjs';
 import { runTmux, withTmuxLock, ensureWindow, stopWindow, windows, quote } from './tmux-windows.mjs';
 
 export async function startPiRuntime(root, { session = 's8-main', args = [], scheduler = true, supervisor = true, telegram, mode = 'project', cwd, run = runTmux } = {}) {

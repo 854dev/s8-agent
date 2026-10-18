@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ProjectmanClient } from '../lib/projectman-client.ts';
+import { ProjectmanClient } from '../lib/projectman/client.ts';
 
 const item = (uid, type = 'task') => ({ uid, type, title: uid, status: 'published', created_at: '2026-01-01T00:00:00Z', updated_at: null, detail: { text: '', attributes: { state: 'ready' } } });
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });

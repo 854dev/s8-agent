@@ -1,11 +1,13 @@
+import { safeJson, saveJson } from '../storage/json-file.mjs';
+import { loadModelRuntime } from '../runtime/model.mjs';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile, rename, lstat, realpath, readdir, appendFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, lstat, realpath, readdir, appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { Type } from 'typebox';
-import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
-import { visible } from '../../apps/telegram-gateway/gateway.mjs';
+import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { visible } from '../../../apps/telegram-gateway/gateway.mjs';
 
 export const SMOKE_IMAGE = 'node:24-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5';
 export const SMOKE_DEPENDENCIES = { react: '19.3.1', 'react-dom': '19.3.1' };
@@ -13,13 +15,6 @@ export const SMOKE_DEV_DEPENDENCIES = { vite: '8.3.4', vitest: '5.0.5', jsdom: '
 const FILES = new Set(['package.json', 'index.html', 'src/App.jsx', 'src/main.jsx', 'src/styles.css', 'README.md']);
 const jsonResult = value => ({ content: [{ type: 'text', text: JSON.stringify(value) }], details: undefined });
 const hash = value => createHash('sha256').update(value).digest('hex');
-const safeJson = value => JSON.stringify(value, (_key, item) => typeof item === 'string' ? visible(item) : item, 2);
-
-export async function saveJson(file, value) {
-  const temp = `${file}.${randomUUID()}.tmp`;
-  await writeFile(temp, `${safeJson(value)}\n`, { mode: 0o600 });
-  await rename(temp, file);
-}
 
 export function validateManifest(text) {
   const manifest = JSON.parse(text);
@@ -142,13 +137,6 @@ export async function createSmokeRun(root, request) {
   return { runId, directory, workspace, checks };
 }
 
-export async function smokeRuntime({ authPath, provider = 'openai-codex', modelId } = {}) {
-  const runtime = await ModelRuntime.create({ authPath: authPath ?? path.join(os.homedir(), '.pi/agent/auth.json'), modelsPath: null, allowModelNetwork: false });
-  const available = await runtime.getAvailable(provider);
-  const preferred = modelId ? runtime.getModel(provider, modelId) : available.find(model => model.id === 'gpt-6-sol') ?? available.find(model => model.id === 'gpt-5.4') ?? available[0];
-  if (!preferred || !available.some(model => model.id === preferred.id)) throw new Error('No authenticated model available for the selected provider');
-  return { runtime, model: preferred };
-}
 
 export async function smokeSession({ role, prompt, systemPrompt, tools, runtime, model, run, signal, onProgress = () => {}, maxModelTokens = 100000 }) {
   const settingsManager = SettingsManager.inMemory({ packages: [], compaction: { enabled: false }, retry: { enabled: false } });
@@ -212,7 +200,7 @@ export async function runCounterSmoke({ root, request = '리액트 Vite로 카�
   const resultFile = path.join(run.directory, 'result.json');
   await persist({ event: 'requested', request });
   try {
-    const { runtime, model } = await smokeRuntime({ authPath, provider, modelId });
+    const { runtime, model } = await loadModelRuntime({ authPath, provider, modelId });
     onProgress(`model: ${model.provider}/${model.id}`);
     const managerSystem = `${await readFile(path.join(root, 'agents/manager/SYSTEM.md'), 'utf8')}\n이번은 격리된 실제 모델 스모크 테스트다. projectman은 운영 서버가 아닌 local-smoke 테스트 저장소다. 외부 등록·배포·예약은 하지 않는다. create는 이 테스트의 작업 생성만 수행한다. 사용자에게 승인된 카운터 작업 한 건을 create로 위임하라. 구현하지 말고 결과는 report로 검토하라.`;
     const projectman = {

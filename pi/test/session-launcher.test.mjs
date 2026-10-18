@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, mkdtemp, realpath, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { MANAGER_TOOLS } from '../lib/manager-launch.mjs';
+import { MANAGER_TOOLS } from '../lib/manager/launch.mjs';
 
 test('unified foreground service entrypoints preserve scheduler setup and supervisor diagnostic arguments', async t => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-service-entry-')));
@@ -36,9 +36,9 @@ test('launcher exposes general and Projectman tools and passes inherited credent
   const script = path.join(dir, 'start-pi.sh');
   await copyFile(new URL('../../start-pi.sh', import.meta.url), script);
   await mkdir(path.join(dir, 'pi/bin'), { recursive: true });
-  await mkdir(path.join(dir, 'pi/lib'), { recursive: true });
+  await mkdir(path.join(dir, 'pi/lib/manager'), { recursive: true });
   await copyFile(new URL('../bin/manager-options.mjs', import.meta.url), path.join(dir, 'pi/bin/manager-options.mjs'));
-  await copyFile(new URL('../lib/manager-launch.mjs', import.meta.url), path.join(dir, 'pi/lib/manager-launch.mjs'));
+  await copyFile(new URL('../lib/manager/launch.mjs', import.meta.url), path.join(dir, 'pi/lib/manager/launch.mjs'));
   await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
   const key = 'phcms_sk_' + 'A'.repeat(43);
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), `#!/usr/bin/env node
@@ -70,10 +70,10 @@ test('launcher dispatches background runtime options and keeps utility commands 
   const script = path.join(dir, 'start-pi.sh');
   await copyFile(new URL('../../start-pi.sh', import.meta.url), script);
   await mkdir(path.join(dir, 'pi/bin'), { recursive: true });
-  await mkdir(path.join(dir, 'pi/lib'));
+  await mkdir(path.join(dir, 'pi/lib/manager'), { recursive: true });
   await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
   await copyFile(new URL('../bin/manager-options.mjs', import.meta.url), path.join(dir, 'pi/bin/manager-options.mjs'));
-  await copyFile(new URL('../lib/manager-launch.mjs', import.meta.url), path.join(dir, 'pi/lib/manager-launch.mjs'));
+  await copyFile(new URL('../lib/manager/launch.mjs', import.meta.url), path.join(dir, 'pi/lib/manager/launch.mjs'));
   await writeFile(path.join(dir, 'pi/bin/pi-runtime.mjs'), 'console.log(JSON.stringify({runtime:process.argv.slice(2)}));');
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), '#!/usr/bin/env node\nconsole.log(JSON.stringify({pi:process.argv.slice(2)}));\n', { mode: 0o755 });
   const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: dir } };

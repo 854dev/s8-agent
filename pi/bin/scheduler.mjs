@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runScheduler } from '../lib/scheduler-daemon.mjs';
+import { runScheduler } from '../lib/scheduler/daemon.mjs';
 
 const agentRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const root = path.join(agentRoot, '.s8-runtime', 'scheduler');

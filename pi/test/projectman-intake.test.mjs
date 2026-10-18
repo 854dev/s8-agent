@@ -4,8 +4,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, writeFile, link, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { ProjectmanClient, projectmanJson } from '../lib/projectman-client.ts';
-import { captureIntakeSource, previewIntake, registerIntake, describeIntake, checkPreview } from '../lib/projectman-intake.ts';
+import { ProjectmanClient, projectmanJson } from '../lib/projectman/client.ts';
+import { captureIntakeSource, previewIntake, registerIntake, describeIntake, checkPreview } from '../lib/projectman/intake.ts';
 import attach from '../extensions/projectman.ts';
 
 const digest = text => createHash('sha256').update(text).digest('hex');

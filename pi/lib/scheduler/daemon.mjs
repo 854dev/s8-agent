@@ -3,15 +3,15 @@ import { randomUUID } from 'node:crypto';
 import { open, readFile, rename, rm, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-import { dueDate, isDue, validId, validateJob } from './scheduler-store.mjs';
-import { visible } from '../../apps/telegram-gateway/gateway.mjs';
-import { loadTelegramConfig, telegramConfigFromEnv } from './telegram-config.mjs';
-import { runProjectmanTurn } from './projectman-dispatch.ts';
+import { dueDate, isDue, validId, validateJob } from './store.mjs';
+import { visible } from '../../../apps/telegram-gateway/gateway.mjs';
+import { loadTelegramConfig, telegramConfigFromEnv } from '../config/s8-config.mjs';
+import { runProjectmanTurn } from '../projectman/dispatch.ts';
 
 const MAX_OUTPUT = 8000;
 const RUN_TIMEOUT = 10 * 60_000;
-export { sendTelegram } from './telegram-notify.mjs';
-import { sendTelegram } from './telegram-notify.mjs';
+export { sendTelegram } from '../telegram/notify.mjs';
+import { sendTelegram } from '../telegram/notify.mjs';
 
 const readJson = async (file, fallback) => {
   try { return JSON.parse(await readFile(file, 'utf8')); }

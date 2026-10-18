@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, symlink, mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { createSmokeRun, smokeWorkspace, validateManifest, verifyCounter, SMOKE_DEPENDENCIES, SMOKE_DEV_DEPENDENCIES, SMOKE_IMAGE } from '../lib/development-smoke.mjs';
+import { createSmokeRun, smokeWorkspace, validateManifest, verifyCounter, SMOKE_DEPENDENCIES, SMOKE_DEV_DEPENDENCIES, SMOKE_IMAGE } from '../lib/evaluation/development-smoke.mjs';
 
 const manifest = () => ({ private: true, type: 'module', dependencies: SMOKE_DEPENDENCIES, devDependencies: SMOKE_DEV_DEPENDENCIES, scripts: { build: 'vite build' } });
 

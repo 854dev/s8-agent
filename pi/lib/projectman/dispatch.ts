@@ -1,4 +1,4 @@
-import { projectmanFromEnv } from './projectman-client.ts';
+import { projectmanFromEnv } from './client.ts';
 
 /** The shared supervisor owns assignment; a scheduler tick never starts or cancels workers. */
 export async function runProjectmanTurn({ projectUid, client = projectmanFromEnv() }: any) {

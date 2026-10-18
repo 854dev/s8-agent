@@ -1,8 +1,9 @@
+import { saveJson } from '../storage/json-file.mjs';
 import net from 'node:net';
 import path from 'node:path';
 import { mkdir, readFile, rm, chmod } from 'node:fs/promises';
-import { saveJson } from './development-smoke.mjs';
-import { executeDeveloper } from './developer-session.mjs';
+
+import { executeDeveloper } from './worker-session.mjs';
 import { validWorker, workerDirectory, workerSocket, processAlive } from './worker-pool.mjs';
 
 export async function startDeveloperWorker(root, workerId, { executeWork = executeDeveloper } = {}) {

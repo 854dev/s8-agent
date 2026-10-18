@@ -1,8 +1,8 @@
 import { fileURLToPath } from 'node:url';
-import { ensureWorkerPool } from '../lib/worker-pool.mjs';
-import { supervisorOwner } from '../lib/pi-services.mjs';
-import { projectmanFromEnv } from '../lib/projectman-client.ts';
-import { loadDevelopmentPolicy, developmentTick, recoverDevelopmentRuns, waitForDevelopmentRuns } from '../lib/development-supervisor.mjs';
+import { ensureWorkerPool } from '../lib/development/worker-pool.mjs';
+import { supervisorOwner } from '../lib/runtime/services.mjs';
+import { projectmanFromEnv } from '../lib/projectman/client.ts';
+import { loadDevelopmentPolicy, developmentTick, recoverDevelopmentRuns, waitForDevelopmentRuns } from '../lib/development/supervisor.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 if (process.argv.includes('--help')) console.log('node pi/bin/supervisor.mjs [--once|--check]\nPoll authorized Projectman development work; assign UIDs to persistent Pi workers. Credentials must already be loaded.');

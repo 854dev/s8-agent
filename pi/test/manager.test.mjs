@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, symlink, link, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { managerArgs } from '../lib/manager-launch.mjs';
-import { managerKb } from '../lib/manager-kb.mjs';
+import { managerArgs } from '../lib/manager/launch.mjs';
+import { managerKb } from '../lib/manager/kb.mjs';
 import manager, { MANAGER_TOOLS, MANAGER_EXTENSION_TOOLS } from '../extensions/manager.ts';
-import { openManagerSession } from '../lib/manager-session.mjs';
+import { openManagerSession } from '../lib/manager/session.mjs';
 
 test('manager launch disables discovery and rejects permission/session/file injection', () => {
   const args = managerArgs('/s8', ['--model', 'fixture', '--continue']);

@@ -1,15 +1,17 @@
+import { saveJson } from '../lib/storage/json-file.mjs';
+import { loadModelRuntime } from '../lib/runtime/model.mjs';
 import { readFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Type } from 'typebox';
-import { smokeRuntime, smokeSession, saveJson } from '../lib/development-smoke.mjs';
+import { smokeSession } from '../lib/evaluation/development-smoke.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const dataset = JSON.parse(await readFile(path.join(root, 'pi/evals/role-boundaries.json'), 'utf8'));
 const directory = path.join(root, '.s8-runtime/evals', `roles-${randomUUID()}`);
 await mkdir(directory, { recursive: true, mode: 0o700 });
-const runtime = await smokeRuntime();
+const runtime = await loadModelRuntime();
 const systemPrompt = await readFile(path.join(root, 'agents/manager/SYSTEM.md'), 'utf8');
 const results = [];
 for (const scenario of dataset.cases) {

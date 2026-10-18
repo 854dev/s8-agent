@@ -6,9 +6,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { Type } from 'typebox';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
-import { openManagerSession } from '../lib/manager-session.mjs';
-import { smokeSession } from '../lib/development-smoke.mjs';
-import { developmentWorkspace } from '../lib/development-workspace.mjs';
+import { openManagerSession } from '../lib/manager/session.mjs';
+import { smokeSession } from '../lib/evaluation/development-smoke.mjs';
+import { developmentWorkspace } from '../lib/development/workspace.mjs';
 
 // Exercise the installed SDK's real HTTP streaming, tool dispatch and session
 // records using a local provider. No account credentials or external API calls.
@@ -68,7 +68,7 @@ test('developer SDK streams a scoped workspace write and records the real tool r
 
 
 test('worker SDK queries its assigned UID, writes in its worktree and blocks changes after report', async t => {
-  const { executeDeveloper } = await import('../lib/developer-session.mjs');
+  const { executeDeveloper } = await import('../lib/development/worker-session.mjs');
   const runId = '11111111-1111-4111-8111-111111111111';
   const f = await fixture(t, [
     { name: 'projectman', args: { action: 'get', uid: 'task-1' } },

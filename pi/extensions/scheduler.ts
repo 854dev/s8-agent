@@ -2,7 +2,7 @@ import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Type } from 'typebox';
 import { withFileMutationQueue, type ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { scheduleRoot, validId, validateJob } from '../lib/scheduler-store.mjs';
+import { scheduleRoot, validId, validateJob } from '../lib/scheduler/store.mjs';
 
 const parameters = Type.Object({
   action: Type.Union([Type.Literal('list'), Type.Literal('create'), Type.Literal('update'), Type.Literal('delete')]),

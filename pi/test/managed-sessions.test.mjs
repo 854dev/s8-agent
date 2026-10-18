@@ -4,7 +4,7 @@ import net from 'node:net';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { moveTelegram, validSession } from '../lib/managed-sessions.mjs';
+import { moveTelegram, validSession } from '../lib/runtime/managed-sessions.mjs';
 
 test('managed session identifiers cannot inject commands or select arbitrary tmux targets', () => {
   assert.equal(validSession('s8-main'), true);

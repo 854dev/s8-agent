@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { isIP } from 'node:net';
-import { createProjectmanConsole } from '../lib/projectman-console.mjs';
+import { createProjectmanConsole } from '../lib/projectman/console.mjs';
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const server = createProjectmanConsole({ root });
 const index = process.argv.indexOf('--host');

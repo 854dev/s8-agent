@@ -95,17 +95,17 @@
 | 대상 | 현재 동작 | 필요한 변경 |
 | --- | --- | --- |
 | `pi/extensions/projectman.ts` | workspace/project 생성 허용, delegate 및 request_review 제공 | 에이전트 workspace 생성 차단, 계획 확정 계약 연결, 계획 단계의 질문과 실행 결과 처리 분리 |
-| `pi/lib/projectman-intake.ts` | workspace 신규 생성 입력 허용, work/subtask 일괄 등록 | workspace 기존 UID만 허용, project 재사용 기준 적용, 최종 계획 및 결정 참조 보존 |
-| `pi/lib/projectman-client.ts` | `task/subtask` 계약, 고정 6단계 `ensurePhases()`, workflow API 호출 | 도메인 매핑, 고정 단계 분할 대체, 계획·확정·할당·구조화 결과 계약 반영 |
-| `pi/lib/projectman-preflight.mjs` | 작업 본문 및 spec 지문과 매니저 요약 검증 | 사람이 확정한 계획 버전을 확인하도록 재정의. 기존 spec·허용 범위 지문을 실행 제한이나 상속 권한 검증으로 유지하지 않음 |
-| `pi/lib/development-supervisor.mjs` | failed/blocked를 매니저 question으로 변환, 준비 실패 시 request_review, task/subtask 모두 실행 후보 | 장애 결과 분리, 같은 계획 자동 재개, 태스크 직접 실행, 범위·부모 권한 검사 제거, 할당·의존성·통합 관리 |
+| `pi/lib/projectman/intake.ts` | workspace 신규 생성 입력 허용, work/subtask 일괄 등록 | workspace 기존 UID만 허용, project 재사용 기준 적용, 최종 계획 및 결정 참조 보존 |
+| `pi/lib/projectman/client.ts` | `task/subtask` 계약, 고정 6단계 `ensurePhases()`, workflow API 호출 | 도메인 매핑, 고정 단계 분할 대체, 계획·확정·할당·구조화 결과 계약 반영 |
+| `pi/lib/projectman/preflight.mjs` | 작업 본문 및 spec 지문과 매니저 요약 검증 | 사람이 확정한 계획 버전을 확인하도록 재정의. 기존 spec·허용 범위 지문을 실행 제한이나 상속 권한 검증으로 유지하지 않음 |
+| `pi/lib/development/supervisor.mjs` | failed/blocked를 매니저 question으로 변환, 준비 실패 시 request_review, task/subtask 모두 실행 후보 | 장애 결과 분리, 같은 계획 자동 재개, 태스크 직접 실행, 범위·부모 권한 검사 제거, 할당·의존성·통합 관리 |
 | `pi/bin/developer.mjs` | 질문 도구 없음, completed/continue/failed와 요약 반환 | 확정 계획 입력 및 구조화 결과 추가. allowedPaths·commandNames 허용 목록 강제 제거, 체크포인트·실행 예산 정합성 확인 |
 | `agents/developer/WORKER_SYSTEM.md` | 승인 후 질문 금지와 자체 판단이 이미 명시됨 | 새 데이터 계약과 미완료·장애 보고 방식 반영 |
 | `agents/developer/SYSTEM.md` | 별도 읽기 전용 개발 조사 경로의 지침 | 실제 실행 워커와 역할을 구분하고 새 결과 계약의 의미를 맞춤 |
 | `agents/manager/SYSTEM.md`, `pi/extensions/manager.ts` | 사전 검토·질문·결정 후속 처리와 상태 감시 | 사람과의 최종 계획 확정, 작업 분할·할당·결과 검토 중심으로 변경 |
-| `pi/lib/development-workspace.mjs` | 작업 UID별 detached worktree 생성 | work 단위 기준 커밋·태스크 변경 전달·통합 설계 적용. 경로·명령 제한을 강제하는 실행 도구와 컨테이너 정책 재검토 |
-| `pi/lib/projectman-console.mjs`, `frontend/src/features/projectman/` | 범위 승인, 실행 중 질문 답변·재개 UI | 계획 버전·확정 대화·승인 대상 표시, 미완료·장애 결과 표시, 실행 중 질문 흐름 재정의 |
-| `pi/lib/projectman-run.ts`, `pi/lib/projectman-dispatch.ts`, `pi/lib/projectman-autopilot.ts` | 기존 읽기 전용 실행·단계 선택 경로 | 유지 여부 확인 후 타입·상태·결과 계약 정합성 확보. 이전 경로가 새 규칙을 우회하지 않도록 검증 |
+| `pi/lib/development/workspace.mjs` | 작업 UID별 detached worktree 생성 | work 단위 기준 커밋·태스크 변경 전달·통합 설계 적용. 경로·명령 제한을 강제하는 실행 도구와 컨테이너 정책 재검토 |
+| `pi/lib/projectman/console.mjs`, `frontend/src/features/projectman/` | 범위 승인, 실행 중 질문 답변·재개 UI | 계획 버전·확정 대화·승인 대상 표시, 미완료·장애 결과 표시, 실행 중 질문 흐름 재정의 |
+| `pi/lib/projectman/dispatch.ts` (과거 projectman-run.ts·projectman-autopilot.ts 포함) | 기존 읽기 전용 실행·단계 선택 경로 | 유지 여부 확인 후 타입·상태·결과 계약 정합성 확보. 이전 경로가 새 규칙을 우회하지 않도록 검증 |
 | scheduler 관련 코드·테스트 | 기존 Projectman 작업 실행 계약 사용 | 예약 시 확정 계획 검증 및 실행 단위·상태 변경 반영 |
 | `agents/developer/policy.json` | 동시 실행 수, 시간·횟수·모델 예산, 명령 정책 정의 | 총 실행 예산·자동 재개 정책과 정합성 확보. 기존 명령 허용 목록을 계획별 실행 범위 강제로 유지하지 않음 |
 | PH-CMS 서버, 별도 저장소 | workflow v1·intake·원자적 선점·멱등 결과 기록 구현 확인 | 기존 기반을 재사용하고 계획 확정·workspace 권한·결과·예산·실행 제약을 목표 정책에 맞게 변경 |

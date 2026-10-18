@@ -2,7 +2,7 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { stringify } from 'yaml';
-import { agentRoot, loadS8Config, telegramConfigFromEnv } from '../lib/telegram-config.mjs';
+import { agentRoot, loadS8Config, telegramConfigFromEnv } from '../lib/config/s8-config.mjs';
 
 try {
   const [action = 'show'] = process.argv.slice(2);
