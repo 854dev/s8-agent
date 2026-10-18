@@ -41,7 +41,8 @@ async function fixture(t, count = 1) {
       const response = structuredClone(row); applied.set(operation.requestId, response); return response;
     },
   };
-  const policy = { maxConcurrency: 2, perRepoConcurrency: 2, maxTimeMinutes: 1, maxCommandSeconds: 1, commands: {} };
+  const workerEntries = Object.fromEntries(Array.from({ length: count }, (_, index) => [`worker-${index + 1}`, { agent: 'pi', host: 'local', launch: 'managed' }]));
+  const policy = { workerEntries, commands: {} };
   return { base, root, repo, rows, client, reports, policy };
 }
 

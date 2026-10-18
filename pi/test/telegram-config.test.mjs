@@ -55,10 +55,12 @@ test('migration copies inherited IDs only, never credentials, and refuses to ove
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, 'pi/bin'), { recursive: true });
   await mkdir(path.join(root, 'pi/lib/config'), { recursive: true });
+  await mkdir(path.join(root, 'pi/lib/development'), { recursive: true });
   await mkdir(path.join(root, 'pi/node_modules'));
   await symlink(fileURLToPath(new URL('../node_modules/yaml', import.meta.url)), path.join(root, 'pi/node_modules/yaml'), process.platform === 'win32' ? 'junction' : 'dir');
   await copyFile(new URL('../bin/s8-config.mjs', import.meta.url), path.join(root, 'pi/bin/s8-config.mjs'));
   await copyFile(new URL('../lib/config/s8-config.mjs', import.meta.url), path.join(root, 'pi/lib/config/s8-config.mjs'));
+  await copyFile(new URL('../lib/development/worker-identity.mjs', import.meta.url), path.join(root, 'pi/lib/development/worker-identity.mjs'));
   const env = { ...legacy, TELEGRAM_BOT_TOKEN: 'fixture-bot-not-for-yaml', PHCMS_ACCESS_TOKEN: 'fixture-service-not-for-yaml' };
   const cli = path.join(root, 'pi/bin/s8-config.mjs');
   const output = execFileSync(process.execPath, [cli, 'init'], { env, encoding: 'utf8' });
@@ -96,20 +98,29 @@ test('scheduler delivery uses the shared YAML target, never legacy IDs, and inva
   await assert.rejects(readFile(path.join(root, 'owner.lock')), { code: 'ENOENT' });
 });
 
-test('shared config validates worker count and public work URL without changing Telegram settings', async t => {
+test('shared config validates explicit worker entries and public work URL without changing Telegram settings', async t => {
   const { loadS8Config } = await import('../lib/config/s8-config.mjs');
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-workers-config-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  assert.equal(loadS8Config(root, {}).workers.count, 2);
+  assert.deepEqual(loadS8Config(root, {}).workerEntries, {});
   const file = path.join(root, 's8-config.yml');
-  await writeFile(file, 'telegram: {}\nworkers:\n  count: 3\npublicUrl: https://s8.example.invalid/s8/\n');
-  assert.equal(loadS8Config(root, {}).workers.count, 3);
+  await writeFile(file, 'telegram: {}\nworker-entries:\n  local-s8-2:\n    agent: pi\n    host: local\n    launch: managed\n  remote-claude-1:\n    agent: claude-code\n    host: ssh://dev@devbox\n    launch: managed\n    root: /home/dev/s8-agent\n  external-claude:\n    agent: claude-code\n    launch: external\npublicUrl: https://s8.example.invalid/s8/\n');
+  assert.deepEqual(Object.keys(loadS8Config(root, {}).workerEntries), ['local-s8-2', 'remote-claude-1', 'external-claude']);
   assert.equal(loadS8Config(root, {}).publicUrl, 'https://s8.example.invalid/s8/');
   assert.equal(loadTelegramConfig(root, legacy).scheduleChatId, null);
-  for (const count of ['0', '-1', '1.5', '"2"', '9007199254740992']) {
-    await writeFile(file, `telegram: {}\nworkers:\n  count: ${count}\n`);
-    assert.throws(() => loadS8Config(root, {}), /workers.count/);
+  for (const entries of [
+    'not-a-map',
+    'invalid.id:\n    agent: pi\n    host: local\n    launch: managed',
+    'worker:\n    agent: codex\n    host: local\n    launch: managed',
+    'worker:\n    agent: pi\n    host: local\n    launch: external',
+    'worker:\n    agent: pi\n    launch: managed',
+    'worker:\n    agent: pi\n    host: ssh://dev:secret@devbox\n    launch: managed',
+  ]) {
+    await writeFile(file, `telegram: {}\nworker-entries:\n  ${entries.replaceAll('\n', '\n  ')}\n`);
+    assert.throws(() => loadS8Config(root, {}));
   }
+  await writeFile(file, 'telegram: {}\nworkers:\n  count: 2\n');
+  assert.throws(() => loadS8Config(root, {}), /migrate-workers/);
   for (const url of ['ftp://s8.example.invalid', 'https://user:password@s8.example.invalid', 'https://s8.example.invalid/?token=x']) {
     await writeFile(file, `telegram: {}\npublicUrl: ${url}\n`);
     assert.throws(() => loadS8Config(root, {}), /publicUrl/);

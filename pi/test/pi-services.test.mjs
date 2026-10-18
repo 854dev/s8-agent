@@ -15,6 +15,7 @@ async function fixture(t) {
   const run = args => exec('tmux', ['-L', socket, ...args], { timeout: 5000 });
   t.after(async () => { await run(['kill-server']).catch(() => {}); await rm(root, { recursive: true, force: true }); });
   // Each actual tmux service executes a harmless isolated stub, never real work.
+  await writeFile(path.join(root, 's8-config.yml'), 'telegram: {}\nworker-entries:\n  worker-1:\n    agent: pi\n    host: local\n    launch: managed\n  worker-2:\n    agent: pi\n    host: local\n    launch: managed\n');
   await writeFile(path.join(root, 'start-pi.sh'), `#!/bin/sh\ntest "$1" = --service || exit 2\nprintf '%s\\n' "$2" >> ${quote(path.join(root, 'starts'))}\nexec sleep 60\n`);
   await run(['new-session', '-d', '-s', 's8-main', '-n', 'shell', 'sleep 60']);
   await run(['set-option', '-t', 's8-main', '@s8-runtime-root', root]);
@@ -104,17 +105,17 @@ test('legacy service sessions are linked without restarting their process', asyn
   await assert.rejects(readFile(path.join(f.root, 'starts')), { code: 'ENOENT' });
 });
 
-test('worker pool uses configured count and canonical checkout identity across launchers', async t => {
+test('worker pool uses explicit IDs and canonical checkout identity across launchers', async t => {
   const { ensureWorkerPool } = await import('../lib/development/worker-pool.mjs');
   const f = await fixture(t);
-  await writeFile(path.join(f.root, 's8-config.yml'), 'telegram: {}\nworkers:\n  count: 3\n');
+  await writeFile(path.join(f.root, 's8-config.yml'), 'telegram: {}\nworker-entries:\n  local-a:\n    agent: pi\n    host: local\n    launch: managed\n  local-b:\n    agent: pi\n    host: local\n    launch: managed\n  local-c:\n    agent: pi\n    host: local\n    launch: managed\n');
   const first = await ensureWorkerPool(f.root, { run: f.run });
   const second = await ensureWorkerPool(`${f.root}/`, { run: f.run });
   assert.equal(first.session, second.session);
   assert.equal(second.count, 3);
   const names = (await f.run(['list-windows', '-t', first.session, '-F', '#W'])).stdout.trim().split('\n');
-  assert.deepEqual(names.filter(name => name.startsWith('worker-')).sort(), ['worker-1', 'worker-2', 'worker-3']);
-  await writeFile(path.join(f.root, 's8-config.yml'), 'telegram: {}\nworkers:\n  count: 2\n');
+  assert.deepEqual(names.filter(name => ['local-a', 'local-b', 'local-c'].includes(name)).sort(), ['local-a', 'local-b', 'local-c']);
+  await writeFile(path.join(f.root, 's8-config.yml'), 'telegram: {}\nworker-entries:\n  local-a:\n    agent: pi\n    host: local\n    launch: managed\n  local-b:\n    agent: pi\n    host: local\n    launch: managed\n');
   const deferred = await ensureWorkerPool(f.root, { run: f.run });
   assert.equal(deferred.deferred, true, 'An unreachable worker is never assumed idle for resizing');
   assert.equal(deferred.count, 3);

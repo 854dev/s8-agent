@@ -102,11 +102,35 @@ export async function workspacePatch(worktree, baseline = 'HEAD') {
   return patch;
 }
 
+export async function applyWorkspacePatch(worktree, patch, { expectedBaseTree, expectedTree } = {}) {
+  if (typeof patch !== 'string' || Buffer.byteLength(patch) > 64 * 1024 * 1024) throw new Error('Workspace input patch is invalid or too large');
+  const temporary = path.join(path.dirname(worktree), `.s8-input-${createHash('sha256').update(`${worktree}:${Date.now()}`).digest('hex').slice(0, 24)}.patch`);
+  await writeFile(temporary, patch, { mode: 0o600, flag: 'wx' });
+  try {
+    const before = await workspaceChanges(worktree);
+    if (before.changedFiles.length) await git(worktree, ['add', '--', ...before.changedFiles]);
+    const baseTree = (await git(worktree, ['write-tree'])).stdout.trim();
+    await git(worktree, ['read-tree', 'HEAD']);
+    if (expectedBaseTree && baseTree !== expectedBaseTree) throw new Error('Worker repository does not match the approved patch baseline');
+    if (patch) {
+      await git(worktree, ['apply', '--check', temporary]);
+      await git(worktree, ['apply', temporary]);
+    }
+    const { changedFiles } = await workspaceChanges(worktree);
+    if (changedFiles.length) await git(worktree, ['add', '--', ...changedFiles]);
+    const tree = (await git(worktree, ['write-tree'])).stdout.trim();
+    await git(worktree, ['read-tree', 'HEAD']);
+    if (expectedTree && tree !== expectedTree) throw new Error('Remote input tree does not match the approved dependency baseline');
+    return tree;
+  } finally { await unlink(temporary).catch(() => {}); }
+}
+
 /** Import incremental task patches in dependency order; keep a durable input tree. */
 export async function importDevelopmentResults({ root, worktree, tasks }) {
   const manifestPath = path.join(root, '.s8-runtime', 'imports', `${path.basename(worktree)}.json`);
   let manifest = { runs: [], tree: 'HEAD' };
   try { manifest = JSON.parse(await readFile(manifestPath, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (manifest.tree === 'HEAD') manifest.tree = (await git(worktree, ['write-tree'])).stdout.trim();
   for (const task of tasks) {
     const runId = task.workflow?.run?.id;
     if (!runId || !/^[a-f0-9-]{36}$/.test(runId)) throw new Error('Dependency has no durable run artifact');

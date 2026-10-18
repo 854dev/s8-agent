@@ -46,7 +46,7 @@ export async function runFullRestart(root, options, directory, { run = runTmux, 
   if (owner !== root) throw new Error('Restart session belongs to another checkout');
   const mode = (await run(['show-option', '-qv', '-t', session, '@s8-mode'])).stdout.trim() || 'project';
   if (mode === 'local') return runtime(root, { session, mode, args: [], scheduler: false, supervisor: false, telegram: undefined });
-  if ((await workerStates(root)).some(worker => worker.alive && worker.status !== 'idle')) throw new Error('개발 작업이 진행 중입니다. 전체 재시작은 작업 종료 후 실행하세요.');
+  if ((await workerStates(root)).some(worker => worker.status !== 'idle' && worker.status !== 'offline' && !(worker.status === 'stopping' && !worker.alive))) throw new Error('개발 작업이 진행 중이거나 워커 상태를 확인할 수 없습니다. 작업·연결 상태를 확인한 뒤 전체 재시작하세요.');
   const lockName = 's8-full-restart-' + createHash('sha256').update(root).digest('hex');
   const lockFile = path.join(root, '.s8-runtime/runtime-restarts/all.lock');
   const handle = await withTmuxLock(run, lockName, async () => {

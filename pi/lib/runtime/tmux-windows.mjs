@@ -8,10 +8,10 @@ export async function withTmuxLock(run, name, action) {
   try { return await action(); } finally { await run(['wait-for', '-U', name]); }
 }
 export async function windows(run, session) {
-  const { stdout } = await run(['list-windows', '-t', `=${session}`, '-F', '#{window_id}\t#{window_name}\t#{@s8-window-root}\t#{pane_dead}']);
+  const { stdout } = await run(['list-windows', '-t', `=${session}`, '-F', '#{window_id}\t#{window_name}\t#{@s8-window-root}\t#{pane_dead}\t#{@s8-worker-id}']);
   return stdout.trim().split('\n').filter(Boolean).map(line => {
-    const [id, name, root, dead] = line.split('\t');
-    return { id, name, root, dead: dead === '1' };
+    const [id, name, root, dead, workerId] = line.split('\t');
+    return { id, name, root, dead: dead === '1', workerId: workerId || undefined };
   });
 }
 export async function stopWindow(run, root, session, name, { timeoutMs = 20000 } = {}) {

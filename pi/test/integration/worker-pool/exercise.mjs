@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { ProjectmanClient } from '../../../lib/projectman/client.ts';
 import { startDeveloperWorker } from '../../../lib/development/worker-daemon.mjs';
+import { startWorkerCommunicator } from '../../../lib/development/worker-communicator.mjs';
 import { executeDeveloper } from '../../../lib/development/worker-session.mjs';
 import { developmentTick, waitForDevelopmentRuns, flushDevelopmentOutbox } from '../../../lib/development/supervisor.mjs';
 import { recoverCompletionReviews } from '../../../lib/projectman/completion-review.mjs';
@@ -23,7 +24,7 @@ export async function exerciseProjectmanWorkerPool({ baseUrl, managerToken, work
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-full-worker-'));
   const repo = path.join(root, 'repo'), directory = path.join(root, 'evidence');
   const exec = promisify(execFile), client = new ProjectmanClient(baseUrl, managerToken);
-  let browser, provider, workers = [];
+  let browser, provider, communicator, workers = [];
   let workerError, providerError;
   const notifications = [];
   let telegramAttempts = 0, modelCalls = 0;
@@ -69,8 +70,9 @@ export async function exerciseProjectmanWorkerPool({ baseUrl, managerToken, work
     const runtime = await ModelRuntime.create({ authPath: path.join(root, 'fixture-auth.json'), modelsPath: null, refreshOnCreate: false });
     runtime.registerProvider('s8-integration', { api: 'openai-completions', apiKey: 'fixture-key', authHeader: true, baseUrl: `${providerUrl}/v1`, models: [{ id: 'fixture', name: 'Fixture', reasoning: false, input: ['text'], contextWindow: 32768, maxTokens: 1024, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }] });
     browser = await liveConsoleBrowser({ root: sourceRoot, runtimeRoot: root, baseUrl, directory, login });
-    const settings = { telegram: { allowedUserIds: ['123456789'], allowedGroupIds: [], scheduleChatId: '123456789' }, workers: { count: 2 }, publicUrl: `${browser.origin}/s8/` };
-    await writeFile(path.join(root, 's8-config.yml'), `telegram:\n  allowedUserIds: ["123456789"]\n  scheduleChatId: "123456789"\nworkers:\n  count: 2\npublicUrl: ${settings.publicUrl}\n`);
+    const settings = { telegram: { allowedUserIds: ['123456789'], allowedGroupIds: [], scheduleChatId: '123456789' }, publicUrl: `${browser.origin}/s8/` };
+    await writeFile(path.join(root, 's8-config.yml'), `telegram:\n  allowedUserIds: ["123456789"]\n  scheduleChatId: "123456789"\nworker-entries:\n  worker-1:\n    agent: pi\n    host: local\n    launch: managed\n  worker-2:\n    agent: pi\n    host: local\n    launch: managed\npublicUrl: ${settings.publicUrl}\n`);
+    communicator = await startWorkerCommunicator({ root });
     const project = await client.create(workspaceUid, 'project', 'Worker integration', 'Disposable integration fixture', [], repo);
     const work = await client.create(project.uid, 'task', '브라우저 승인 워커 통합', '파일을 작성하고 검증하세요.');
     const delegated = await client.workflow(work.uid, { action: 'delegate', requestId: randomUUID(), expectedRevision: 0, spec: { repoPath: repo, plan: 'Write result.txt and verify it exists.', decisionRefs: ['fixture:approved-plan'], completionCriteria: ['result.txt exists'], commandNames: ['test'], dependsOn: [] } });
@@ -85,7 +87,7 @@ export async function exerciseProjectmanWorkerPool({ baseUrl, managerToken, work
         catch (error) { const events = await readFile(path.join(request.run.directory, 'developer.events.jsonl'), 'utf8').catch(() => 'No worker events'); workerError = { stack: `${error.stack}\nModel calls: ${modelCalls}; provider: ${providerError}\n${events}` }; throw error; }
       },
     })));
-    const options = { root, client, policy: { maxConcurrency: 2 }, projectUid: project.uid };
+    const options = { root, client, policy: { workerEntries: { 'worker-1': { agent: 'pi', host: 'local', launch: 'managed' }, 'worker-2': { agent: 'pi', host: 'local', launch: 'managed' } } }, projectUid: project.uid };
     const deadline = Date.now() + 20000;
     let completed;
     do {
@@ -161,6 +163,7 @@ export async function exerciseProjectmanWorkerPool({ baseUrl, managerToken, work
   } finally {
     await Promise.all(workers.map(worker => worker.close()));
     await waitForDevelopmentRuns(root);
+    await communicator?.close();
     await browser?.close();
     if (provider) { provider.closeAllConnections(); await new Promise(resolve => provider.close(resolve)); }
     await rm(root, { recursive: true, force: true });

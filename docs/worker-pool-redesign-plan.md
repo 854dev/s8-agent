@@ -2,7 +2,7 @@
 
 ## 확정 범위
 
-PH-CMS를 수정하지 않고 s8만 기존 Projectman v2 계약에 맞춘다. 사용자 화면 승인을 실행 대기열로 삼고, 전용 tmux 세션에 유지되는 Pi 워커가 UID 단위로 작업한다. 기본 워커 수는 2이며 s8-config.yml의 workers.count로 설정한다.
+PH-CMS를 수정하지 않고 s8만 기존 Projectman v2 계약에 맞춘다. 사용자 화면 승인을 실행 대기열로 삼고, worker-entries에 등록한 에이전트가 UID 단위로 작업한다. 로컬 Pi 워커는 전용 tmux 세션에서 유지하며, 등록하지 않은 워커를 기본 생성하지 않는다.
 
 ```text
 사용자 계획 승인 → ready → supervisor 원자적 claim → doing
@@ -32,7 +32,7 @@ review → 매니저 review_result → 사용자가 화면에서 complete → do
 
 ## 구현 작업
 
-1. **기동·워커 수명 관리**: start-pi가 YAML을 읽고 전용 tmux 세션에 N개 워커를 만든다. 재시작·중복 기동·실행 중 수 변경을 처리한다. 워커별 Unix 소켓으로 UID/runId를 전달하고 중복 배정을 막는다.
+1. **기동·워커 수명 관리**: start-pi가 YAML의 worker-entries를 읽고 로컬 관리 Pi 항목마다 설정된 ID의 창을 만든다. 재시작·중복 기동·실행 중 항목 변경을 처리한다. 워커별 Unix 소켓으로 UID/runId를 전달하고 중복 배정을 막는다. 원격 워커 통신·기동은 [공통 워커 구현 계획](remote-worker-implementation-plan.md)에서 다룬다.
 2. **기존 배정기 통합**: supervisor가 승인·예정 시각·담당자·의존성을 확인하고 원자적 claim을 사용한다. 기존 run이 있는 work는 재실행하지 않는다. 예약 조회도 같은 배정기를 사용한다.
 3. **실행과 보존**: 워커가 projectman으로 UID를 먼저 조회하고 승인된 계획을 수행한다. 작업별 worktree와 새 대화를 사용하며 결과·검증·판단·오류·패치를 보존한다. 토큰·작업 시간·명령 수로 중단하지 않는다. 사용자 취소·인프라 실패는 보존한다.
 4. **보고와 알림**: 기존 outbox가 같은 requestId로 서버 report를 재전송하고 결과를 저장한다. 매니저 inbox와 Telegram 전달 상태를 별도로 보존한다. 성공 문구는 ‘개발 완료 · 최종 확인 대기’이며 work/run 링크를 포함한다. 설정 누락은 미전송으로 남긴다.
@@ -41,7 +41,7 @@ review → 매니저 review_result → 사용자가 화면에서 complete → do
 
 ## 검증 기준
 
-- 기본 2개와 설정 N개 워커, 중복 시작·UID 전달·소켓 복구 검증.
+- 명시한 두 개 또는 임의 개수의 worker ID, 중복 시작·UID 전달·소켓 복구 검증.
 - 서로 격리된 작업 실행, 빈 워커 재사용, 다른 워커 실행 중 다음 독립 UID 배정.
 - 기존 승인 버전·원자적 claim·멱등 report·취소·실패 보존.
 - 성공 보고 후 review 저장, 사용자 미응답 상태에서도 개발 완료 알림과 워커 반환.

@@ -18,10 +18,13 @@ async function fixture(t) {
   t.after(async () => { await run(['kill-server']).catch(() => {}); await rm(root, { recursive: true, force: true }); });
   for (const directory of ['pi/bin', 'pi/lib', 'pi/node_modules/.bin', 'tools']) await mkdir(path.join(root, directory), { recursive: true });
   await copyFile(new URL('../../start-pi.sh', import.meta.url), path.join(root, 'start-pi.sh'));
-  for (const file of ['bin/pi-runtime.mjs', 'bin/telegram-status.mjs', 'bin/pi-runtime-worker.mjs', 'bin/manager-options.mjs', 'lib/runtime/restart.mjs', 'lib/runtime/full-restart.mjs', 'lib/runtime/runtime.mjs', 'lib/runtime/services.mjs', 'lib/runtime/tmux-windows.mjs', 'lib/runtime/managed-sessions.mjs', 'lib/manager/launch.mjs', 'lib/telegram/status.mjs', 'lib/development/worker-pool.mjs', 'lib/config/s8-config.mjs']) {
+  await writeFile(path.join(root, 's8-config.yml'), 'telegram: {}\nworker-entries:\n  worker-1:\n    agent: pi\n    host: local\n    launch: managed\n');
+  for (const file of ['bin/pi-runtime.mjs', 'bin/telegram-status.mjs', 'bin/pi-runtime-worker.mjs', 'bin/manager-options.mjs', 'lib/runtime/restart.mjs', 'lib/runtime/full-restart.mjs', 'lib/runtime/runtime.mjs', 'lib/runtime/services.mjs', 'lib/runtime/tmux-windows.mjs', 'lib/runtime/managed-sessions.mjs', 'lib/manager/launch.mjs', 'lib/telegram/status.mjs', 'lib/development/worker-pool.mjs', 'lib/development/worker-identity.mjs', 'lib/development/worker-communicator.mjs', 'lib/development/ssh-worker.mjs', 'lib/storage/json-file.mjs', 'lib/scheduler/control.mjs', 'lib/scheduler/store.mjs', 'lib/config/s8-config.mjs']) {
     await mkdir(path.dirname(path.join(root, 'pi', file)), { recursive: true });
     await copyFile(new URL(`../${file}`, import.meta.url), path.join(root, 'pi', file));
   }
+  await mkdir(path.join(root, 'apps/telegram-gateway'), { recursive: true });
+  await copyFile(new URL('../../apps/telegram-gateway/gateway.mjs', import.meta.url), path.join(root, 'apps/telegram-gateway/gateway.mjs'));
   await symlink(new URL('../node_modules/yaml', import.meta.url).pathname, path.join(root, 'pi/node_modules/yaml'));
   await writeFile(path.join(root, 'pi/bin/developer.mjs'), 'setInterval(() => {}, 1000);');
   for (const service of ['scheduler', 'supervisor']) await writeFile(path.join(root, `pi/bin/${service}.mjs`), `import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(path.join(root, 'service-starts'))}, JSON.stringify({service:${JSON.stringify(service)},pid:process.pid})+'\\n'); setInterval(() => {}, 1000);`);

@@ -29,12 +29,14 @@
 - KB: Markdown 검색·조회와 정책 확인, 버전 충돌 검사를 거친 문서 쓰기·삭제. 변경은 대화형 확인이 필요하다.
 - Scheduler: Projectman 예약만 관리한다. 임의 셸 예약은 관리 도구에서 변경할 수 없다.
 - 착수 전: `todo`를 **일 시작 전**으로 표시한다. 매니저가 원문·코드·지침·요구 충돌·누락·허용 범위·검증 계획을 검토하고 작은 의문도 사용자에게 확인한다. 확정 내용을 `delegate`한 뒤 `preflight_review`로 work의 `s8Preflight`에 기록한다. S8 콘솔과 슈퍼바이저는 이 기록이 현재 작업·spec과 일치해야 승인·실행을 허용한다. 내용이나 spec이 변경되면 재검토한다. 기존 승인 작업도 검토 기록이 없으면 실행되지 않는다.
-- 개발: `start-pi`가 전용 tmux 세션에 상시 Pi 워커를 준비한다. `s8-config.yml`의 `workers.count`(기본 2)로 슬롯 수를 지정한다. s8 화면에서 승인된 ready work를 UID로 배정하고 작업별 독립 git worktree에서 실행한다.
+- 개발: `start-pi`가 `s8-config.yml`의 `worker-entries` 중 로컬 관리 Pi 워커를 전용 tmux 세션에 준비한다. 각 항목의 키가 worker ID이며 등록 항목 수가 슬롯 수다. s8 화면에서 승인된 ready work를 UID로 배정하고 작업별 독립 git worktree에서 실행한다.
 - 개발 중 판단: 최종 승인된 작업의 구현 선택과 일반 테스트 실패는 워커가 스스로 해결한다. work당 토큰·시간·명령·실행 횟수 예산은 없다. 실제 실패·취소는 결과와 기록을 보존한다.
 - 완료: 워커가 결과를 보고하면 review로 저장하고 매니저에게 보고를 전달한다. 사용자는 Telegram으로 요약과 work 링크를 받는다. 매니저 검토 후 사용자가 화면에서 선택적으로 검토의견을 적고 완료를 제출한다. 원본은 done으로 확정되며 매니저가 의견을 보고 추가 조치 없음·새 work 작성·질문을 판단한다. 새 work는 별도 실행 승인을 받는다.
 - 기록: `.s8-runtime/runs/<run-id>/`의 전달 프롬프트·공개 응답·도구 이벤트·결과·검증·패치와 Projectman 작업 이력을 연결한다. 모델 내부 추론과 인증정보는 기록 대상이 아니다.
 
 역할별 기준은 [관리 지침](agents/manager/SYSTEM.md), [개발 지침](agents/developer/WORKER_SYSTEM.md)과 [워커 개편 계획](docs/worker-pool-redesign-plan.md)에 있다. 실행 방법은 아래 안내를, 화면·프록시 구성은 [프런트엔드 README](frontend/README.md)를 따른다.
+
+로컬·원격 공통 워커의 설정, 인증 통신기, 장치별 작업 공간·산출물 전송, managed SSH와 Claude Code 실행 어댑터까지 코드에 반영했다. 실제 두 장치 운영과 전체 통합 검증은 아직 남아 있다. 구현 현황과 다음 확인 항목은 [handoff](docs/remote-worker-handoff.md), 설계 기준은 [구현 계획](docs/remote-worker-implementation-plan.md)을 참고한다.
 
 `854_md` 지식베이스를 사용하는 개인용 AI 작업 오케스트레이터와 운영 콘솔이다. 지식과 에이전트 설정을 각각 `854_md`, `s8-agent` 저장소로 분리한다.
 
@@ -93,8 +95,8 @@ pi/
 | 찾으려는 기능 | 구현 위치 | 실행·연결 진입점 |
 | --- | --- | --- |
 | 승인된 UID 조회·claim·보고 outbox·복구 | [development/supervisor.mjs](pi/lib/development/supervisor.mjs) | `start-pi.sh --service supervisor` → `pi/bin/supervisor.mjs` |
-| tmux 워커 수·창·소켓 통신 | [development/worker-pool.mjs](pi/lib/development/worker-pool.mjs) | 런타임 서비스 기동·supervisor |
-| 상시 워커의 배정·상태·반환 | [development/worker-daemon.mjs](pi/lib/development/worker-daemon.mjs) | `start-pi.sh --service worker worker-N` → `pi/bin/developer.mjs` |
+| 워커 항목·tmux 창·로컬 소켓 통신 | [development/worker-pool.mjs](pi/lib/development/worker-pool.mjs) | 런타임 서비스 기동·supervisor |
+| 상시 워커의 배정·상태·반환 | [development/worker-daemon.mjs](pi/lib/development/worker-daemon.mjs) | `start-pi.sh --service worker <workerId>` → `pi/bin/developer.mjs` |
 | UID별 새 Pi 대화·get/report 도구 | [development/worker-session.mjs](pi/lib/development/worker-session.mjs) | worker-daemon |
 | worktree·변경 파일·패치·선행 결과 반영 | [development/workspace.mjs](pi/lib/development/workspace.mjs) | supervisor |
 | 완료보고·사용자 검토의견 수신 | [manager/inbox.mjs](pi/lib/manager/inbox.mjs), [manager 확장](pi/extensions/manager.ts) | 매니저 시작·기존 polling |
@@ -332,7 +334,7 @@ Pi 1.3.0에도 내장 MCP가 있지만 `pi-mcp-extension@1.5.0`의 설치와 패
 - Telegram의 `/jobs`, `/jobs pause ID`, `/jobs resume ID`, `/jobs stop ID`로 예약과 현재 배치를 관리한다. 중단은 이미 수행한 변경을 롤백하지 않는다.
 - OS 자동 시작 등록은 별도다. 비정상 종료 후 남은 잠금은 프로세스 종료를 확인한 뒤 수동 복구한다.
 - `kind=projectman` 잡은 지정 프로젝트에서 workflow v2 계획을 사람이 확정한 실행 가능 작업을 5분마다 확인해 개발 슈퍼바이저에 전달한다. 빈 조회에는 모델·Telegram 호출이 없다.
-- 슈퍼바이저는 작업별 격리 worktree에서 코드를 수정하고 계획된 검증을 실행한다. 동일 work를 자동 재실행하지 않으며, 완료 결과는 `review`, 장애·검증 실패는 구조화된 결과로 남긴다. 동시 실행은 workers.count 설정을 따른다.
+- 슈퍼바이저는 작업별 격리 worktree에서 코드를 수정하고 계획된 검증을 실행한다. 동일 work를 자동 재실행하지 않으며, 완료 결과는 `review`, 장애·검증 실패는 구조화된 결과로 남긴다. 동시 실행은 현재 연결된 유휴 worker-entries 수를 따른다.
 
 설정·승인·알림·복구 절차는 [`pi/SCHEDULER.md`](pi/SCHEDULER.md)를 참고한다.
 
@@ -405,13 +407,29 @@ git diff --check
 `s8-config.example.yml`을 참고해 `s8-config.yml`에 설정한다. 봇 토큰 등 인증 값은 YAML에 넣지 않는다.
 
 ```yaml
-workers:
-  count: 2
+worker-entries:
+  local-s8-1:
+    agent: pi
+    host: local
+    launch: managed
+  remote-claude-1:
+    agent: claude-code
+    host: ssh://dev@devbox
+    launch: managed
+    root: /home/dev/s8-agent
+worker-communicator:
+  bindAddress: 100.100.0.10 # 실제 Tailscale IPv4로 변경
+  port: 38771
+  url: http://100.100.0.10:38771
+repository-mappings:
+  /central/path/to/repository: /home/dev/work/repository
 publicUrl: https://your-host.example/s8/
 ```
+
+`worker-communicator`는 중앙 장치의 실제 Tailscale IPv4를 사용하고, `repository-mappings`는 승인된 저장소 경로를 원격 checkout에 연결한다. managed SSH 워커는 원격 s8-agent checkout의 절대 `root` 경로가 필요하다. 실제 장치 등록·기동·완료 전달은 아직 검증해야 한다. 기존 `workers.count` 설정은 `node pi/bin/s8-config.mjs migrate-workers`로 `worker-1..N` 명시적 항목으로 바꿀 수 있다. 기존 담당자 ID와 실행 기록을 유지한다.
 
 알림 대상은 기존 `telegram.scheduleChatId`를 사용한다. 공개 URL과 수신자가 없으면 알림을 미전송 상태로 보존한다. Telegram 오류는 완료 처리나 다음 배정을 막지 않는다. 응답 유실 때는 동일 알림이 중복될 수 있다.
 
 PH-CMS는 수정하지 않는다. 기존 `workflowVersion: 2`, `atomicClaims: true`, `idempotentReports: true` 계약을 사용한다. 성공 report는 review로 저장한다. 매니저 review_result 후 사용자가 최종 완료하면 done이 되고 의존 작업이 실행 가능해진다. 워커는 review 상태에서도 다음 독립 작업을 받는다. 서버의 기존 예산 필드는 유지되며 s8는 시간·토큰 제한이나 동일 work 재실행에 사용하지 않는다.
 
-워커 세션은 `s8-workers-<저장소 해시>`, 창은 `worker-1` 등의 이름이다. 매니저 재시작 시 진행 중 워커는 유지한다. count 변경과 전체 재시작은 진행 중 작업이 있으면 보류한다. 작업 종료 뒤 다시 실행해 적용한다.
+로컬 Pi 워커 세션은 `s8-workers-<저장소 해시>`, 창은 설정의 worker ID를 사용한다. 매니저 재시작 시 진행 중 워커는 유지한다. 항목 변경은 기존 워커가 idle로 확인될 때 적용한다. 작업 종료 뒤 다시 실행해 적용한다.

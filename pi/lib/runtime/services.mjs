@@ -24,7 +24,8 @@ export async function startPiServices(root, { session = 's8-main', scheduler = t
     if (owner !== root) throw new Error(`${session}은 이 저장소의 런타임 세션이 아닙니다.`);
   }
   const results = [];
-  if (supervisor) results.push({ service: 'workers', ...await ensureWorkerPool(root, { run }) });
+  let workerPool;
+  if (supervisor) { workerPool = await ensureWorkerPool(root, { run }); results.push({ service: 'workers', ...workerPool }); }
   for (const [name, enabled] of Object.entries({ scheduler, supervisor })) {
     if (!enabled) continue;
     const service = definitions[name];
@@ -57,7 +58,8 @@ export async function startPiServices(root, { session = 's8-main', scheduler = t
           }
         }
       }
-      if (restart && !(name === 'supervisor' && (await workerStates(root)).some(worker => worker.alive && worker.status !== 'idle'))) {
+      if (restart && name === 'supervisor' && workerPool?.deferred) return { service: name, session, window: name, reused: true, deferred: true };
+      if (restart && !(name === 'supervisor' && (await workerStates(root)).some(worker => worker.status !== 'idle' && worker.status !== 'offline' && !(worker.status === 'stopping' && !worker.alive)))) {
         await stopWindow(run, root, session, name);
         const file = path.join(root, service.lock);
         const deadline = Date.now() + 5000;

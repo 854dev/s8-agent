@@ -82,7 +82,7 @@ if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
         '  (인자 없음)      프로젝트 / 로컬 모드 선택' \
         '  --no-scheduler   스케줄러 자동 시작 제외' \
         '  --no-supervisor  개발 슈퍼바이저 자동 시작 제외' \
-        '  --service 종류   scheduler 또는 supervisor 전경 실행 (내부 worker 지원, 감독 --check 지원)' \
+        '  --service 종류   scheduler, supervisor 또는 worker <workerId> 전경 실행' \
         '  --telegram take  이 세션으로 Telegram 연결 이전 (단독 --telegram도 호환)' \
         '  --telegram off   이 세션의 Telegram 연결 비활성 (--no-telegram도 호환)' \
         '  --no-telegram    Telegram 없이 단독 실행' \

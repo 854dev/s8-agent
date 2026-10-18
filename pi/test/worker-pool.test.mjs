@@ -6,15 +6,17 @@ import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { startDeveloperWorker } from '../lib/development/worker-daemon.mjs';
 import { workerRequest } from '../lib/development/worker-pool.mjs';
+import { startWorkerCommunicator } from '../lib/development/worker-communicator.mjs';
 import { drainManagerInbox } from '../lib/manager/inbox.mjs';
 
 const until = async check => { for (let i = 0; i < 100; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 10)); } assert.fail('condition timeout'); };
 
 test('persistent worker accepts one UID, survives duplicate delivery, and waits for release before another', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-worker-'));
+  const communicator = await startWorkerCommunicator({ root, entries: { 'worker-1': { agent: 'pi', host: 'local', launch: 'managed' } } });
   let complete, executions = 0;
   const worker = await startDeveloperWorker(root, 'worker-1', { executeWork: async request => { executions++; await new Promise(resolve => { complete = resolve; }); await writeFile(path.join(request.run.directory, 'worker-result.json'), JSON.stringify({ status: 'completed', summary: 'done' })); } });
-  t.after(async () => { await worker.close(); await rm(root, { recursive: true, force: true }); });
+  t.after(async () => { await worker.close(); await communicator.close(); await rm(root, { recursive: true, force: true }); });
   async function assignment(uid) {
     const runId = randomUUID(), directory = path.join(root, '.s8-runtime/runs', runId);
     await mkdir(directory, { recursive: true });
@@ -63,7 +65,7 @@ test('two persistent workers dispatch three approved UIDs and reuse a free slot 
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-pool-integration-'));
   const repo = path.join(root, 'repo');
   await mkdir(repo);
-  await writeFile(path.join(root, 's8-config.yml'), 'telegram: {}\nworkers:\n  count: 2\n');
+  await writeFile(path.join(root, 's8-config.yml'), 'telegram: {}\nworker-entries:\n  worker-1:\n    agent: pi\n    host: local\n    launch: managed\n  worker-2:\n    agent: pi\n    host: local\n    launch: managed\n');
   await writeFile(path.join(repo, 'base.txt'), 'original');
   for (const args of [['init'], ['add', '.'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture']]) await exec('git', args, { cwd: repo });
   const rows = new Map(Array.from({ length: 3 }, (_, i) => [`task-${i}`, {
@@ -101,9 +103,10 @@ test('two persistent workers dispatch three approved UIDs and reuse a free slot 
     await writeFile(path.join(request.run.workspace, `${request.task.uid}.txt`), 'done');
     await saveJson(path.join(request.run.directory, 'worker-result.json'), { status: 'completed', summary: 'done', verification: [] });
   };
+  const communicator = await startWorkerCommunicator({ root, entries: { 'worker-1': { agent: 'pi', host: 'local', launch: 'managed' }, 'worker-2': { agent: 'pi', host: 'local', launch: 'managed' } } });
   const workers = await Promise.all(['worker-1', 'worker-2'].map(id => startDeveloperWorker(root, id, { executeWork })));
-  t.after(async () => { releaseFirst(); await waitForDevelopmentRuns(root); await Promise.all(workers.map(worker => worker.close())); await rm(root, { recursive: true, force: true }); });
-  const options = { root, client, policy: { maxConcurrency: 2 } };
+  t.after(async () => { releaseFirst(); await waitForDevelopmentRuns(root); await Promise.all(workers.map(worker => worker.close())); await communicator.close(); await rm(root, { recursive: true, force: true }); });
+  const options = { root, client, policy: { workerEntries: { 'worker-1': { agent: 'pi', host: 'local', launch: 'managed' }, 'worker-2': { agent: 'pi', host: 'local', launch: 'managed' } } } };
   for (let i = 0; i < 300 && [...rows.values()].some(row => row.state !== 'review'); i++) {
     await developmentTick(options); await recoverDevelopmentRuns(options);
     await new Promise(resolve => setTimeout(resolve, 10));

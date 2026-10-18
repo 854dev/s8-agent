@@ -7,8 +7,20 @@ telegram:
   # 아직 대상을 지정하지 않을 때는 null로 두며 임의 수신자를 자동 선택하지 않는다.
   scheduleChatId: "123456789"
 
-# 프로젝트 모드 시작 시 준비할 Pi 워커 수. 변경은 전체 워커가 idle일 때 적용한다.
-workers:
-  count: 2
+# key가 고유 workerId다. 로컬 Pi 예시 두 개이며 원격/external은 문서의 워커 설정 안내를 따른다.
+worker-entries:
+  worker-1:
+    agent: pi
+    host: local
+    launch: managed
+  worker-2:
+    agent: pi
+    host: local
+    launch: managed
+# Loopback은 로컬 워커 전용. 원격 워커는 bindAddress와 url을 장치의 Tailscale IPv4로 맞춘다.
+worker-communicator:
+  bindAddress: 127.0.0.1
+  port: 38771
+  url: http://127.0.0.1:38771
 # Telegram 알림에서 열 s8 화면의 공개 URL. 실제 배포 경로로 지정한다.
 publicUrl: null

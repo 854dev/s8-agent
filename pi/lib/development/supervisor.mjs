@@ -2,13 +2,15 @@ import { enqueueManagerMessage } from '../manager/inbox.mjs';
 import { saveJson } from '../storage/json-file.mjs';
 import { requireConfirmedPlan } from '../projectman/preflight.mjs';
 import { workerRequest, workerStates, processAlive } from './worker-pool.mjs';
+import { getWorkerState } from './worker-communicator.mjs';
 import { loadS8Config } from '../config/s8-config.mjs';
 import { sendTelegram } from '../telegram/notify.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, readdir, open, rm, lstat } from 'node:fs/promises';
 import path from 'node:path';
 
-import { prepareWorktree, workspaceChanges, workspacePatch, importDevelopmentResults } from './workspace.mjs';
+import { prepareWorktree, workspaceChanges, workspacePatch, applyWorkspacePatch, importDevelopmentResults } from './workspace.mjs';
+import { writeWorkerInputPatch } from './worker-workspace.mjs';
 
 async function projectGuidelines(worktree) {
   const instructions = []; let visited = 0;
@@ -31,7 +33,7 @@ async function projectGuidelines(worktree) {
 }
 
 export async function loadDevelopmentPolicy(root) {
-  return { maxConcurrency: loadS8Config(root).workers.count, commands: {} };
+  return { workerEntries: loadS8Config(root).workerEntries, commands: {} };
 }
 const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; } };
@@ -45,11 +47,11 @@ export function reportForServer(value) {
 
 export async function runDeveloper(request, { signal } = {}) {
   const { root, workerId, run } = request;
-  const assign = { action: 'assign', uid: request.task.uid, runId: run.runId };
+  const assign = { action: 'assign', uid: request.task.uid, runId: run.runId, request };
   try { await workerRequest(root, workerId, assign); }
   catch {
     // A lost acknowledgement must not result in another assignment or a second execution.
-    const state = await workerRequest(root, workerId, { action: 'status' });
+    const state = await getWorkerState(root, workerId);
     if (state.runId !== run.runId) throw new Error('Worker assignment was not accepted');
   }
   let cancelSent = false;
@@ -59,15 +61,23 @@ export async function runDeveloper(request, { signal } = {}) {
       if (signal?.aborted && !cancelSent) {
         await workerRequest(root, workerId, { action: 'cancel', runId: run.runId }); cancelSent = true;
       }
-      state = await workerRequest(root, workerId, { action: 'status' });
+      state = await getWorkerState(root, workerId);
+      if (!state) throw new Error('Worker state unavailable');
     } catch {
       const saved = (await workerStates(root)).find(item => item.workerId === workerId);
-      if (!saved?.alive || saved.runId !== run.runId) throw new Error('Assigned worker exited');
-      // Keep ownership while a live worker is temporarily unreachable.
+      if (saved?.runId !== run.runId) throw new Error('Assigned worker state unavailable');
+      // Preserve ownership during a communication outage; only a fresh connected state can finish the run.
       await new Promise(resolve => setTimeout(resolve, 1000)); continue;
     }
     if (state.runId !== run.runId) throw new Error('Worker assignment changed');
-    if (state.status === 'reported') return { report: await readJson(path.join(run.directory, 'worker-result.json')), workerPid: state.pid };
+    if (state.status === 'reported') {
+      const report = await readJson(path.join(run.directory, 'worker-result.json'));
+      if (request.transport?.kind === 'remote' && report.status === 'completed') {
+        const taskPatch = await readFile(path.join(run.directory, 'task.patch'), 'utf8');
+        await applyWorkspacePatch(run.workspace, taskPatch, { expectedBaseTree: request.inputTree });
+      }
+      return { report, workerPid: state.pid };
+    }
     await new Promise(resolve => setTimeout(resolve, 500));
   }
 }
@@ -189,7 +199,13 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
         executionNotes = events.filter(event => event.type === 'assistant' && event.text).map(event => event.text).join('\n').slice(-8000);
       } catch { /* Durable result remains available if the previous transcript is missing. */ }
     }
-    const request = { root, run, workerId, inputTree, task: { ...task, workflow: { ...claimed.workflow, runs: undefined, result: undefined } }, preflight: preflight.preflight, policy, previous: { ...task.workflow.result, executionNotes }, baseCommit: workspace.baseCommit, projectInstructions };
+    const workerEntry = policy.workerEntries?.[workerId];
+    let transport;
+    if (workerEntry?.host && workerEntry.host !== 'local') {
+      const input = await writeWorkerInputPatch(directory, workspace.worktree, inputTree);
+      transport = { kind: 'remote', repoPath: task.workflow.spec.repoPath, baseCommit: workspace.baseCommit, baseTree: input.baseTree, inputTree, inputPatchSha256: input.sha256 };
+    }
+    const request = { root, run, workerId, inputTree, ...(transport ? { transport } : {}), task: { ...task, workflow: { ...claimed.workflow, runs: undefined, result: undefined } }, preflight: preflight.preflight, policy, previous: { ...task.workflow.result, executionNotes }, baseCommit: workspace.baseCommit, projectInstructions };
     await saveJson(path.join(directory, 'request.json'), request);
     let polling = false;
     poll = setInterval(async () => {
@@ -268,9 +284,12 @@ export async function developmentTick({ root, client, policy, signal, worker, al
     }
     candidates = selected;
   }
-  const slots = worker ? Array.from({ length: policy.maxConcurrency }, (_, i) => ({ workerId: `worker-${i + 1}`, alive: true, status: 'idle' })) : await workerStates(root, policy.maxConcurrency);
+  const workerIds = Object.keys(policy.workerEntries ?? {});
+  const slots = worker
+    ? workerIds.map(workerId => ({ workerId, alive: true, status: 'idle', registered: true }))
+    : await workerStates(root, policy.workerEntries ?? {});
   const results = worker ? [] : finishedRuns.splice(0);
-  for (const slot of slots.filter(slot => slot.alive && slot.status === 'idle' && Number(slot.workerId.slice(7)) <= policy.maxConcurrency)) {
+  for (const slot of slots.filter(slot => slot.registered && slot.alive && slot.status === 'idle')) {
     const key = `${root}:${slot.workerId}`;
     if (!worker && activeSlots.has(key)) continue;
     const execute = async () => {
@@ -321,9 +340,10 @@ export async function recoverDevelopmentRuns({ root, client }) {
     let pending;
     try { pending = await readJson(path.join(directory, 'outbox.json')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     let state;
-    if (lock.workerId) state = await workerRequest(root, lock.workerId, { action: 'status' }).catch(() => null);
-    if (state?.runId === lock.runId && ['busy', 'accepting'].includes(state.status)) {
-      outcomes.push({ runId: lock.runId, status: 'worker-running' }); continue;
+    if (lock.workerId) state = await getWorkerState(root, lock.workerId).catch(() => null);
+    if (state?.runId === lock.runId && ['busy', 'accepting', 'unknown'].includes(state.status)) {
+      const fresh = Number.isFinite(Date.parse(state.lastSeenAt)) && Date.now() - Date.parse(state.lastSeenAt) < 15000;
+      outcomes.push({ runId: lock.runId, status: fresh ? 'worker-running' : 'worker-state-unknown' }); continue;
     }
     if (!pending && alive(lock.supervisorPid) && (!lock.workerId || activeSlots.has(`${root}:${lock.workerId}`))) continue;
     if (!pending) {

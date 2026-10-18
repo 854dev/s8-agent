@@ -34,7 +34,10 @@ try {
     const result = await restartPiRuntime(root, { session, mode, cwd, args, scheduler, supervisor, telegram });
     console.log(`tmux 세션: ${result.session}`);
     for (const window of result.windows) console.log(`  ${result.session}:${window}`);
-    if (result.workers) console.log(`개발 워커: ${result.workers.session} · ${result.workers.count}개${result.workers.deferred ? ' (진행 중 작업 또는 연결 상태 확인 필요: 수 변경 보류)' : ''}`);
+    if (result.workers) {
+      console.log(`개발 워커: ${result.workers.count}개 등록${result.workers.session ? ` · ${result.workers.session}` : ''}${result.workers.deferred ? ' (워커 종료·연결 확인 후 설정 적용)' : ''}`);
+      for (const worker of result.workers.remoteWorkers ?? []) console.log(`  ${worker.workerId}: SSH ${worker.status}`);
+    }
     console.log(result.telegramStatus);
     console.log(`접속: tmux attach-session -t ${result.session}`);
   }
