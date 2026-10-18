@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createProjectmanConsole } from '../projectman/console.mjs';
+import { createProjectmanConsole } from '../../lib/projectman/console.mjs';
 
 // Integration-test host only: serves the built app and the real console adapter.
 export async function liveConsoleBrowser({ root, baseUrl, directory, login, runtimeRoot = root }) {

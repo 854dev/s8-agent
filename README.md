@@ -76,15 +76,16 @@ pi/
 ├── lib/
 │   ├── config/              # s8-config.yml 읽기·검증
 │   ├── development/         # UID 배정, 워커 풀·소켓, 작업 실행·결과 보존
-│   ├── manager/             # 매니저 세션·도구, KB 접근, 보고 수신함
+│   ├── manager/             # 매니저 도구 설정, KB 접근, 보고 수신함
 │   ├── projectman/          # PH-CMS API, 승인·사전 검토, 웹 콘솔·인증·이력
-│   ├── runtime/             # Pi·tmux 세션, 서비스 기동·재시작, 모델·프로세스
+│   ├── runtime/             # Pi·tmux 세션, 서비스 기동·재시작, 모델 로딩
 │   ├── scheduler/           # 예약 저장·제어·실행
 │   ├── telegram/            # 알림 전송과 현재 연결 상태
-│   ├── storage/             # 민감 값 필터링·원자적 JSON 기록
-│   └── evaluation/          # 모델·브라우저 시나리오 검증
+│   └── storage/             # 민감 값 필터링·원자적 JSON 기록
 └── test/
     ├── *.test.mjs           # 기능별 회귀 테스트
+    ├── helpers/             # SDK 세션·브라우저 테스트 어댑터
+    ├── manual/              # 명시적으로 실행하는 실제 모델 역할 평가
     └── integration/
         └── worker-pool/     # 원본 PH-CMS·DB·브라우저·Pi SDK 전체 연동
 ```
@@ -112,6 +113,8 @@ npm run test:run --prefix frontend
 npm run build --prefix frontend
 bash pi/bin/test-projectman-worker-pool.sh ../ph-cms
 ```
+
+실제 모델을 사용하는 선택적 역할 평가는 `node pi/test/manual/evaluate-roles.mjs`로 실행한다. 자동 회귀 테스트에는 포함하지 않으며 모델 인증과 사용량이 발생한다. 카운터 데모 실행기와 구형 제한 프로세스·출력 파서는 제거했다. 현재 개발 실행 검증은 워커 SDK 회귀와 `test-projectman-worker-pool.sh`가 담당한다. 기존 PH-CMS의 구형 카운터 수동 평가 대신 이 s8 전체 연동 명령을 사용한다.
 
 ## 빠른 시작
 

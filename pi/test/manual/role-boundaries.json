@@ -117,5 +117,5 @@
       ]
     }
   ],
-  "t3": "The real PH-CMS + developer CLI + browser HITL scenario is evaluated separately by @ph-cms/server test:multi-agent."
+  "t3": "The real PH-CMS + persistent Pi workers + browser approval scenario is tested by bash pi/bin/test-projectman-worker-pool.sh."
 }

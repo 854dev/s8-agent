@@ -6,8 +6,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { Type } from 'typebox';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
-import { openManagerSession } from '../lib/manager/session.mjs';
-import { smokeSession } from '../lib/evaluation/development-smoke.mjs';
+import { openManagerSession } from './helpers/manager-session.mjs';
+import { runModelSession } from './helpers/model-session.mjs';
 import { developmentWorkspace } from '../lib/development/workspace.mjs';
 
 // Exercise the installed SDK's real HTTP streaming, tool dispatch and session
@@ -59,7 +59,7 @@ test('developer SDK streams a scoped workspace write and records the real tool r
   const f = await fixture(t, { name: 'workspace', args: { path: 'src/result.txt', content: 'developer-sdk-ok' } });
   const workspace = developmentWorkspace(f.root);
   const tool = { name: 'workspace', label: 'Workspace', description: 'Write a fixture file within the approved src directory.', parameters: Type.Object({ path: Type.String(), content: Type.String() }), async execute(_id, args) { return { content: [{ type: 'text', text: JSON.stringify(await workspace.write(args.path, args.content)) }] }; } };
-  const result = await smokeSession({ role: 'developer', prompt: 'Write the approved fixture file.', systemPrompt: 'Perform the approved task.', tools: [tool], runtime: f.runtime, model: f.model, run: { directory: f.root, workspace: f.root }, signal: AbortSignal.timeout(10000) });
+  const result = await runModelSession({ role: 'developer', prompt: 'Write the approved fixture file.', systemPrompt: 'Perform the approved task.', tools: [tool], runtime: f.runtime, model: f.model, run: { directory: f.root, workspace: f.root }, signal: AbortSignal.timeout(10000) });
   assert.equal(result, 'SDK 검증 완료');
   assert.equal(await readFile(path.join(f.root, 'src/result.txt'), 'utf8'), 'developer-sdk-ok');
   const events = (await readFile(path.join(f.root, 'developer.events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);

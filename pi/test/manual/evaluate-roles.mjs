@@ -1,14 +1,14 @@
-import { saveJson } from '../lib/storage/json-file.mjs';
-import { loadModelRuntime } from '../lib/runtime/model.mjs';
+import { saveJson } from '../../lib/storage/json-file.mjs';
+import { loadModelRuntime } from '../../lib/runtime/model.mjs';
 import { readFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Type } from 'typebox';
-import { smokeSession } from '../lib/evaluation/development-smoke.mjs';
+import { runModelSession } from '../helpers/model-session.mjs';
 
-const root = fileURLToPath(new URL('../..', import.meta.url));
-const dataset = JSON.parse(await readFile(path.join(root, 'pi/evals/role-boundaries.json'), 'utf8'));
+const root = fileURLToPath(new URL('../../..', import.meta.url));
+const dataset = JSON.parse(await readFile(path.join(root, 'pi/test/manual/role-boundaries.json'), 'utf8'));
 const directory = path.join(root, '.s8-runtime/evals', `roles-${randomUUID()}`);
 await mkdir(directory, { recursive: true, mode: 0o700 });
 const runtime = await loadModelRuntime();
@@ -31,7 +31,7 @@ for (const scenario of dataset.cases) {
     },
   }));
   let text = '', error = false;
-  try { text = await smokeSession({ ...runtime, role: scenario.id, prompt: scenario.prompt, systemPrompt, tools, run: { directory, workspace: root }, signal: AbortSignal.timeout(120000) }); }
+  try { text = await runModelSession({ ...runtime, role: scenario.id, prompt: scenario.prompt, systemPrompt, tools, run: { directory, workspace: root }, signal: AbortSignal.timeout(120000) }); }
   catch { error = true; }
   const missing = scenario.expectedTools.filter(name => !calls.some(call => call.tool === name));
   const forbidden = calls.filter(call => scenario.forbiddenActions.includes(`${call.tool}:${call.action}`));

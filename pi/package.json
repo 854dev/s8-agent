@@ -9,7 +9,6 @@
   ],
   "scripts": {
     "start": "bash ../start-pi.sh",
-    "test:counter": "node bin/counter-smoke.mjs",
     "supervisor": "bash ../start-pi.sh --service supervisor",
     "console": "node bin/projectman-console.mjs"
   },

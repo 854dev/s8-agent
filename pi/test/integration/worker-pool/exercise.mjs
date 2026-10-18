@@ -14,7 +14,7 @@ import { executeDeveloper } from '../../../lib/development/worker-session.mjs';
 import { developmentTick, waitForDevelopmentRuns, flushDevelopmentOutbox } from '../../../lib/development/supervisor.mjs';
 import { drainManagerInbox } from '../../../lib/manager/inbox.mjs';
 import { sendTelegram } from '../../../lib/telegram/notify.mjs';
-import { liveConsoleBrowser } from '../../../lib/evaluation/live-console-browser.mjs';
+import { liveConsoleBrowser } from '../../helpers/console-browser.mjs';
 
 /** Full DB/HTTP/browser/SDK/socket flow; external model and Telegram accounts are never used. */
 export async function exerciseProjectmanWorkerPool({ baseUrl, managerToken, workspaceUid, login }) {
