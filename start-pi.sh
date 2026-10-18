@@ -4,7 +4,7 @@
 # Telegram은 시작 메뉴에서 유지/가져오기를 선택한다. --telegram take/off로 명시할 수 있다.
 # 루트 .env의 연결 설정을 자식 프로세스에 전달하며 인증 값은 출력하지 않는다.
 # 모델 인증·대화는 .pi-runtime에 보관한다. 처음 실행하면 Pi에서 /login을 수행한다.
-# Pi와 두 서비스는 하나의 tmux 세션의 별도 창에서 유지된다. --no-scheduler / --no-supervisor로 자동 시작을 제외한다.
+# 매니저·공유 서비스는 런타임 창에, 개발 Pi 워커는 전용 공유 tmux 세션에 유지한다. --no-scheduler / --no-supervisor로 자동 시작을 제외한다.
 # 제외 옵션은 이미 실행 중인 공유 서비스를 종료하지 않는다.
 set -euo pipefail
 
@@ -13,7 +13,7 @@ AGENT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # 서비스 전용 진입점: 통합 실행의 tmux 자식과 수동 진단이 같은 경로를 사용한다.
 if [[ "${1:-}" == --service ]]; then
     service="${2:-}"
-    case "$service" in scheduler|supervisor) ;; *) echo '서비스는 scheduler 또는 supervisor여야 합니다.' >&2; exit 2 ;; esac
+    case "$service" in scheduler|supervisor|worker) ;; *) echo '서비스는 scheduler, supervisor 또는 worker여야 합니다.' >&2; exit 2 ;; esac
     shift 2
     if [[ "$service" == scheduler && $# -gt 0 ]]; then echo '스케줄러는 추가 인자를 받지 않습니다.' >&2; exit 2; fi
     if [[ "$service" == supervisor && "${1:-}" == --help ]]; then exec node "$AGENT_ROOT/pi/bin/supervisor.mjs" --help; fi
@@ -29,6 +29,7 @@ if [[ "${1:-}" == --service ]]; then
         [ -x "$S8_PI_BINARY" ] || { echo 'Pi is not installed; run npm ci --ignore-scripts --prefix pi.' >&2; exit 1; }
         cd "$KNOWLEDGE_BASE_ROOT"
     fi
+    if [[ "$service" == worker ]]; then exec node "$AGENT_ROOT/pi/bin/developer.mjs" "$@"; fi
     exec node "$AGENT_ROOT/pi/bin/$service.mjs" "$@"
 fi
 # 서비스 제어 옵션은 Pi에 넘기지 않고 여기서 소비한다. 옵션 위치와 관계없이 처리한다.
@@ -81,7 +82,7 @@ if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
         '  (인자 없음)      프로젝트 / 로컬 모드 선택' \
         '  --no-scheduler   스케줄러 자동 시작 제외' \
         '  --no-supervisor  개발 슈퍼바이저 자동 시작 제외' \
-        '  --service 종류   scheduler 또는 supervisor만 전경 실행 (감독 --check 지원)' \
+        '  --service 종류   scheduler 또는 supervisor 전경 실행 (내부 worker 지원, 감독 --check 지원)' \
         '  --telegram take  이 세션으로 Telegram 연결 이전 (단독 --telegram도 호환)' \
         '  --telegram off   이 세션의 Telegram 연결 비활성 (--no-telegram도 호환)' \
         '  --no-telegram    Telegram 없이 단독 실행' \

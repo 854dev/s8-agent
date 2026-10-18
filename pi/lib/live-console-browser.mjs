@@ -6,8 +6,8 @@ import { pathToFileURL } from 'node:url';
 import { createProjectmanConsole } from './projectman-console.mjs';
 
 // Integration-test host only: serves the built app and the real console adapter.
-export async function liveConsoleBrowser({ root, baseUrl, directory, login }) {
-  const api = createProjectmanConsole({ root, baseUrl });
+export async function liveConsoleBrowser({ root, baseUrl, directory, login, runtimeRoot = root }) {
+  const api = createProjectmanConsole({ root: runtimeRoot, baseUrl });
   const dist = path.join(root, 'frontend/dist');
   const web = http.createServer(async (req, res) => {
     if (req.url.startsWith('/api/projectman/')) { api.emit('request', req, res); return; }
@@ -29,7 +29,7 @@ export async function liveConsoleBrowser({ root, baseUrl, directory, login }) {
     const page = await browser.newPage({ viewport: { width: 1300, height: 1000 } });
     const origin = `http://127.0.0.1:${web.address().port}`;
     return {
-      page,
+      page, origin,
       async open(uid) {
         await page.goto(`${origin}/s8/?task=${uid}`);
         await page.getByLabel('이메일', { exact: true }).fill(login.email);

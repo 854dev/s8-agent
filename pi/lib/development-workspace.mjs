@@ -3,7 +3,6 @@ import { promisify } from 'node:util';
 import { mkdir, readFile, writeFile, lstat, readdir, realpath, unlink, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { boundedCommand, SMOKE_IMAGE } from './development-smoke.mjs';
 
 const exec = promisify(execFile);
 export const safePath = value => typeof value === 'string' && value.length > 0 && !path.isAbsolute(value) && !value.includes('\\') && value.split('/').every(part => part && part !== '..' && part !== '.' && !/secret/i.test(part) && !['.git', '.env', '.pi-runtime', '.s8-runtime', 'auth.json', 'firebase.json', 'node_modules'].includes(part) && (!part.startsWith('.env.') || part === '.env.example')) && !/\.(pem|key)$/i.test(value);
@@ -101,15 +100,6 @@ export async function workspacePatch(worktree, baseline = 'HEAD') {
     catch (error) { if (error.code !== 1) throw error; patch += error.stdout; }
   }
   return patch;
-}
-
-export async function developmentCommand({ root, worktree, name, command: shell, policy, runId, signal }) {
-  const command = shell ? { argv: ['sh', '-lc', shell], network: 'bridge' } : policy.commands[name] ?? { argv: ['sh', '-lc', name], network: 'bridge' };
-  if (!command.argv?.length || command.argv.some(arg => typeof arg !== 'string' || arg.includes('\0'))) throw new Error('Invalid command');
-  const containerName = `s8-dev-${runId}`;
-  const args = ['run', '--rm', '--init', '--name', containerName, '--user', `${process.getuid()}:${process.getgid()}`, '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '128', '--cpus', '2', '--memory', '2g', '--read-only', '--tmpfs', '/tmp:rw,nosuid,size=512m', '--network', command.network, '--mount', `type=bind,source=${worktree},target=/work`, '--workdir', '/work', '--env', 'npm_config_cache=/tmp/npm-cache', command.image ?? policy.image ?? SMOKE_IMAGE, ...command.argv];
-  try { return await boundedCommand('docker', args, { cwd: root, signal, timeoutMs: policy.maxCommandSeconds * 1000 }); }
-  finally { await boundedCommand('docker', ['rm', '-f', containerName], { timeoutMs: 10000 }); }
 }
 
 /** Import incremental task patches in dependency order; keep a durable input tree. */

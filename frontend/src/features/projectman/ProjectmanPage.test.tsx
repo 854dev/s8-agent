@@ -45,21 +45,23 @@ test.each([false, true])('event pagination supports legacy and cursor APIs (curs
   await waitFor(() => expect(screen.getByRole('button', { name: '기록 더 보기' })).toBeDisabled())
 })
 
-test('a renewed write session preserves the form and retries only on an explicit click with the same request ID', async () => {
+test('a renewed approval session preserves the same request ID for an explicit retry', async () => {
   const f = fixture(), operations: Record<string, unknown>[] = []
+  f.detail.execution.state = 'todo'; f.detail.execution.preflightReviewed = true
+  delete f.detail.execution.workflow!.review
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith('/workflow')) {
       operations.push(JSON.parse(String(init?.body)))
       if (operations.length === 1) return Response.json({ code: 'SESSION_RENEWED', error: '세션 갱신 · 같은 요청으로 다시 시도하세요.' }, { status: 401 })
+      return Response.json({ state: 'ready' })
     }
     return f.fetcher(url, init)
   }))
   const user = userEvent.setup(); render(<ProjectmanPage />)
-  await user.type(await screen.findByRole('textbox', { name: '내 답변' }), '확인했습니다.')
-  await user.click(screen.getByRole('button', { name: '답변 저장' }))
+  await user.click(await screen.findByRole('checkbox', { name: '매니저와 논의한 최종 계획을 확인하고 이 버전으로 실행을 요청합니다.' }))
+  await user.click(screen.getByRole('button', { name: '최종 계획 확정 · 실행' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('세션 갱신')
-  expect(operations).toHaveLength(1); expect(screen.getByRole('button', { name: '로그아웃' })).toBeInTheDocument()
-  expect(screen.getByRole('textbox', { name: '내 답변' })).toHaveValue('확인했습니다.')
+  expect(operations).toHaveLength(1)
   await user.click(screen.getByRole('button', { name: '같은 요청 확인·재시도' }))
   await waitFor(() => expect(operations).toHaveLength(2))
   expect(operations[1].requestId).toBe(operations[0].requestId)
@@ -82,23 +84,16 @@ test('shows the original request, question, reason, choices and scope before a h
   expect(await screen.findByRole('heading', { name: '음수를 허용할까요?' })).toBeInTheDocument()
   expect(screen.getByText('React Vite 카운터')).toBeInTheDocument()
   expect(screen.getByText('요구사항이 없습니다.')).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: '답변 확정 · 재개 요청' })).toBeDisabled()
+  expect(screen.queryByRole('button', { name: '답변 확정 · 재개 요청' })).not.toBeInTheDocument()
   expect(screen.getByText('/tmp/repo')).toBeInTheDocument()
 })
 
-test('draft does not resume; explicit confirmation records a separate resume request', async () => {
-  const f = fixture(); const user = userEvent.setup(); render(<ProjectmanPage />)
-  const answer = await screen.findByRole('textbox', { name: '내 답변' })
-  await user.type(answer, '음수를 허용합니다.')
-  await user.click(screen.getByRole('button', { name: '답변 저장' }))
-  await waitFor(() => expect(f.operations).toHaveLength(1))
-  expect(f.operations[0].action).toBe('draft'); expect(f.detail.execution.state).toBe('blocked')
-  await user.click(screen.getByRole('checkbox', { name: '답변과 승인 범위를 확인했습니다.' }))
-  await user.click(screen.getByRole('button', { name: '답변 확정 · 재개 요청' }))
-  await waitFor(() => expect(f.operations).toHaveLength(2))
-  expect(f.operations[1].action).toBe('decide'); expect(f.operations[1].expectedRevision).toBe(5)
-  expect(await screen.findByText('결정 확정 · 재개 대기')).toBeInTheDocument()
-  expect(screen.queryByText('재개됨')).not.toBeInTheDocument()
+test('legacy review results remain readable without resume controls', async () => {
+  const f = fixture(); f.detail.execution.workflow!.run = { id: 'old-run', status: 'finished', startedAt: '2026-10-19' }; render(<ProjectmanPage />)
+  expect(await screen.findByText('이전 검토 요청입니다. 필요한 변경은 새 work로 등록하세요.')).toBeInTheDocument()
+  expect(screen.queryByRole('textbox', { name: '내 답변' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '답변 저장' })).not.toBeInTheDocument()
+  expect(f.operations).toHaveLength(0)
 })
 
 test('labels resumed only after a run is bound to the decision, and cancellation takes precedence', () => {
@@ -304,4 +299,45 @@ test('reviewed work displays resolved decisions and allows explicit final approv
   await user.click(screen.getByRole('checkbox', { name: '매니저와 논의한 최종 계획을 확인하고 이 버전으로 실행을 요청합니다.' }))
   await user.click(button)
   await waitFor(() => expect(operations[0]?.action).toBe('authorize'))
+})
+
+test('completion shows results and worker identity without approval or retry buttons', async () => {
+  const f = fixture()
+  f.detail.execution.state = 'done'; delete f.detail.execution.workflow!.review
+  f.detail.execution.workflow!.run = { id: 'run-done', workerId: 'worker-2', status: 'finished', startedAt: '2026-10-19' }
+  f.detail.execution.workflow!.result = { summary: '개발과 검증 완료', changedFiles: ['src/App.tsx'], verification: [{ name: 'test', ok: true, summary: 'passed' }] }
+  render(<ProjectmanPage />)
+  expect(await screen.findByText('개발과 검증 완료')).toBeInTheDocument()
+  expect(screen.getByText('finished · 워커 worker-2')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '결과 확인 · 작업 완료' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '같은 계획으로 재개' })).not.toBeInTheDocument()
+})
+
+test('planning answers are saved before execution without reopening a completed work', async () => {
+  const f = fixture(), user = userEvent.setup(); render(<ProjectmanPage />)
+  await user.type(await screen.findByRole('textbox', { name: '내 답변' }), '최솟값은 0입니다.')
+  await user.click(screen.getByRole('button', { name: '답변 저장' }))
+  await waitFor(() => expect(f.operations).toHaveLength(1))
+  expect(f.operations[0].action).toBe('draft')
+  await user.click(screen.getByRole('checkbox', { name: '답변과 승인 범위를 확인했습니다.' }))
+  await user.click(screen.getByRole('button', { name: '답변 확정 · 계획 반영' }))
+  await waitFor(() => expect(f.operations).toHaveLength(2))
+  expect(f.operations[1].action).toBe('decide')
+})
+
+
+test.each([false, true])('human completion requires a manager review (reviewed=%s)', async reviewed => {
+  const f = fixture()
+  f.detail.execution.state = 'review'; delete f.detail.execution.workflow!.review
+  f.detail.execution.workflow!.result = { summary: '개발 보고 완료', changedFiles: [], verification: [] }
+  if (reviewed) f.detail.execution.workflow!.managerReview = { message: '검증 근거를 확인했습니다.' }
+  render(<ProjectmanPage />)
+  await screen.findByText('개발 보고 완료')
+  if (reviewed) {
+    await userEvent.click(screen.getByRole('button', { name: '결과 확인 · 작업 완료' }))
+    await waitFor(() => expect(f.operations[0]?.action).toBe('complete'))
+  } else {
+    expect(screen.getByText('매니저의 결과 검토를 기다리고 있습니다.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '결과 확인 · 작업 완료' })).not.toBeInTheDocument()
+  }
 })

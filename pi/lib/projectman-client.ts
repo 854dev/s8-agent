@@ -149,7 +149,7 @@ export class ProjectmanClient {
     if (type === 'project' && (!repoPath || !repoPath.startsWith('/'))) throw new Error('New projects require an absolute repoPath');
     return this.request<ProjectmanContent>('contents', { method: 'POST', body: JSON.stringify({
       channelSlug: 'ph-projectman', parentUid, type, title, text, tags, status: 'published',
-      attributes: ['task', 'subtask'].includes(type) ? { state: 'todo', autorun: false, ...(type === 'subtask' ? { timeBudgetMinutes: 20 } : {}) } : type === 'project' ? { repoPath } : {},
+      attributes: ['task', 'subtask'].includes(type) ? { state: 'todo', autorun: false } : type === 'project' ? { repoPath } : {},
     }) });
   }
 

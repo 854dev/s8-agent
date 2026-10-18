@@ -95,3 +95,23 @@ test('scheduler delivery uses the shared YAML target, never legacy IDs, and inva
   await assert.rejects(runScheduler(options), /Invalid s8-config.yml/);
   await assert.rejects(readFile(path.join(root, 'owner.lock')), { code: 'ENOENT' });
 });
+
+test('shared config validates worker count and public work URL without changing Telegram settings', async t => {
+  const { loadS8Config } = await import('../lib/telegram-config.mjs');
+  const root = await mkdtemp(path.join(os.tmpdir(), 's8-workers-config-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  assert.equal(loadS8Config(root, {}).workers.count, 2);
+  const file = path.join(root, 's8-config.yml');
+  await writeFile(file, 'telegram: {}\nworkers:\n  count: 3\npublicUrl: https://s8.example.invalid/s8/\n');
+  assert.equal(loadS8Config(root, {}).workers.count, 3);
+  assert.equal(loadS8Config(root, {}).publicUrl, 'https://s8.example.invalid/s8/');
+  assert.equal(loadTelegramConfig(root, legacy).scheduleChatId, null);
+  for (const count of ['0', '-1', '1.5', '"2"', '9007199254740992']) {
+    await writeFile(file, `telegram: {}\nworkers:\n  count: ${count}\n`);
+    assert.throws(() => loadS8Config(root, {}), /workers.count/);
+  }
+  for (const url of ['ftp://s8.example.invalid', 'https://user:password@s8.example.invalid', 'https://s8.example.invalid/?token=x']) {
+    await writeFile(file, `telegram: {}\npublicUrl: ${url}\n`);
+    assert.throws(() => loadS8Config(root, {}), /publicUrl/);
+  }
+});

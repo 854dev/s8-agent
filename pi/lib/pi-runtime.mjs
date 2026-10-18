@@ -51,7 +51,8 @@ export async function startPiRuntime(root, { session = 's8-main', args = [], sch
     }
     if (pi && sameProfile && !launchArgs.includes('--continue') && !launchArgs.includes('--no-session')) launchArgs.push('--continue');
     await stopWindow(run, root, session, 'pi');
-    if (mode === 'project') await startPiServices(root, { session, scheduler, supervisor, restart: true, run });
+    const services = mode === 'project' ? await startPiServices(root, { session, scheduler, supervisor, restart: true, run }) : [];
+    const workers = services.find(service => service.service === 'workers');
     const command = ['bash', path.join(root, 'start-pi.sh'), '--managed', '--mode', mode, '--cwd', cwd, telegram ? '--telegram' : '--no-telegram', ...launchArgs].map(quote).join(' ');
     await run(['set-option', '-t', session, '@s8-telegram', telegram ? 'take' : 'off']);
     await run(['set-option', '-t', session, '@s8-mode', mode]);
@@ -67,6 +68,6 @@ export async function startPiRuntime(root, { session = 's8-main', args = [], sch
     const telegramStatus = currentOwner === session
       ? `Telegram: ${previousOwner && previousOwner !== session ? previousOwner + ' → ' : ''}${session} 연결`
       : `Telegram: ${currentOwner ? currentOwner + ' 연결 유지' : '연결 없음'} (이 세션: ${telegram ? '연결 대기' : '꺼짐'})`;
-    return { session, windows: active.map(window => window.name), telegramStatus };
+    return { session, windows: active.map(window => window.name), telegramStatus, workers };
   });
 }

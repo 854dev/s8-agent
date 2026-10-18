@@ -35,7 +35,7 @@ async function fixture(t, count = 1) {
         row.state = 'doing'; row.workflow.run = { id: operation.runId };
       } else if (operation.action === 'report') {
         if (row.state !== 'doing' || row.workflow.run.id !== operation.runId) throw new Error('PH-CMS request failed (HTTP 409)');
-        row.state = operation.report.status === 'completed' ? 'review' : operation.report.status === 'continue' ? 'ready' : 'blocked'; row.workflow.result = operation.report; reports.push(operation);
+        row.state = operation.report.status === 'completed' ? 'review' : 'blocked'; row.workflow.result = operation.report; reports.push(operation);
       } else if (operation.action === 'request_review') { row.state = 'blocked'; row.workflow.review = { pending: true, ...operation.question }; }
       row.workflow.revision++;
       const response = structuredClone(row); applied.set(operation.requestId, response); return response;
@@ -90,29 +90,15 @@ test('missing or outdated human plan confirmation never starts a worker', async 
   }
 });
 
-test('developer checkpoints continue automatically without creating a decision question', async t => {
-  const f = await fixture(t);
-  await developmentTick({ ...f, allowedRoot: f.base, worker: async () => ({ report: { status: 'continue', summary: 'Chose existing pattern; continue with validation', question: { question: 'Legacy preference question' } } }) });
-  assert.equal(f.rows.get('task0').state, 'ready');
+test('incomplete reports become failed work and never execute automatically again', async t => {
+  const f = await fixture(t); let executions = 0;
+  const worker = async () => { executions++; return { report: { status: 'continue', summary: 'Unfinished implementation', question: { question: 'Legacy question' } } }; };
+  await developmentTick({ ...f, worker });
+  assert.equal(f.rows.get('task0').state, 'blocked');
+  assert.equal(f.reports[0].report.status, 'failed');
   assert.equal(f.reports[0].report.question, undefined);
-  await developmentTick({ ...f, allowedRoot: f.base, worker: async () => ({ report: { status: 'completed', summary: 'Validated existing implementation choice' } }) });
-  assert.equal(f.rows.get('task0').state, 'review');
-});
-
-test('independent verification failure resumes repair without asking the human or manager', async t => {
-  const f = await fixture(t), row = f.rows.get('task0');
-  row.workflow.spec.commandNames = ['test'];
-  f.policy.commands.test = { argv: ['fixture-test'], network: 'none' };
-  row.s8Preflight.fingerprint = preflightFingerprint(await f.client.get('task0'), row.workflow);
-  let ok = false;
-  const options = { ...f, allowedRoot: f.base, candidate: { uid: 'task0' }, worker: async () => ({ report: { status: 'completed', summary: 'Implementation ready' } }), command: async () => ({ ok, output: ok ? 'passed' : 'assertion failed' }) };
-  assert.equal((await runDevelopmentTask(options)).status, 'continue');
-  assert.equal(row.state, 'ready');
-  assert.equal(f.reports[0].report.question, undefined);
-  assert.equal(f.reports[0].report.verification[0].ok, false);
-  ok = true;
-  assert.equal((await runDevelopmentTask(options)).status, 'completed');
-  assert.equal(row.state, 'review');
+  await developmentTick({ ...f, worker });
+  assert.equal(executions, 1);
 });
 
 test('dirty source repository does not block execution or change user files', async t => {
@@ -156,28 +142,20 @@ test('revoked execution aborts a running worker and preserves the stopped report
   assert.match(f.reports[0].report.summary, /Execution stopped/)
 })
 
-test('exhausted run budget preserves work without a question or new execution', async t => {
-  const f = await fixture(t)
-  f.rows.get('task0').workflow.runCount = 6
-  let invoked = false
-  const result = await runDevelopmentTask({ ...f, allowedRoot: f.base, candidate: { uid: 'task0' }, worker: async () => { invoked = true } })
-  assert.equal(result.status, 'budget_exhausted')
-  assert.equal(invoked, false)
-  assert.equal(f.rows.get('task0').workflow.review, undefined)
-})
-
-test('per-repository concurrency one serializes otherwise independent tasks', async t => {
-  const f = await fixture(t, 2)
-  f.policy.perRepoConcurrency = 1
-  let active = 0, max = 0
-  const results = await developmentTick({ ...f, allowedRoot: f.base, worker: async () => {
-    max = Math.max(max, ++active)
-    await new Promise(resolve => setTimeout(resolve, 30)); active--
-    return { report: { status: 'completed', summary: 'done', verification: [] } }
-  } })
-  assert.equal(results.length, 2)
-  assert.equal(max, 1)
-})
+test('legacy execution budgets and per-repository limits do not restrict the pool', async t => {
+  const f = await fixture(t, 2);
+  for (const row of f.rows.values()) { row.workflow.runCount = 100; row.workflow.spec.maxRuns = 1; }
+  f.policy.perRepoConcurrency = 1;
+  let active = 0, max = 0;
+  const results = await developmentTick({ ...f, worker: async () => {
+    max = Math.max(max, ++active);
+    await new Promise(resolve => setTimeout(resolve, 30)); active--;
+    return { report: { status: 'completed', summary: 'done' } };
+  } });
+  assert.equal(results.length, 2);
+  assert.equal(max, 2);
+  assert.ok([...f.rows.values()].every(row => row.state === 'review'));
+});
 
 test('deletion patches preserve protected file and directory checks', async t => {
   const f = await fixture(t)
@@ -196,7 +174,7 @@ test('deletion patches preserve protected file and directory checks', async t =>
 })
 
 
-test('incremental dependency patches compose into a parent integration and survive retry', async t => {
+test('incremental dependency patches compose into a parent integration', async t => {
   const f = await fixture(t, 3);
   const run = async (uid, worker) => runDevelopmentTask({ ...f, candidate: { uid }, worker });
   const first = await run('task0', async request => {
@@ -213,7 +191,7 @@ test('incremental dependency patches compose into a parent integration and survi
   });
   assert.equal(second.status, 'completed'); f.rows.get('task1').state = 'done';
   const parent = f.rows.get('task2'); parent.workflow.spec.dependsOn = ['task0', 'task1'];
-  for (const status of ['continue', 'completed']) {
+  for (const status of ['completed']) {
     const integrated = await run('task2', async request => {
       assert.equal((await developmentWorkspace(request.run.workspace).read('src/shared.txt')).content, 'first\nsecond\n');
       return { report: { status, summary: 'Combined feature verification' } };
@@ -226,7 +204,59 @@ test('incremental dependency patches compose into a parent integration and survi
 test('failed worker verification is preserved even when no named supervisor checks exist', async t => {
   const f = await fixture(t);
   const result = await runDevelopmentTask({ ...f, candidate: { uid: 'task0' }, worker: async () => ({ report: { status: 'completed', summary: 'Claimed complete', verification: [{ name: 'custom test', ok: false, summary: 'failed' }] } }) });
-  assert.equal(result.status, 'continue');
+  assert.equal(result.status, 'failed');
   assert.equal(f.reports[0].report.verification[0].ok, false);
   assert.equal(f.reports[0].report.question, undefined);
+});
+
+test('Telegram retry does not repeat the server report or manager receipt', async t => {
+  const f = await fixture(t);
+  await developmentTick({ ...f, worker: async () => ({ report: { status: 'completed', summary: 'done', verification: [] } }) });
+  const [runId] = await readdir(path.join(f.root, '.s8-runtime/runs'));
+  const settings = { publicUrl: 'https://s8.example.invalid/s8/', telegram: { scheduleChatId: '123' } };
+  let attempts = 0;
+  const notify = async message => { attempts++; assert.ok(message.includes(`task=task0&run=${runId}`)); if (attempts === 1) throw new Error('unavailable'); return true; };
+  await flushDevelopmentOutbox({ ...f, settings, notify });
+  const inbox = path.join(f.root, '.s8-runtime/manager-inbox', `${runId}.json`);
+  const received = { ...JSON.parse(await readFile(inbox, 'utf8')), receivedAt: 'fixture' };
+  await writeFile(inbox, JSON.stringify(received));
+  await Promise.all([flushDevelopmentOutbox({ ...f, settings, notify }), flushDevelopmentOutbox({ ...f, settings, notify })]);
+  assert.equal(attempts, 2);
+  assert.equal(f.reports.length, 1);
+  assert.equal(JSON.parse(await readFile(inbox, 'utf8')).receivedAt, 'fixture');
+  const pending = JSON.parse(await readFile(path.join(f.root, '.s8-runtime/runs', runId, 'outbox.json'), 'utf8'));
+  assert.equal(pending.telegramDelivered, true);
+});
+
+test('lost claim response keeps its original run and is recovered without developer execution', async t => {
+  const f = await fixture(t), apply = f.client.workflow;
+  let executed = false;
+  f.client.workflow = async (uid, operation) => { const result = await apply(uid, operation); if (operation.action === 'claim') throw new Error('response lost'); return result; };
+  await runDevelopmentTask({ ...f, candidate: { uid: 'task0' }, workerId: 'worker-1', worker: async () => { executed = true; } });
+  assert.equal(executed, false);
+  const runId = f.rows.get('task0').workflow.run.id;
+  const locks = await readdir(path.join(f.root, '.s8-runtime/development-locks'));
+  assert.equal(locks.length, 1);
+  await recoverDevelopmentRuns(f);
+  assert.equal(f.rows.get('task0').state, 'blocked');
+  assert.equal(f.reports[0].runId, runId);
+});
+
+test('explicit worker assignments route each UID to the matching idle slot', async t => {
+  const f = await fixture(t, 2), assigned = [];
+  f.rows.get('task0').workflow.assignment = { assignee: 'worker-2' };
+  f.rows.get('task1').workflow.assignment = { assignee: 'worker-1' };
+  await developmentTick({ ...f, worker: async request => {
+    assigned.push([request.task.uid, request.workerId]);
+    return { report: { status: 'completed', summary: 'done', verification: [] } };
+  } });
+  assert.deepEqual(assigned.sort(), [['task0', 'worker-2'], ['task1', 'worker-1']]);
+});
+
+test('historical ready work with a previous run is not automatically executed again', async t => {
+  const f = await fixture(t);
+  f.rows.get('task0').workflow.run = { id: randomUUID(), status: 'finished' };
+  const result = await runDevelopmentTask({ ...f, candidate: { uid: 'task0' }, worker: async () => assert.fail('Must create a new work instead') });
+  assert.equal(result.status, 'idle');
+  assert.equal(f.reports.length, 0);
 });

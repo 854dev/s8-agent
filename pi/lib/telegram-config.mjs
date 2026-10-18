@@ -29,14 +29,14 @@ export function telegramConfigFromEnv(env = process.env) {
 }
 
 /** Non-credential settings only. A present file is the sole authority, never merged with env IDs. */
-export function loadTelegramConfig(root = agentRoot, env = process.env) {
+export function loadS8Config(root = agentRoot, env = process.env) {
   const file = path.join(root, 's8-config.yml');
   let fd;
   try {
     if (!lstatSync(file).isFile()) throw new Error();
     fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   }
-  catch (error) { if (error.code === 'ENOENT') return telegramConfigFromEnv(env); throw new Error('Cannot open s8-config.yml as a regular file'); }
+  catch (error) { if (error.code === 'ENOENT') return { telegram: telegramConfigFromEnv(env), workers: { count: 2 }, publicUrl: null }; throw new Error('Cannot open s8-config.yml as a regular file'); }
   let data;
   try {
     const stat = fstatSync(fd);
@@ -49,6 +49,20 @@ export function loadTelegramConfig(root = agentRoot, env = process.env) {
       data = document.toJS({ maxAliasCount: 0 });
     } catch { throw new Error('Invalid s8-config.yml YAML; values are not displayed'); }
   } finally { closeSync(fd); }
-  if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => key !== 'telegram')) throw new Error('s8-config.yml supports only non-credential Telegram settings');
-  return normalize(data.telegram, 'file');
+  if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !['telegram', 'workers', 'publicUrl'].includes(key))) throw new Error('Invalid s8-config.yml settings');
+  const workers = data.workers ?? {};
+  if (!workers || typeof workers !== 'object' || Array.isArray(workers) || Object.keys(workers).some(key => key !== 'count') || !Number.isSafeInteger(workers.count ?? 2) || (workers.count ?? 2) < 1) throw new Error('workers.count must be a positive safe integer');
+  let publicUrl = null;
+  if (data.publicUrl != null) {
+    try {
+      const url = new URL(data.publicUrl);
+      if (typeof data.publicUrl !== 'string' || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
+      publicUrl = url.href;
+    } catch { throw new Error('publicUrl must be an HTTP(S) URL without credentials, query or fragment'); }
+  }
+  return { telegram: normalize(data.telegram ?? (data.workers ? {} : undefined), 'file'), workers: { count: workers.count ?? 2 }, publicUrl };
+}
+
+export function loadTelegramConfig(root = agentRoot, env = process.env) {
+  return loadS8Config(root, env).telegram;
 }

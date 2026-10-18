@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, realpath, mkdir, copyFile, writeFile, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, mkdir, copyFile, writeFile, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -18,9 +18,11 @@ async function fixture(t) {
   t.after(async () => { await run(['kill-server']).catch(() => {}); await rm(root, { recursive: true, force: true }); });
   for (const directory of ['pi/bin', 'pi/lib', 'pi/node_modules/.bin', 'tools']) await mkdir(path.join(root, directory), { recursive: true });
   await copyFile(new URL('../../start-pi.sh', import.meta.url), path.join(root, 'start-pi.sh'));
-  for (const file of ['bin/pi-runtime.mjs', 'bin/telegram-status.mjs', 'bin/pi-runtime-worker.mjs', 'bin/manager-options.mjs', 'lib/pi-runtime-restart.mjs', 'lib/full-restart.mjs', 'lib/pi-runtime.mjs', 'lib/pi-services.mjs', 'lib/tmux-windows.mjs', 'lib/managed-sessions.mjs', 'lib/manager-launch.mjs', 'lib/telegram-status.mjs']) {
+  for (const file of ['bin/pi-runtime.mjs', 'bin/telegram-status.mjs', 'bin/pi-runtime-worker.mjs', 'bin/manager-options.mjs', 'lib/pi-runtime-restart.mjs', 'lib/full-restart.mjs', 'lib/pi-runtime.mjs', 'lib/pi-services.mjs', 'lib/tmux-windows.mjs', 'lib/managed-sessions.mjs', 'lib/manager-launch.mjs', 'lib/telegram-status.mjs', 'lib/worker-pool.mjs', 'lib/telegram-config.mjs']) {
     await copyFile(new URL(`../${file}`, import.meta.url), path.join(root, 'pi', file));
   }
+  await symlink(new URL('../node_modules/yaml', import.meta.url).pathname, path.join(root, 'pi/node_modules/yaml'));
+  await writeFile(path.join(root, 'pi/bin/developer.mjs'), 'setInterval(() => {}, 1000);');
   for (const service of ['scheduler', 'supervisor']) await writeFile(path.join(root, `pi/bin/${service}.mjs`), `import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(path.join(root, 'service-starts'))}, JSON.stringify({service:${JSON.stringify(service)},pid:process.pid})+'\\n'); setInterval(() => {}, 1000);`);
   await writeFile(path.join(root, 'tools/tmux'), `#!/bin/sh\nexec ${quote(tmux)} -f /dev/null -L ${quote(socket)} "$@"\n`, { mode: 0o755 });
   await writeFile(path.join(root, 'pi/node_modules/.bin/pi'), `#!/usr/bin/env node
@@ -52,7 +54,7 @@ test('start-pi fully restarts Pi and both services, resumes the session and conn
   const result = await f.launch(['--model', 'fixture model']);
   assert.match(result.stdout, /tmux 세션: s8-main/);
   for (const name of ['shell', 'pi', 'scheduler', 'supervisor']) assert.ok(result.stdout.includes(`s8-main:${name}`));
-  assert.equal((await f.run(['list-sessions', '-F', '#S'])).stdout.trim(), 's8-main');
+  assert.ok((await f.run(['list-sessions', '-F', '#S'])).stdout.includes('s8-workers-'));
   assert.equal((await f.run(['list-clients'])).stdout.trim(), '');
   const record = JSON.parse((await readFile(path.join(f.root, 'starts'), 'utf8')).trim());
   assert.equal(record.session, 's8-main');
@@ -101,7 +103,7 @@ test('last launched Telegram session takes over; no-telegram sessions stay indep
   await f.launch([]);
   assert.deepEqual((await readFile(path.join(f.root, 'telegram'), 'utf8')).trim().split('\n'), ['s8-main', 's8-work', 's8-main']);
   const sessions = (await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n').sort();
-  assert.deepEqual(sessions, ['s8-local', 's8-main', 's8-work']);
+  assert.deepEqual(sessions.filter(name => !name.startsWith('s8-workers-')), ['s8-local', 's8-main', 's8-work']);
 });
 
 test('concurrent launchers serialize restarts without duplicate service processes', async t => {

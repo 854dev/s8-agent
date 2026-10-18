@@ -36,7 +36,7 @@ test('console login keeps user JWT in HttpOnly cookie and never returns it to JS
 test('decisions reject cross-origin writes and propagate version conflicts without secret error details', async t => {
   const { base, headers, operations } = await fixture(t);
   const url = `${base}/api/projectman/items/task-1/workflow`;
-  const input = { action: 'decide', expectedRevision: 0, requestId: 'fixture-request', answer: 'resume' };
+  const input = { action: 'authorize', expectedRevision: 0, requestId: 'fixture-request' };
   assert.equal((await fetch(url, { method: 'POST', headers: { ...headers, Origin: 'http://evil.invalid' }, body: JSON.stringify(input) })).status, 403);
   assert.equal(operations.length, 0);
   const conflict = await fetch(url, { method: 'POST', headers, body: JSON.stringify(input) });

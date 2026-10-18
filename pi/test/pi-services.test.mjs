@@ -25,11 +25,11 @@ test('default starts both services once and concurrent or later launchers reuse 
   const f = await fixture(t);
   await Promise.all([startPiServices(f.root, { run: f.run }), startPiServices(f.root, { run: f.run })]);
   const later = await startPiServices(f.root, { run: f.run });
-  assert.ok(later.every(item => item.reused));
+  assert.ok(later.filter(item => item.service !== 'workers').every(item => item.reused));
   const starts = (await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').sort();
-  assert.deepEqual(starts, ['scheduler', 'supervisor']);
+  assert.deepEqual(starts, ['scheduler', 'supervisor', 'worker', 'worker']);
   const names = (await f.run(['list-sessions', '-F', '#S'])).stdout;
-  assert.equal(names.trim(), 's8-main');
+  assert.ok(names.includes('s8-main')); assert.ok(names.includes('s8-workers-'));
   const windowNames = (await f.run(['list-windows', '-t', 's8-main', '-F', '#W'])).stdout.trim().split('\n').sort();
   assert.deepEqual(windowNames, ['scheduler', 'shell', 'supervisor']);
 });
@@ -38,7 +38,7 @@ test('each exclusion starts only the requested service; excluding both never inv
   for (const excluded of ['scheduler', 'supervisor']) {
     const f = await fixture(t);
     const results = await startPiServices(f.root, { run: f.run, [excluded]: false });
-    assert.equal(results.length, 1); assert.notEqual(results[0].service, excluded);
+    assert.equal(results.length, excluded === 'scheduler' ? 2 : 1); assert.notEqual(results[0].service, excluded);
   }
   const f = await fixture(t);
   assert.deepEqual(await startPiServices(f.root, { scheduler: false, supervisor: false, run: () => { throw new Error('Must not start'); } }), []);
@@ -78,7 +78,7 @@ test('another runtime links the same service windows without launching duplicate
     const id = async session => (await f.run(['display-message', '-p', '-t', `${session}:${service}`, '#{window_id}'])).stdout;
     assert.equal(await id('s8-main'), await id('s8-other'));
   }
-  assert.deepEqual((await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').sort(), ['scheduler', 'supervisor']);
+  assert.deepEqual((await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').sort(), ['scheduler', 'supervisor', 'worker', 'worker']);
 });
 
 test('restart replaces shared service processes in their existing linked windows', async t => {
@@ -91,7 +91,7 @@ test('restart replaces shared service processes in their existing linked windows
     const old = before.find(row => row[0] === name), fresh = after.find(row => row[0] === name);
     assert.equal(fresh[1], old[1]); assert.notEqual(fresh[2], old[2]);
   }
-  assert.equal((await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').length, 4);
+  assert.equal((await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').length, 6);
 });
 
 test('legacy service sessions are linked without restarting their process', async t => {
@@ -102,4 +102,20 @@ test('legacy service sessions are linked without restarting their process', asyn
   await startPiServices(f.root, { run: f.run, supervisor: false });
   assert.equal((await f.run(['display-message', '-p', '-t', 's8-main:scheduler', '#{pane_pid}'])).stdout, before);
   await assert.rejects(readFile(path.join(f.root, 'starts')), { code: 'ENOENT' });
+});
+
+test('worker pool uses configured count and canonical checkout identity across launchers', async t => {
+  const { ensureWorkerPool } = await import('../lib/worker-pool.mjs');
+  const f = await fixture(t);
+  await writeFile(path.join(f.root, 's8-config.yml'), 'telegram: {}\nworkers:\n  count: 3\n');
+  const first = await ensureWorkerPool(f.root, { run: f.run });
+  const second = await ensureWorkerPool(`${f.root}/`, { run: f.run });
+  assert.equal(first.session, second.session);
+  assert.equal(second.count, 3);
+  const names = (await f.run(['list-windows', '-t', first.session, '-F', '#W'])).stdout.trim().split('\n');
+  assert.deepEqual(names.filter(name => name.startsWith('worker-')).sort(), ['worker-1', 'worker-2', 'worker-3']);
+  await writeFile(path.join(f.root, 's8-config.yml'), 'telegram: {}\nworkers:\n  count: 2\n');
+  const deferred = await ensureWorkerPool(f.root, { run: f.run });
+  assert.equal(deferred.deferred, true, 'An unreachable worker is never assumed idle for resizing');
+  assert.equal(deferred.count, 3);
 });

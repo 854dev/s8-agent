@@ -62,7 +62,7 @@ test('parallel requests refresh expired access once, and a human decision execut
   const f = await fixture(t), cookie = jar(await login(f)); f.state.expired.add('fixture.access.0');
   const responses = await Promise.all(Array.from({ length: 6 }, () => f.request('/session', cookie)));
   assert.ok(responses.every(response => response.status === 200)); assert.equal(f.state.refreshCount, 1);
-  const decision = { action: 'decide', expectedRevision: 5, requestId: 'same-human-decision', reviewId: 'review-1', decision: 'resume', answer: 'Continue' };
+  const decision = { action: 'authorize', expectedRevision: 5, requestId: 'same-human-decision', planHash: 'confirmed-plan' };
   const response = await f.request('/items/task-1/workflow', cookie, decision);
   assert.equal(response.status, 200); assert.deepEqual(f.state.actions, [decision]); assert.equal(f.state.refreshCount, 1);
 });

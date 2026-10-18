@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtemp, mkdir, readFile, copyFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, copyFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { Type } from 'typebox';
@@ -26,8 +26,9 @@ async function fixture(t, tool) {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     const emit = (delta, finish_reason = null) => res.write(`data: ${JSON.stringify({ id: `fixture-${requests.length}`, object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta, finish_reason }] })}\n\n`);
     emit({ role: 'assistant' });
-    if (requests.length === 1) {
-      emit({ tool_calls: [{ index: 0, id: 'call_fixture', type: 'function', function: { name: tool.name, arguments: JSON.stringify(tool.args) } }] });
+    const step = (Array.isArray(tool) ? tool : [tool])[requests.length - 1];
+    if (step) {
+      emit({ tool_calls: [{ index: 0, id: 'call_fixture', type: 'function', function: { name: step.name, arguments: JSON.stringify(step.args) } }] });
       emit({}, 'tool_calls');
     } else { emit({ content: 'SDK 검증 완료' }); emit({}, 'stop'); }
     res.end('data: [DONE]\n\n');
@@ -63,4 +64,29 @@ test('developer SDK streams a scoped workspace write and records the real tool r
   assert.equal(await readFile(path.join(f.root, 'src/result.txt'), 'utf8'), 'developer-sdk-ok');
   const events = (await readFile(path.join(f.root, 'developer.events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
   assert.ok(events.some(event => event.type === 'tool_execution_end' && !event.isError));
+});
+
+
+test('worker SDK queries its assigned UID, writes in its worktree and blocks changes after report', async t => {
+  const { executeDeveloper } = await import('../lib/developer-session.mjs');
+  const runId = '11111111-1111-4111-8111-111111111111';
+  const f = await fixture(t, [
+    { name: 'projectman', args: { action: 'get', uid: 'task-1' } },
+    { name: 'write', args: { path: 'src/result.txt', content: 'worker-pool-sdk-ok' } },
+    { name: 'projectman', args: { action: 'report', uid: 'task-1', status: 'completed', summary: 'Verified implementation', verification: [] } },
+    { name: 'write', args: { path: 'src/result.txt', content: 'must not write' } },
+  ]);
+  await mkdir(path.join(f.root, 'agents/developer'), { recursive: true });
+  await mkdir(path.join(f.root, 'pi'));
+  await writeFile(path.join(f.root, 'pi/settings.json'), JSON.stringify({ defaultProvider: 's8-fixture', defaultModel: 'fixture' }));
+  await copyFile(new URL('../../agents/developer/WORKER_SYSTEM.md', import.meta.url), path.join(f.root, 'agents/developer/WORKER_SYSTEM.md'));
+  const result = await executeDeveloper({ root: f.root, task: { uid: 'task-1' }, run: { runId, workspace: f.root, directory: f.root } }, {
+    signal: AbortSignal.timeout(10000), runtimeFactory: async () => ({ runtime: f.runtime, model: f.model }),
+    client: { getWorkflow: async uid => ({ uid, state: 'doing', workflow: { run: { id: runId }, spec: { plan: 'Implement and verify' } } }) },
+  });
+  assert.equal(result.report.status, 'completed');
+  assert.equal(await readFile(path.join(f.root, 'src/result.txt'), 'utf8'), 'worker-pool-sdk-ok');
+  const report = JSON.parse(await readFile(path.join(f.root, 'worker-result.json'), 'utf8'));
+  assert.equal(report.summary, 'Verified implementation');
+  assert.ok(f.requests.at(-1).messages.some(message => message.role === 'tool' && JSON.stringify(message.content).includes('no changes after reporting')));
 });

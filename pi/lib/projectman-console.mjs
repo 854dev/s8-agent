@@ -76,7 +76,7 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
       const action = /^\/api\/projectman\/items\/([a-zA-Z0-9_-]+)\/workflow$/.exec(url.pathname);
       if (req.method === 'POST' && action) {
         const input = await body(req);
-        if (!['authorize', 'draft', 'decide', 'cancel', 'complete', 'recover', 'retry'].includes(input.action)) return json(res, 400, { error: '지원하지 않는 사용자 결정입니다.' });
+        if (!['authorize', 'draft', 'decide', 'complete', 'cancel', 'recover'].includes(input.action)) return json(res, 400, { error: '지원하지 않는 사용자 결정입니다.' });
         return json(res, 200, await client.workflow(action[1], input));
       }
       const events = /^\/api\/projectman\/runs\/([a-f0-9-]{36})\/events$/.exec(url.pathname);

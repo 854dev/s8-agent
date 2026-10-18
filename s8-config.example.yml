@@ -6,3 +6,9 @@ telegram:
   # 개인 알림은 해당 사용자의 chat ID, 그룹 알림은 허용된 그룹 chat ID를 지정한다.
   # 아직 대상을 지정하지 않을 때는 null로 두며 임의 수신자를 자동 선택하지 않는다.
   scheduleChatId: "123456789"
+
+# 프로젝트 모드 시작 시 준비할 Pi 워커 수. 변경은 전체 워커가 idle일 때 적용한다.
+workers:
+  count: 2
+# Telegram 알림에서 열 s8 화면의 공개 URL. 실제 배포 경로로 지정한다.
+publicUrl: null

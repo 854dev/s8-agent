@@ -1,9 +1,22 @@
 {
   "role": "developer",
   "systemPrompt": "SYSTEM.md",
-  "readOnlyTools": ["read", "grep", "find", "ls"],
+  "readOnlyTools": [
+    "read",
+    "grep",
+    "find",
+    "ls"
+  ],
   "writeExecutionEnabled": true,
   "workerSystemPrompt": "WORKER_SYSTEM.md",
-  "workerTools": ["workspace", "command", "finish"],
-  "policy": "policy.json"
+  "workerTools": [
+    "projectman",
+    "read",
+    "write",
+    "edit",
+    "bash",
+    "grep",
+    "find",
+    "ls"
+  ]
 }

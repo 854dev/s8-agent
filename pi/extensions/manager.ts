@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+import { drainManagerInbox } from '../lib/manager-inbox.mjs';
 import { Type } from 'typebox';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import projectman from './projectman.ts';
@@ -48,10 +50,14 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
     clearInterval(timer);
     if (!poll) return;
     let checking = false;
-    timer = setInterval(async () => {
-      if (checking || !ctx.isIdle() || !process.env.PHCMS_ACCESS_TOKEN) return;
+    const check = async () => {
+      if (checking || typeof ctx.isIdle !== 'function' || !ctx.isIdle()) return;
       checking = true;
       try {
+        await drainManagerInbox(fileURLToPath(new URL('../..', import.meta.url)), report => {
+          pi.sendMessage({ customType: 'projectman-completed', content: `작업 ${report.uid}, 실행 ${report.runId}의 보고가 도착했습니다. 상태: ${report.state}. 요약: ${report.summary ?? ''}\nworkflow_get으로 결과와 검증 근거를 확인하세요. review 상태라면 검토 후 review_result로 의견을 기록하고 사용자에게 최종 완료 확인을 안내하세요. 워커 실행은 종료됐으며 수정 요청은 새 work로 생성합니다.`, display: true }, { triggerTurn: true, deliverAs: 'followUp' });
+        });
+        if (!process.env.PHCMS_ACCESS_TOKEN) return;
         const client = projectmanFromEnv();
         const tasks = [...await client.list('task'), ...await client.list('subtask')];
         for (const item of tasks) {
@@ -60,19 +66,19 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
           const key = `${item.uid}:${workflow.revision}`;
           const needsPreflight = item.detail?.attributes.state === 'todo' && !hasReviewedPreflight(item, workflow);
           const needsReview = item.detail?.attributes.state === 'review' && !workflow.managerReview;
-          const needsFollowup = item.detail?.attributes.state === 'ready' && workflow.review?.decision === 'resume' && workflow.followup?.reviewId !== workflow.review.id;
           const humanQuestion = workflow.review?.pending;
-          const incomplete = item.detail?.attributes.state === 'blocked' && workflow.result && !workflow.review?.pending;
-          if (!seen.has(key) && (needsPreflight || needsReview || needsFollowup || humanQuestion || incomplete)) {
+          if (!seen.has(key) && (needsPreflight || humanQuestion || needsReview)) {
             seen.add(key);
             if (seen.size > 1000) seen.delete(seen.values().next().value!);
-            pi.sendMessage({ customType: 'projectman-update', content: `Projectman 작업 ${item.uid}에 새 계획·결과·장애가 있습니다. workflow_get으로 확인하세요. 실행 전 사람과 대화하고 최종 계획을 확정하세요. 확정 후 개발자의 구현 결정을 질문으로 돌리지 마세요. 미완료·판단·실행 장애·체크포인트를 검토하고 기존 계획이면 retry로 복구하며, 예산 소진 시 결과를 보존하세요. 파일·명령 범위 제한이나 부모 권한 검증은 요구하지 마세요. 완료 결과는 review_result로 검토하고 최종 완료와 구분하세요.`, display: true }, { triggerTurn: true, deliverAs: 'followUp' });
+            pi.sendMessage({ customType: 'projectman-update', content: `Projectman 작업 ${item.uid}에 새 계획·결과·장애가 있습니다. workflow_get으로 확인하세요. 실행 전 사람과 대화하고 최종 계획을 확정하세요. 확정 후 개발자의 구현 결정을 질문으로 돌리지 마세요. review 상태라면 결과와 검증 근거를 확인하고 review_result로 검토 의견을 기록하세요. 최종 complete는 사용자가 화면에서 처리합니다. 완료·실패 보고는 별도 inbox로도 전달됩니다. 수정이 필요하면 새로운 work를 생성하세요.`, display: true }, { triggerTurn: true, deliverAs: 'followUp' });
             break;
           }
         }
       } catch { /* Keep pending work in Projectman; retry on the next poll without exposing credentials. */ }
       finally { checking = false; }
-    }, 15000);
+    };
+    void check();
+    timer = setInterval(check, 15000);
     timer.unref();
   });
   pi.on('session_shutdown', () => { clearInterval(timer); });

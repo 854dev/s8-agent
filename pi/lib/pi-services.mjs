@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ensureWindow, stopWindow, windows, withTmuxLock, runTmux, quote } from './tmux-windows.mjs';
+import { ensureWorkerPool, workerStates } from './worker-pool.mjs';
 import { validSession } from './managed-sessions.mjs';
 import { readFile, mkdir, open, rm, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -23,6 +24,7 @@ export async function startPiServices(root, { session = 's8-main', scheduler = t
     if (owner !== root) throw new Error(`${session}은 이 저장소의 런타임 세션이 아닙니다.`);
   }
   const results = [];
+  if (supervisor) results.push({ service: 'workers', ...await ensureWorkerPool(root, { run }) });
   for (const [name, enabled] of Object.entries({ scheduler, supervisor })) {
     if (!enabled) continue;
     const service = definitions[name];
@@ -55,7 +57,7 @@ export async function startPiServices(root, { session = 's8-main', scheduler = t
           }
         }
       }
-      if (restart) {
+      if (restart && !(name === 'supervisor' && (await workerStates(root)).some(worker => worker.alive && worker.status !== 'idle'))) {
         await stopWindow(run, root, session, name);
         const file = path.join(root, service.lock);
         const deadline = Date.now() + 5000;

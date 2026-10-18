@@ -109,3 +109,18 @@ test('KB CRUD requires policy and current document version; protected paths rema
   await assert.rejects(kb.document('note.md'));
   for (const name of ['AGENTS.md', '../outside.md', '.hidden.md', 'secret.md', 'code.js']) await assert.rejects(kb.write(name, 'bad', null));
 });
+
+
+test('manager records result review through the existing workflow API', async t => {
+  const previous = { S8_PI_CONFIG_ROOT: process.env.S8_PI_CONFIG_ROOT, PHCMS_API_URL: process.env.PHCMS_API_URL, PHCMS_ACCESS_TOKEN: process.env.PHCMS_ACCESS_TOKEN, fetch: globalThis.fetch };
+  process.env.S8_PI_CONFIG_ROOT = '/tmp/s8-review-fixture/pi';
+  process.env.PHCMS_API_URL = 'http://127.0.0.1:1/api/v2'; process.env.PHCMS_ACCESS_TOKEN = 'fixture';
+  t.after(() => { globalThis.fetch = previous.fetch; for (const key of ['S8_PI_CONFIG_ROOT', 'PHCMS_API_URL', 'PHCMS_ACCESS_TOKEN']) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; } });
+  let request;
+  globalThis.fetch = async (url, options) => { request = { url: String(url), body: JSON.parse(options.body) }; return Response.json({ state: 'review', workflow: { managerReview: { message: 'Verified evidence' } } }); };
+  const tools = new Map();
+  manager({ on() {}, registerTool(tool) { tools.set(tool.name, tool); }, registerCommand() {} }, { poll: false });
+  await tools.get('projectman').execute('review', { action: 'review_result', uid: 'task-1', expectedRevision: 4, message: 'Verified evidence' });
+  assert.ok(request.url.endsWith('/items/task-1/workflow'));
+  assert.equal(request.body.action, 'review_result'); assert.equal(request.body.message, 'Verified evidence'); assert.equal(request.body.expectedRevision, 4);
+});
