@@ -226,18 +226,18 @@ test('creates a workspace and edits a selected workspace without sending managed
   await waitFor(() => expect(f.fetcher.mock.calls.some(([url, init]) => url.endsWith('/items/ws-a') && init?.method === 'PATCH')).toBe(true))
 })
 
-test('deletion needs an exact title and clears the deleted workspace URL after success', async () => {
+test('deletion needs no name input and clears the deleted workspace URL after success', async () => {
   const f = boardFixture(); const user = userEvent.setup(); render(<ProjectmanPage />)
   await user.click(await screen.findByRole('button', { name: /팀 B/ }))
   await user.click(screen.getByRole('button', { name: '워크스페이스 삭제' }))
   const form = screen.getByRole('form', { name: '워크스페이스 삭제' }), confirm = within(form).getByRole('button', { name: '삭제 확정' })
-  expect(confirm).toBeDisabled()
-  await user.type(within(form).getByLabelText('삭제 확인: 제목을 그대로 입력'), '팀 B')
+  expect(confirm).toBeEnabled()
+  expect(within(form).queryByRole('textbox')).not.toBeInTheDocument()
   await user.click(confirm)
   await waitFor(() => expect(new URLSearchParams(location.search).has('workspace')).toBe(false))
   const call = f.fetcher.mock.calls.find(([, init]) => init?.method === 'DELETE')!
-  expect(call[0]).toBe('/api/projectman/items/ws-b')
-  expect(JSON.parse(String(call[1]?.body))).toEqual({ title: '팀 B' })
+  expect(call[0]).toBe('/api/projectman/items/ws-b?cascade=true')
+  expect(call[1]?.body).toBeUndefined()
 })
 
 test('a blocked task deletion keeps its detail and confirmation for inspection', async () => {
@@ -246,11 +246,30 @@ test('a blocked task deletion keeps its detail and confirmation for inspection',
   render(<ProjectmanPage />)
   await user.click(await screen.findByRole('button', { name: '작업 삭제' }))
   const form = screen.getByRole('form', { name: '작업 삭제' })
-  await user.type(within(form).getByLabelText('삭제 확인: 제목을 그대로 입력'), f.detail.item.title)
   await user.click(within(form).getByRole('button', { name: '삭제 확정' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('실행을 종료하세요.')
   expect(screen.getByRole('heading', { name: '카운터 구현' })).toBeInTheDocument()
   expect(form).toBeInTheDocument()
+})
+
+test('deleting a project closes a selected descendant detail', async () => {
+  const f = boardFixture(); history.replaceState(null, '', '/s8/?task=task-1')
+  const original = globalThis.fetch
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => init?.method === 'DELETE' ? Response.json({ deleted: true, deletedUids: ['pa', f.detail.item.uid] }) : original(url, init)))
+  const user = userEvent.setup(); render(<ProjectmanPage />)
+  await screen.findByRole('heading', { name: '카운터 구현' })
+  await user.click(within(screen.getByRole('region', { name: '웹 앱' })).getByRole('button', { name: '프로젝트 삭제' }))
+  await user.click(within(screen.getByRole('form', { name: '프로젝트 삭제' })).getByRole('button', { name: '삭제 확정' }))
+  await waitFor(() => expect(new URLSearchParams(location.search).has('task')).toBe(false))
+  expect(screen.queryByRole('article', { name: '작업 상세' })).not.toBeInTheDocument()
+})
+
+test('an older server shows the cascade capability error without hiding it as an unknown write result', async () => {
+  const f = fixture(), user = userEvent.setup()
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => init?.method === 'DELETE' ? Response.json({ code: 'CASCADE_DELETE_UNAVAILABLE', error: 'PH-CMS 하위 삭제 지원을 먼저 적용하세요.' }, { status: 503 }) : f.fetcher(url, init)))
+  render(<ProjectmanPage />); await user.click(await screen.findByRole('button', { name: '작업 삭제' }))
+  await user.click(within(screen.getByRole('form', { name: '작업 삭제' })).getByRole('button', { name: '삭제 확정' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('PH-CMS 하위 삭제 지원을 먼저 적용하세요.')
 })
 
 test('pre-start work belongs to manager and cannot be authorized before review', async () => {

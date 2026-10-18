@@ -26,6 +26,10 @@ const rejectionCodes = new Map([
   ['Delete child resources first', 'CHILD_RESOURCES_EXIST'],
   ['Finish or stop workflow execution before deleting', 'EXECUTION_NOT_FINISHED'],
   ['Projectman parent was deleted', 'PARENT_CHANGED'],
+  ['Active or unsettled execution prevents tree deletion', 'TREE_EXECUTION_ACTIVE'],
+  ['Projectman resources are referenced by unfinished work outside the deletion tree', 'TREE_HAS_DEPENDENTS'],
+  ['Projectman deletion tree exceeds 5000 records; delete smaller subtrees', 'TREE_TOO_LARGE'],
+  ['Projectman dependency is missing or deleted', 'DEPENDENCY_CHANGED'],
   ['Project for this codebase already exists in this workspace; select its UID', 'PROJECT_ALREADY_EXISTS'],
   ['Project for this codebase already exists in this workspace', 'PROJECT_ALREADY_EXISTS'],
   ["Body cannot be empty when content-type is set to 'application/json'", 'JSON_BODY_REQUIRED'],
@@ -117,7 +121,7 @@ export class ProjectmanClient {
   }
 
   async capabilities() {
-    return this.request<{ workflowVersion: 2; safeResourceDelete?: boolean; humanDecisions: boolean; atomicClaims: boolean; idempotentReports: boolean; actorType?: string }>('projectman/capabilities');
+    return this.request<{ workflowVersion: 2; safeResourceDelete?: boolean; cascadeResourceDelete?: boolean; humanDecisions: boolean; atomicClaims: boolean; idempotentReports: boolean; actorType?: string }>('projectman/capabilities');
   }
 
   async workflow(uid: string, operation: Record<string, unknown>) {
@@ -160,8 +164,8 @@ export class ProjectmanClient {
   }
 
   async deleteResource(uid: string) {
-    await this.get(uid);
-    await this.request<void>(`contents/${encodeURIComponent(uid)}`, { method: 'DELETE' });
+    // The dedicated endpoint enforces channel scope and atomically deletes the resource tree.
+    return this.request<{ uid: string; deletedUids: string[]; deletedCount: number; retainedLogCount: number }>(`projectman/items/${encodeURIComponent(uid)}/tree`, { method: 'DELETE' }, 60000);
   }
 
   async bindProject(uid: string, repoPath: string) {

@@ -7,7 +7,7 @@ import os from 'node:os';
 import { preflightFingerprint } from '../lib/projectman-preflight.mjs';
 import { createProjectmanConsole } from '../lib/projectman-console.mjs';
 
-async function fixture(t, { capabilities = async () => ({ workflowVersion: 2, safeResourceDelete: true, actorType: 'human' }), reviewed = false, client = {} } = {}) {
+async function fixture(t, { capabilities = async () => ({ workflowVersion: 2, safeResourceDelete: true, cascadeResourceDelete: true, actorType: 'human' }), reviewed = false, client = {} } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-console-'));
   const operations = [];
   const workflow = { revision: 2, specHash: 'scope', spec: { plan: 'Finalized plan', decisionRefs: ['conversation:final-plan'] } };
@@ -60,7 +60,7 @@ test('expired sessions and agent-role JWTs cannot read tasks or submit human dec
 })
 
 
-test('resource CRUD requires a human same-origin session and validates parents and delete confirmation', async t => {
+test('resource CRUD requires a human same-origin session and deletes a tree without a title', async t => {
   const writes = [];
   const { base, headers } = await fixture(t, { client: {
     get: async uid => ({ uid, type: uid === 'ws' ? 'workspace' : 'task', title: '정확한 제목' }),
@@ -78,17 +78,18 @@ test('resource CRUD requires a human same-origin session and validates parents a
   assert.equal((await send('', 'POST', { type: 'workspace', title: '위조', text: '', attributes: { workflow: {} } })).status, 400);
   assert.equal((await send('/task-1', 'PATCH', { title: '수정', text: '본문' })).status, 200);
   assert.equal((await send('/task-1', 'PATCH', { title: '수정', text: '', attributes: {} })).status, 400);
-  assert.equal((await send('/task-1', 'DELETE', { title: '다른 제목' })).status, 409);
-  assert.equal((await send('/task-1', 'DELETE', { title: '정확한 제목' })).status, 200);
+  assert.equal((await fetch(`${base}/api/projectman/items/task-1?cascade=true`, { method: 'DELETE', headers: { ...headers, Origin: 'http://evil.invalid' } })).status, 403);
+  assert.equal((await fetch(`${base}/api/projectman/items/task-1`, { method: 'DELETE', headers })).status, 400);
+  assert.equal((await fetch(`${base}/api/projectman/items/task-1?cascade=true`, { method: 'DELETE', headers })).status, 200);
   assert.deepEqual(writes.map(call => call[0]), ['workspace', 'create', 'edit', 'delete']);
   assert.deepEqual(writes[1].slice(1), ['ws', 'project', '프로젝트', '', [], '/tmp/repo']);
 });
 
 test('resource deletion fails closed against an older PH-CMS server', async t => {
   let deleted = false;
-  const { base, headers } = await fixture(t, { capabilities: async () => ({ workflowVersion: 2, actorType: 'human' }), client: { deleteResource: async () => { deleted = true; } } });
-  const response = await fetch(`${base}/api/projectman/items/task-1`, { method: 'DELETE', headers, body: JSON.stringify({ title: 'Counter' }) });
-  assert.equal(response.status, 503); assert.equal(deleted, false);
+  const { base, headers } = await fixture(t, { capabilities: async () => ({ workflowVersion: 2, safeResourceDelete: true, actorType: 'human' }), client: { deleteResource: async () => { deleted = true; } } });
+  const response = await fetch(`${base}/api/projectman/items/task-1?cascade=true`, { method: 'DELETE', headers });
+  assert.equal(response.status, 503); assert.equal((await response.json()).code, 'CASCADE_DELETE_UNAVAILABLE'); assert.equal(deleted, false);
 });
 
 test('console forwards explicit human plan confirmation to the server independently of manager notes', async t => {

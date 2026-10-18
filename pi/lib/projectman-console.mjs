@@ -57,18 +57,16 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
         return json(res, 201, { item: created });
       }
       const item = /^\/api\/projectman\/items\/([a-zA-Z0-9_-]+)$/.exec(url.pathname);
-      if (item && ['PATCH', 'DELETE'].includes(req.method)) {
+      if (item && req.method === 'PATCH') {
         const input = await body(req);
-        if (typeof input.title !== 'string' || !input.title.trim() || input.title.length > 200 || Object.keys(input).some(key => !['title', ...(req.method === 'PATCH' ? ['text'] : [])].includes(key))) return json(res, 400, { error: '제목을 확인하세요.' });
-        if (req.method === 'PATCH') {
-          if (typeof input.text !== 'string' || input.text.length > 50000) return json(res, 400, { error: '본문을 확인하세요.' });
-          return json(res, 200, { item: await client.editResource(item[1], input.title.trim(), input.text) });
-        }
-        if ((await client.capabilities()).safeResourceDelete !== true) return json(res, 503, { error: 'PH-CMS에 안전한 리소스 삭제 지원을 먼저 적용해야 합니다.' });
-        const current = await client.get(item[1]);
-        if (input.title !== current.title) return json(res, 409, { error: '삭제할 항목의 현재 제목을 정확히 입력하세요.' });
-        await client.deleteResource(current.uid);
-        return json(res, 200, { deleted: true });
+        if (typeof input.title !== 'string' || !input.title.trim() || input.title.length > 200 || Object.keys(input).some(key => !['title', 'text'].includes(key))) return json(res, 400, { error: '제목을 확인하세요.' });
+        if (typeof input.text !== 'string' || input.text.length > 50000) return json(res, 400, { error: '본문을 확인하세요.' });
+        return json(res, 200, { item: await client.editResource(item[1], input.title.trim(), input.text) });
+      }
+      if (item && req.method === 'DELETE') {
+        if (url.searchParams.get('cascade') !== 'true') return json(res, 400, { code: 'CASCADE_CONFIRMATION_REQUIRED', error: '하위 자원 포함 삭제를 확인해야 합니다. 화면을 새로고침한 뒤 다시 삭제하세요.' });
+        if ((await client.capabilities()).cascadeResourceDelete !== true) return json(res, 503, { code: 'CASCADE_DELETE_UNAVAILABLE', error: 'PH-CMS에 하위 자원 일괄 삭제 지원을 먼저 적용해야 합니다.' });
+        return json(res, 200, { deleted: true, ...await client.deleteResource(item[1]) });
       }
       if (req.method === 'GET' && item) {
         const content = await client.get(item[1]);
@@ -122,6 +120,10 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
         CHILD_RESOURCES_EXIST: '하위 리소스를 먼저 삭제하세요. 자동 연쇄 삭제는 지원하지 않습니다.',
         EXECUTION_NOT_FINISHED: '위임된 작업은 완료·취소 상태이고 실행이 종료되어야 삭제할 수 있습니다.',
         PARENT_CHANGED: '상위 리소스가 삭제됐습니다. 목록을 새로고침하세요.',
+        TREE_EXECUTION_ACTIVE: '하위 자원에 실행 중이거나 종료 확인이 안 된 작업이 있습니다. 실행 종료 후 다시 삭제하세요.',
+        TREE_HAS_DEPENDENTS: '삭제 범위 밖의 미완료 작업이 이 자원을 선행 항목으로 참조합니다. 해당 작업의 계획을 먼저 수정하세요.',
+        TREE_TOO_LARGE: '삭제 범위가 5,000개 기록을 초과합니다. 작은 하위 자원 단위로 나누어 삭제하세요.',
+        DEPENDENCY_CHANGED: '선행 작업이 없거나 삭제됐습니다. 목록과 계획을 새로 확인하세요.',
         PROJECT_ALREADY_EXISTS: '이 워크스페이스에 같은 저장소의 프로젝트가 이미 있습니다. 기존 프로젝트를 선택하세요.',
         JSON_BODY_REQUIRED: '본문 없는 요청에 JSON 헤더가 전송됐습니다. 콘솔 API 버전을 확인하세요.',
         INVALID_CURSOR: '기록 페이지 위치가 올바르지 않습니다. 실행 기록을 처음부터 다시 조회하세요.',

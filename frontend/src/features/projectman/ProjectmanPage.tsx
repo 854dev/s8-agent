@@ -126,9 +126,9 @@ export default function ProjectmanPage() {
     {notice && <p role="status" className="pm-notice">{notice}</p>}
     {checking ? <p>사용자 세션 확인 중…</p> : sessionUnavailable ? <section className="pm-login"><h2>콘솔에 연결할 수 없습니다.</h2><p>Projectman 콘솔 서버와 PH-CMS가 실행 중인지 확인하세요.</p><button onClick={() => setSessionAttempt(value => value + 1)}>연결 다시 시도</button></section> : !authenticated ? <form className="pm-login" onSubmit={event => { event.preventDefault(); setBusy(true); setError(''); void request('/login', { method: 'POST', body: JSON.stringify({ email, password }) }).then(() => { setPassword(''); setAuthenticated(true) }).catch(fail).finally(() => setBusy(false)) }}><h2>PH-CMS 사용자 로그인</h2><p>사람의 결정은 사용자 계정으로 기록합니다.</p><label>이메일<input autoComplete="username" type="email" required value={email} onChange={event => setEmail(event.target.value)} /></label><label>비밀번호<input autoComplete="current-password" type="password" required value={password} onChange={event => setPassword(event.target.value)} /></label><button className="pm-primary" disabled={busy}>로그인</button></form> : <>
       <div className="pm-actions pm-resource-actions"><button disabled={busy} onClick={() => createResource('workspace')}>워크스페이스 만들기</button></div>
-      {editor && <div ref={resourceForm}><ResourceForm key={`${editor.mode}:${editor.item.type}:${editor.item.uid}:${editor.item.parent?.uid}`} editor={editor} onClose={() => setEditor(null)} onError={fail} onSaved={async deleted => {
+      {editor && <div ref={resourceForm}><ResourceForm key={`${editor.mode}:${editor.item.type}:${editor.item.uid}:${editor.item.parent?.uid}`} editor={editor} onClose={() => setEditor(null)} onError={fail} onSaved={async (deleted, deletedUids = []) => {
         setEditor(null); setError(''); setNotice(deleted ? '목록에서 삭제했습니다. 데이터와 작업 로그는 보존됩니다.' : '저장했습니다.')
-        if (deleted && selectedTask.current === editor.item.uid) closeDetail()
+        if (deleted && (selectedTask.current === editor.item.uid || deletedUids.includes(selectedTask.current))) closeDetail()
         if (deleted && editor.item.type === 'workspace' && workspace === editor.item.uid) selectWorkspace('')
         await refresh(); if (!deleted && selectedTask.current === editor.item.uid) await refreshDetail()
       }} /></div>}

@@ -23,7 +23,7 @@ async function fixture(t, { requestTimeout } = {}) {
   const pair = suffix => ({ accessToken: `fixture.${suffix}`, refreshToken: `fixture.refresh.${suffix}` });
   upstream.post('/api/v2/auth/login', () => pair('old'));
   upstream.post('/api/v2/auth/refresh', (_req, reply) => { state.refreshes++; return reply.code(state.refreshStatus).send(state.refreshStatus === 200 ? pair('fresh') : { message: 'Fixture refresh unavailable' }); });
-  upstream.get('/api/v2/projectman/capabilities', () => ({ workflowVersion: 2, actorType: 'human', safeResourceDelete: true }));
+  upstream.get('/api/v2/projectman/capabilities', () => ({ workflowVersion: 2, actorType: 'human', safeResourceDelete: true, cascadeResourceDelete: true }));
   upstream.get('/api/v2/contents', (req, reply) => {
     state.reads++;
     assert.equal(req.query.channelSlug, 'ph-projectman');
@@ -47,9 +47,9 @@ async function fixture(t, { requestTimeout } = {}) {
     if (req.body.title === 'unknown-error') return reply.code(400).send({ message: 'Bearer fixture-private-error-value' });
     item.title = req.body.title; item.detail.text = req.body.text; return item;
   });
-  upstream.delete('/api/v2/contents/:uid', (req, reply) => {
+  upstream.delete('/api/v2/projectman/items/:uid/tree', (req, reply) => {
     assert.equal(req.headers['content-type'], undefined, 'Empty JSON DELETE must fail this real Fastify regression');
-    state.items.delete(req.params.uid); return reply.code(204).send();
+    state.items.delete(req.params.uid); return { uid: req.params.uid, deletedUids: [req.params.uid], deletedCount: 1, retainedLogCount: 0 };
   });
   upstream.get('/api/v2/projectman/items/:uid/workflow', req => ({ state: 'todo', workflow: null, uid: req.params.uid }));
   upstream.post('/api/v2/projectman/items/:uid/workflow', req => ({ uid: req.params.uid, state: 'ready', action: req.body.action }));
@@ -82,7 +82,7 @@ integration('real console + SDK + client + Fastify covers resource CRUD, workflo
   assert.equal(response.status, 400); assert.equal((await response.json()).code, 'WORKFLOW_FROZEN');
   response = await f.request(`/items/${ws.uid}`, 'PATCH', { title: 'unknown-error', text: '' });
   assert.equal(response.status, 400); assert.doesNotMatch(JSON.stringify(await response.json()), /fixture-private/);
-  response = await f.request(`/items/${ws.uid}`, 'DELETE', { title: '수정' }); assert.equal(response.status, 200);
+  response = await f.request(`/items/${ws.uid}?cascade=true`, 'DELETE'); assert.equal(response.status, 200);
   assert.equal((await f.request(`/items/${ws.uid}`)).status, 404);
 });
 
