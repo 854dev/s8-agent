@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
-import { drainManagerInbox } from '../lib/manager/inbox.mjs';
+import { recoverCompletionReviews } from '../lib/projectman/completion-review.mjs';
+import { drainManagerInbox, managerInboxMessage } from '../lib/manager/inbox.mjs';
 import { Type } from 'typebox';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import projectman from './projectman.ts';
@@ -54,11 +55,13 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
       if (checking || typeof ctx.isIdle !== 'function' || !ctx.isIdle()) return;
       checking = true;
       try {
-        await drainManagerInbox(fileURLToPath(new URL('../..', import.meta.url)), report => {
-          pi.sendMessage({ customType: 'projectman-completed', content: `작업 ${report.uid}, 실행 ${report.runId}의 보고가 도착했습니다. 상태: ${report.state}. 요약: ${report.summary ?? ''}\nworkflow_get으로 결과와 검증 근거를 확인하세요. review 상태라면 검토 후 review_result로 의견을 기록하고 사용자에게 최종 완료 확인을 안내하세요. 워커 실행은 종료됐으며 수정 요청은 새 work로 생성합니다.`, display: true }, { triggerTurn: true, deliverAs: 'followUp' });
+        const root = fileURLToPath(new URL('../..', import.meta.url));
+        const client = process.env.PHCMS_ACCESS_TOKEN ? projectmanFromEnv() : null;
+        if (client) await recoverCompletionReviews(root, client);
+        await drainManagerInbox(root, report => {
+          pi.sendMessage(managerInboxMessage(report), { triggerTurn: true, deliverAs: 'followUp' });
         });
-        if (!process.env.PHCMS_ACCESS_TOKEN) return;
-        const client = projectmanFromEnv();
+        if (!client) return;
         const tasks = [...await client.list('task'), ...await client.list('subtask')];
         for (const item of tasks) {
           const workflow = item.detail?.attributes.workflow as any;

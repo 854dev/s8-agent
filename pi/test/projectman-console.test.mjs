@@ -20,7 +20,7 @@ async function fixture(t, { capabilities = async () => ({ workflowVersion: 2, sa
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(root, { recursive: true, force: true }); });
   const base = `http://127.0.0.1:${server.address().port}`;
-  return { base, operations, headers: { cookie: 's8_projectman_session=fixture.user.token', Origin: base, 'Content-Type': 'application/json' } };
+  return { root, base, operations, headers: { cookie: 's8_projectman_session=fixture.user.token', Origin: base, 'Content-Type': 'application/json' } };
 }
 
 test('console login keeps user JWT in HttpOnly cookie and never returns it to JS', async t => {
@@ -100,3 +100,21 @@ test('console forwards explicit human plan confirmation to the server independen
     assert.equal(operations.length, 1);
   }
 });
+
+
+test('console completion accepts an optional review comment and keeps human completion authorization upstream', async t => {
+  const calls = [];
+  const { base, headers, root } = await fixture(t, { client: {
+    getWorkflow: async () => ({ state: 'review', workflow: { result: { summary: 'Verified result' } } }),
+    workflow: async (uid, operation) => { calls.push(operation); return { uid, state: 'done' }; },
+  } });
+  const input = { action: 'complete', expectedRevision: 4, requestId: '11111111-1111-4111-8111-111111111111', reviewComment: '추가 개선이 필요합니다.' };
+  const send = (overrides = {}) => fetch(`${base}/api/projectman/items/task-1/workflow`, { method: 'POST', headers, body: JSON.stringify({ ...input, ...overrides }) });
+  assert.equal((await send({ reviewComment: 'x'.repeat(6001) })).status, 400);
+  assert.equal((await send()).status, 200);
+  assert.equal(calls.length, 1); assert.equal(calls[0].reviewComment, undefined);
+  assert.equal(calls[0].message, '사용자 검토의견:\n추가 개선이 필요합니다.');
+  const { drainManagerInbox } = await import('../lib/manager/inbox.mjs');
+  const messages = []; await drainManagerInbox(root, event => messages.push(event));
+  assert.equal(messages.length, 1); assert.equal(messages[0].uid, 'task-1');
+})

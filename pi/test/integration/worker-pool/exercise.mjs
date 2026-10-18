@@ -12,6 +12,7 @@ import { ProjectmanClient } from '../../../lib/projectman/client.ts';
 import { startDeveloperWorker } from '../../../lib/development/worker-daemon.mjs';
 import { executeDeveloper } from '../../../lib/development/worker-session.mjs';
 import { developmentTick, waitForDevelopmentRuns, flushDevelopmentOutbox } from '../../../lib/development/supervisor.mjs';
+import { recoverCompletionReviews } from '../../../lib/projectman/completion-review.mjs';
 import { drainManagerInbox } from '../../../lib/manager/inbox.mjs';
 import { sendTelegram } from '../../../lib/telegram/notify.mjs';
 import { liveConsoleBrowser } from '../../helpers/console-browser.mjs';
@@ -121,7 +122,7 @@ export async function exerciseProjectmanWorkerPool({ baseUrl, managerToken, work
     await browser.page.getByRole('heading', { name: '개발 결과와 검증' }).waitFor();
     assert.equal(new URL(browser.page.url()).searchParams.get('run'), runId);
     assert.ok(await browser.page.getByRole('heading', { name: '개발 결과와 검증' }).locator('..').getByText('파일 구현과 검증을 완료했습니다.', { exact: true }).isVisible());
-    assert.equal(await browser.page.getByRole('button', { name: '결과 확인 · 작업 완료' }).count(), 0);
+    assert.ok(await browser.page.getByRole('button', { name: '검토의견 제출 · 작업 완료' }).isDisabled());
     // A dependent work must remain unclaimable until the human finalizes its predecessor.
     const dependent = await client.create(project.uid, 'task', '선행 결과 통합', '최종 완료된 결과를 통합하세요.');
     const depPlan = await client.workflow(dependent.uid, { action: 'delegate', requestId: randomUUID(), expectedRevision: 0, spec: { repoPath: repo, plan: 'Integrate the completed predecessor.', decisionRefs: ['fixture:dependency'], completionCriteria: ['Predecessor finalized'], commandNames: [], dependsOn: [work.uid] } });
@@ -135,8 +136,26 @@ export async function exerciseProjectmanWorkerPool({ baseUrl, managerToken, work
     await browser.page.goto(link);
     await client.workflow(work.uid, { action: 'review_result', expectedRevision: completed.workflow.revision, requestId: randomUUID(), message: '변경 패치와 파일 생성 검증 근거를 검토했습니다.' });
     await browser.page.reload();
-    await browser.operation('complete', () => browser.page.getByRole('button', { name: '결과 확인 · 작업 완료' }).click());
+    await browser.page.getByRole('textbox', { name: '검토의견 (선택)' }).fill('모바일 버튼 간격을 개선하는 작업이 필요합니다.');
+    await browser.operation('complete', () => browser.page.getByRole('button', { name: '검토의견 제출 · 작업 완료' }).click());
     assert.equal((await client.getWorkflow(work.uid)).state, 'done');
+    const completionLogs = await client.list('work_log', work.uid);
+    const completionLog = completionLogs.find(log => log.title === 'workflow:complete');
+    assert.ok(completionLog.detail?.text.includes('모바일 버튼 간격'));
+    const completionId = completionLog.detail.attributes.requestId;
+    const intentFile = path.join(root, '.s8-runtime/completion-reviews', `${completionId}.json`);
+    const intent = JSON.parse(await readFile(intentFile, 'utf8'));
+    assert.equal(intent.serverFingerprint, completionLog.detail.attributes.fingerprint);
+    await rm(path.join(root, '.s8-runtime/manager-inbox', `completion-${completionId}.json`));
+    await writeFile(intentFile, JSON.stringify({ ...intent, delivered: false }));
+    await recoverCompletionReviews(root, client);
+    const completionMessages = [];
+    await drainManagerInbox(root, event => completionMessages.push(event));
+    await drainManagerInbox(root, event => completionMessages.push(event));
+    assert.equal(completionMessages.length, 1);
+    assert.equal(completionMessages[0].type, 'completion_review');
+    assert.equal(completionMessages[0].reviewComment, '모바일 버튼 간격을 개선하는 작업이 필요합니다.');
+    assert.equal(await browser.page.getByRole('button', { name: '완료 후 추가 작업' }).count(), 0);
     assert.equal((await client.workflow(dependent.uid, { ...depClaim, requestId: randomUUID() })).state, 'doing');
     return { ok: true, dependencyWaitVerified: true, humanCompletion: true, workUid: work.uid, runId, modelCalls, telegramAttempts, managerReports: reports.length, browserApproval: true, linkLoginPreserved: true };
   } finally {

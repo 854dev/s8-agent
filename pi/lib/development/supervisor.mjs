@@ -1,3 +1,4 @@
+import { enqueueManagerMessage } from '../manager/inbox.mjs';
 import { saveJson } from '../storage/json-file.mjs';
 import { requireConfirmedPlan } from '../projectman/preflight.mjs';
 import { workerRequest, workerStates, processAlive } from './worker-pool.mjs';
@@ -109,11 +110,7 @@ async function flushOutbox({ root, client, notify = sendTelegram, settings = loa
         outcomes.push({ runId, delivered: true });
       }
       if (!pending.managerDelivered) {
-        const inbox = path.join(root, '.s8-runtime/manager-inbox');
-        await mkdir(inbox, { recursive: true, mode: 0o700 });
-        try {
-          await writeFile(path.join(inbox, `${runId}.json`), JSON.stringify({ uid: pending.uid, runId, state: pending.state, summary: pending.report.summary }), { mode: 0o600, flag: 'wx' });
-        } catch (error) { if (error.code !== 'EEXIST') throw error; }
+        await enqueueManagerMessage(root, runId, { uid: pending.uid, runId, state: pending.state, summary: pending.report.summary });
         pending.managerDelivered = true;
         await saveJson(file, pending);
       }

@@ -309,7 +309,7 @@ test('completion shows results and worker identity without approval or retry but
   render(<ProjectmanPage />)
   expect(await screen.findByText('개발과 검증 완료')).toBeInTheDocument()
   expect(screen.getByText('finished · 워커 worker-2')).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: '결과 확인 · 작업 완료' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '검토의견 제출 · 작업 완료' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '같은 계획으로 재개' })).not.toBeInTheDocument()
 })
 
@@ -334,10 +334,38 @@ test.each([false, true])('human completion requires a manager review (reviewed=%
   render(<ProjectmanPage />)
   await screen.findByText('개발 보고 완료')
   if (reviewed) {
-    await userEvent.click(screen.getByRole('button', { name: '결과 확인 · 작업 완료' }))
-    await waitFor(() => expect(f.operations[0]?.action).toBe('complete'))
+    await userEvent.click(screen.getByRole('button', { name: '검토의견 제출 · 작업 완료' }))
+    await waitFor(() => expect(f.operations[0]).toMatchObject({ action: 'complete', reviewComment: '' }))
   } else {
     expect(screen.getByText('매니저의 결과 검토를 기다리고 있습니다.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '결과 확인 · 작업 완료' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '검토의견 제출 · 작업 완료' })).toBeDisabled()
   }
+})
+
+
+test('completion submits the optional review comment and preserves it on a failed request', async () => {
+  const f = fixture(), user = userEvent.setup()
+  f.detail.execution.state = 'review'; delete f.detail.execution.workflow!.review
+  f.detail.execution.workflow!.result = { summary: '검증 완료', changedFiles: [], verification: [] }
+  f.detail.execution.workflow!.managerReview = { message: '검토 완료' }
+  const attempts: Record<string, unknown>[] = []
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/workflow')) {
+      attempts.push(JSON.parse(String(init?.body)))
+      if (attempts.length === 1) return Response.json({ error: '연결을 확인하세요.' }, { status: 503 })
+      f.detail.execution.state = 'done'
+      return Response.json({ state: 'done' })
+    }
+    return f.fetcher(url, init)
+  }))
+  render(<ProjectmanPage />)
+  await user.type(await screen.findByRole('textbox', { name: '검토의견 (선택)' }), '모바일 버튼 간격을 보완해주세요.')
+  await user.click(screen.getByRole('button', { name: '검토의견 제출 · 작업 완료' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('연결을 확인하세요.')
+  expect(screen.getByRole('textbox', { name: '검토의견 (선택)' })).toHaveValue('모바일 버튼 간격을 보완해주세요.')
+  expect(attempts[0]).toMatchObject({ action: 'complete', reviewComment: '모바일 버튼 간격을 보완해주세요.', expectedRevision: 4 })
+  await user.click(screen.getByRole('button', { name: '같은 요청 확인·재시도' }))
+  await waitFor(() => expect(attempts).toHaveLength(2))
+  expect(attempts[1]).toEqual(attempts[0])
+  expect(await screen.findByRole('status')).toHaveTextContent('작업을 완료했습니다.')
 })

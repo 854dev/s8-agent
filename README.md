@@ -31,7 +31,7 @@
 - 착수 전: `todo`를 **일 시작 전**으로 표시한다. 매니저가 원문·코드·지침·요구 충돌·누락·허용 범위·검증 계획을 검토하고 작은 의문도 사용자에게 확인한다. 확정 내용을 `delegate`한 뒤 `preflight_review`로 work의 `s8Preflight`에 기록한다. S8 콘솔과 슈퍼바이저는 이 기록이 현재 작업·spec과 일치해야 승인·실행을 허용한다. 내용이나 spec이 변경되면 재검토한다. 기존 승인 작업도 검토 기록이 없으면 실행되지 않는다.
 - 개발: `start-pi`가 전용 tmux 세션에 상시 Pi 워커를 준비한다. `s8-config.yml`의 `workers.count`(기본 2)로 슬롯 수를 지정한다. s8 화면에서 승인된 ready work를 UID로 배정하고 작업별 독립 git worktree에서 실행한다.
 - 개발 중 판단: 최종 승인된 작업의 구현 선택과 일반 테스트 실패는 워커가 스스로 해결한다. work당 토큰·시간·명령·실행 횟수 예산은 없다. 실제 실패·취소는 결과와 기록을 보존한다.
-- 완료: 워커가 결과를 보고하면 review로 저장하고 매니저에게 보고를 전달한다. 사용자는 Telegram으로 요약과 work 링크를 받는다. 매니저 검토 후 사용자가 화면에서 최종 완료하며 자동 재작업은 없고 수정은 새로운 work로 생성·승인한다.
+- 완료: 워커가 결과를 보고하면 review로 저장하고 매니저에게 보고를 전달한다. 사용자는 Telegram으로 요약과 work 링크를 받는다. 매니저 검토 후 사용자가 화면에서 선택적으로 검토의견을 적고 완료를 제출한다. 원본은 done으로 확정되며 매니저가 의견을 보고 추가 조치 없음·새 work 작성·질문을 판단한다. 새 work는 별도 실행 승인을 받는다.
 - 기록: `.s8-runtime/runs/<run-id>/`의 전달 프롬프트·공개 응답·도구 이벤트·결과·검증·패치와 Projectman 작업 이력을 연결한다. 모델 내부 추론과 인증정보는 기록 대상이 아니다.
 
 역할별 기준은 [관리 지침](agents/manager/SYSTEM.md), [개발 지침](agents/developer/WORKER_SYSTEM.md)과 [워커 개편 계획](docs/worker-pool-redesign-plan.md)에 있다. 실행 방법은 아래 안내를, 화면·프록시 구성은 [프런트엔드 README](frontend/README.md)를 따른다.
@@ -97,7 +97,7 @@ pi/
 | 상시 워커의 배정·상태·반환 | [development/worker-daemon.mjs](pi/lib/development/worker-daemon.mjs) | `start-pi.sh --service worker worker-N` → `pi/bin/developer.mjs` |
 | UID별 새 Pi 대화·get/report 도구 | [development/worker-session.mjs](pi/lib/development/worker-session.mjs) | worker-daemon |
 | worktree·변경 파일·패치·선행 결과 반영 | [development/workspace.mjs](pi/lib/development/workspace.mjs) | supervisor |
-| 완료보고 수신·매니저 검토 연결 | [manager/inbox.mjs](pi/lib/manager/inbox.mjs), [manager 확장](pi/extensions/manager.ts) | 매니저 시작·기존 polling |
+| 완료보고·사용자 검토의견 수신 | [manager/inbox.mjs](pi/lib/manager/inbox.mjs), [manager 확장](pi/extensions/manager.ts) | 매니저 시작·기존 polling |
 | Projectman API·콘솔 | [projectman/client.ts](pi/lib/projectman/client.ts), [projectman/console.mjs](pi/lib/projectman/console.mjs) | `pi/extensions/projectman.ts`, `pi/bin/projectman-console.mjs` |
 | Pi 세션·서비스 시작·재시작 | [runtime/](pi/lib/runtime/) | `start-pi.sh` → `pi/bin/pi-runtime.mjs` |
 | 설정·알림 | [config/s8-config.mjs](pi/lib/config/s8-config.mjs), [telegram/notify.mjs](pi/lib/telegram/notify.mjs) | `pi/bin/s8-config.mjs`, 보고 outbox |
@@ -115,6 +115,14 @@ bash pi/bin/test-projectman-worker-pool.sh ../ph-cms
 ```
 
 실제 모델을 사용하는 선택적 역할 평가는 `node pi/test/manual/evaluate-roles.mjs`로 실행한다. 자동 회귀 테스트에는 포함하지 않으며 모델 인증과 사용량이 발생한다. 카운터 데모 실행기와 구형 제한 프로세스·출력 파서는 제거했다. 현재 개발 실행 검증은 워커 SDK 회귀와 `test-projectman-worker-pool.sh`가 담당한다. 기존 PH-CMS의 구형 카운터 수동 평가 대신 이 s8 전체 연동 명령을 사용한다.
+
+### 결과 검토와 완료
+
+개발 완료 알림의 work 링크에서 결과와 매니저 검토를 확인한다. 선택 입력인 **검토의견**에 수정·보완 내용을 적고 **검토의견 제출 · 작업 완료**를 누르면 원본을 done으로 처리한다. 의견 없이 완료할 수도 있다. 의견은 기존 PH-CMS 완료 work_log에 저장되며, 매니저가 접속하면 결과와 함께 전달된다.
+
+매니저는 의견에 따라 추가 조치 없이 종료하거나, 불명확한 내용을 질문하거나, 같은 프로젝트에 새 work 계획을 작성한다. 새 work는 원본 UID와 검토의견 참조를 기록하고 완료된 원본을 선행 작업으로 지정해 기존 결과 패치를 이어받는다. 별도 추가작업 버튼·재작업 상태·자동 실행은 없다. 새 계획은 사용자가 실행 승인한다.
+
+완료 요청 전에 `.s8-runtime/completion-reviews/`에 전달 기록을 보존한다. 완료 응답이 유실되거나 매니저 수신함 기록에 실패하면, 매니저의 기존 polling이 요청 ID와 내용 지문이 일치하는 서버 완료 이력을 확인한 후 전달을 복구한다. 화면 재시도는 같은 요청 ID와 의견을 사용한다. 수신함 전달은 장애 시 재전달될 수 있어 매니저가 같은 참조의 후속 work를 먼저 확인한다. PH-CMS 소스나 DB 스키마는 변경하지 않는다.
 
 ## 빠른 시작
 
@@ -325,7 +333,6 @@ Pi 1.3.0에도 내장 MCP가 있지만 `pi-mcp-extension@1.5.0`의 설치와 패
 - OS 자동 시작 등록은 별도다. 비정상 종료 후 남은 잠금은 프로세스 종료를 확인한 뒤 수동 복구한다.
 - `kind=projectman` 잡은 지정 프로젝트에서 workflow v2 계획을 사람이 확정한 실행 가능 작업을 5분마다 확인해 개발 슈퍼바이저에 전달한다. 빈 조회에는 모델·Telegram 호출이 없다.
 - 슈퍼바이저는 작업별 격리 worktree에서 코드를 수정하고 계획된 검증을 실행한다. 동일 work를 자동 재실행하지 않으며, 완료 결과는 `review`, 장애·검증 실패는 구조화된 결과로 남긴다. 동시 실행은 workers.count 설정을 따른다.
-- 기존 잡은 최신 데몬에서 `node pi/bin/projectman-job.mjs JOB_ID PROJECT_UID`로 명시적으로 전환한다. 작업 상태·결과·운영 종료 시각은 초기화하지 않는다. 새 CRUD 필드는 S8 재시작 후 사용한다.
 
 설정·승인·알림·복구 절차는 [`pi/SCHEDULER.md`](pi/SCHEDULER.md)를 참고한다.
 

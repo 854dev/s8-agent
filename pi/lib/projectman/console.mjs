@@ -4,6 +4,7 @@ import { readFile, lstat } from 'node:fs/promises';
 import { ProjectmanClient } from './client.ts';
 import { hasReviewedPreflight } from './preflight.mjs';
 import { consoleSessions } from './session.mjs';
+import { submitCompletionReview } from './completion-review.mjs';
 import { readEventPage } from './events.mjs';
 
 const json = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(data)); };
@@ -77,7 +78,7 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
       if (req.method === 'POST' && action) {
         const input = await body(req);
         if (!['authorize', 'draft', 'decide', 'complete', 'cancel', 'recover'].includes(input.action)) return json(res, 400, { error: '지원하지 않는 사용자 결정입니다.' });
-        return json(res, 200, await client.workflow(action[1], input));
+        return json(res, 200, input.action === 'complete' ? await submitCompletionReview({ root, client, uid: action[1], input }) : await client.workflow(action[1], input));
       }
       const events = /^\/api\/projectman\/runs\/([a-f0-9-]{36})\/events$/.exec(url.pathname);
       const patch = /^\/api\/projectman\/runs\/([a-f0-9-]{36})\/patch$/.exec(url.pathname);

@@ -122,3 +122,8 @@
   .pm-detail-head h2 { font-size: 24px; }
   .pm-detail-toolbar { align-items: flex-start; }
 }
+
+.pm-completion-form { display: grid; gap: 12px; margin-top: 24px; padding-top: 20px; border-top: 1px solid #c6c6c6; }
+.pm-completion-form h4, .pm-completion-form p { margin: 0; }
+.pm-completion-form textarea { box-sizing: border-box; width: 100%; min-height: 120px; line-height: 1.7; resize: vertical; }
+.pm-completion-form button { justify-self: start; }
