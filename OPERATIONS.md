@@ -65,8 +65,12 @@ Pi 창이 열리면 `/login`을 실행한다. credential과 세션은 `.pi-runti
 - 관리 UI에서 워크스페이스·프로젝트·작업·하위 작업을 생성하고 제목·본문을 수정하거나 삭제한다. 프로젝트 생성에는 저장소 절대 경로가 필요하며, 작업은 `todo`, 자동 실행 꺼짐으로 등록한다. 위임된 작업의 제목·본문은 기존 서버 규칙에 따라 수정할 수 없다.
 - 삭제는 현재 제목 재입력이 필요하다. 하위 리소스는 먼저 삭제하며 자동 연쇄 삭제하지 않는다. 작업 로그와 원본 데이터는 보존하는 soft delete이고 UI 복원 기능은 없다. 위임된 작업은 완료·취소 상태이며 실행 종료까지 확인되어야 삭제할 수 있다. `cancel_requested`·복구 필요 상태는 삭제를 차단하므로 실행 상태부터 운영자가 확인한다.
 - PH-CMS의 안전 삭제 가드와 `capabilities.safeResourceDelete=true`를 먼저 적용한다. 지원하지 않는 서버에서는 콘솔이 삭제를 거부한다. 이후 S8 콘솔을 재시작하고 frontend를 빌드한다. 환경변수·스키마·데이터 이관은 없다. 기존 workflow v2 호환 조건도 그대로 유지한다.
+- 콘솔 JSON 본문은 최대 384,000바이트이며 리소스 본문은 최대 50,000 UTF-16 단위다. 한글 청크는 바이트를 모아 UTF-8로 한 번 디코딩하며 잘못된 UTF-8은 거부한다. JSON 이스케이프를 포함한 UI 최대 입력도 허용한다.
+- 요청 도중 401이 나면 조회만 세션 갱신 후 한 번 재시도한다. 쓰기는 자동 재전송하지 않고 갱신된 쿠키와 `SESSION_RENEWED` 안내를 반환한다. UI는 입력과 workflow 요청 ID를 보존하며 사용자가 반영 여부를 확인한 뒤 재시도한다. 갱신 장애 시 기존 쿠키를 지우지 않는다.
+- 실행 이벤트는 바이트 `cursor`로 페이지 조회하며 기존 줄 단위 `offset`도 유지한다. 페이지는 최대 30개·약 1MB이며 단일 이벤트는 최대 2MB다. 10MB 초과 파일도 조회한다. 작성 중인 마지막 미완성 줄은 다음 조회로 넘기고, 실행 중에는 EOF에서도 조회 위치를 보존한다. 손상된 완료 줄·잘못된 커서·단일 이벤트 크기 초과는 구분해서 안내한다. 구형 offset 조회의 약 64MB 스캔 한계를 넘으면 화면을 새로고침해 커서 방식으로 전환한다.
+- 알려진 PH-CMS 거부 사유만 고정 코드와 안내로 변환하며 원문 오류·내부 정보는 UI에 전달하지 않는다.
 - 쓰기 실패·응답 유실은 자동 재시도하지 않는다. 목록 재조회로 반영 여부를 확인한다. 롤백은 UI/콘솔 코드를 되돌리되 서버 안전 가드는 유지한다. 삭제 복구가 필요하면 운영자가 감사·하위 관계·실행 상태를 확인한 뒤 별도로 처리하며 DB 초기화하지 않는다.
-- 검증: `node --test pi/test/projectman-client.test.mjs pi/test/projectman-console.test.mjs`, `npm run test:run --prefix frontend`, `npm run build --prefix frontend`, `git diff --check`. 서버 삭제 회귀는 기존 격리 DB 전용 intake suite에서 검증한다. 운영 DB에는 테스트 fixture/reset을 실행하지 않는다.
+- 검증: `node --test pi/test/projectman-client.test.mjs pi/test/projectman-console.test.mjs pi/test/projectman-session.test.mjs pi/test/projectman-events.test.mjs pi/test/projectman-http.test.mjs`, `npm run test:run --prefix frontend`, `npm run build --prefix frontend`, `git diff --check`. 서버 삭제 회귀는 기존 격리 DB 전용 intake suite에서 검증한다. 운영 DB에는 테스트 fixture/reset을 실행하지 않는다. `projectman-http.test.mjs`는 형제 `ph-cms/packages/server`의 설치된 Fastify를 이용해 실제 TCP·JSON 파서를 검증하며 환경 파일이나 DB를 사용하지 않는다. 해당 의존성이 없으면 이 HTTP suite는 명시적으로 skip되므로 완전 검증으로 보고하지 않는다.
 
 ## Projectman 지시 잡 운영
 

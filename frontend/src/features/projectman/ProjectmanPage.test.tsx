@@ -26,6 +26,45 @@ function fixture() {
   return { operations, detail, fetcher }
 }
 
+test.each([false, true])('event pagination supports legacy and cursor APIs (cursor=%s)', async useCursor => {
+  const f = fixture(), urls: string[] = []
+  f.detail.execution.workflow!.run = { id: '11111111-1111-4111-8111-111111111111', status: 'finished', startedAt: '2026-10-16' }
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes('/events?')) {
+      urls.push(url)
+      return Response.json({ events: [{ page: urls.length }], nextOffset: urls.length === 1 ? 1 : null, ...(useCursor ? { nextCursor: urls.length === 1 ? 77 : null } : {}) })
+    }
+    return f.fetcher(url, init)
+  }))
+  const user = userEvent.setup(); render(<ProjectmanPage />)
+  await user.click(await screen.findByRole('button', { name: '실행 기록 보기' }))
+  await user.click(await screen.findByRole('button', { name: '기록 더 보기' }))
+  await waitFor(() => expect(urls).toHaveLength(2))
+  const query = new URL(urls[1], location.origin).searchParams
+  expect(query.get('offset')).toBe('1'); expect(query.get('cursor')).toBe(useCursor ? '77' : null)
+  await waitFor(() => expect(screen.getByRole('button', { name: '기록 더 보기' })).toBeDisabled())
+})
+
+test('a renewed write session preserves the form and retries only on an explicit click with the same request ID', async () => {
+  const f = fixture(), operations: Record<string, unknown>[] = []
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/workflow')) {
+      operations.push(JSON.parse(String(init?.body)))
+      if (operations.length === 1) return Response.json({ code: 'SESSION_RENEWED', error: '세션 갱신 · 같은 요청으로 다시 시도하세요.' }, { status: 401 })
+    }
+    return f.fetcher(url, init)
+  }))
+  const user = userEvent.setup(); render(<ProjectmanPage />)
+  await user.type(await screen.findByRole('textbox', { name: '내 답변' }), '확인했습니다.')
+  await user.click(screen.getByRole('button', { name: '답변 저장' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('세션 갱신')
+  expect(operations).toHaveLength(1); expect(screen.getByRole('button', { name: '로그아웃' })).toBeInTheDocument()
+  expect(screen.getByRole('textbox', { name: '내 답변' })).toHaveValue('확인했습니다.')
+  await user.click(screen.getByRole('button', { name: '같은 요청 확인·재시도' }))
+  await waitFor(() => expect(operations).toHaveLength(2))
+  expect(operations[1].requestId).toBe(operations[0].requestId)
+})
+
 test('a console startup failure can be retried without losing a valid session', async () => {
   const fetcher = vi.fn(async () => new Response('<html>Bad Gateway</html>', { status: 502 }))
   vi.stubGlobal('fetch', fetcher)

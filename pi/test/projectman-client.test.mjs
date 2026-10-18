@@ -29,8 +29,12 @@ test('human resource writes preserve attributes, scope UIDs, and accept empty DE
   const calls = [];
   const client = new ProjectmanClient('https://cms.example/api', 'fixture-token', async (url, init) => {
     calls.push({ path: new URL(url).pathname, init });
-    if (init.method === 'DELETE') return { ok: true, status: 204, json: () => assert.fail('204 has no JSON') };
-    if (init.method) return response(item('ws', 'workspace'));
+    if (init.method === 'DELETE') {
+      assert.equal(init.body, undefined);
+      assert.equal(init.headers['content-type'], undefined, 'Fastify rejects empty JSON bodies before authentication');
+      return { ok: true, status: 204, json: () => assert.fail('204 has no JSON') };
+    }
+    if (init.method) { assert.equal(init.headers['content-type'], 'application/json'); return response(item('ws', 'workspace')); }
     return response({ content: [item('ws', 'workspace')], last: true });
   });
   await client.createWorkspace('팀', '본문');
@@ -89,6 +93,21 @@ test('resumes from parent and subtask logs', async () => {
   assert.deepEqual(snapshot.logs.map(s => s.uid), ['log-task-1']);
   assert.deepEqual(snapshot.subtaskLogs[0].logs.map(s => s.uid), ['log-sub-1']);
   assert.equal(urls[0].searchParams.get('withParent'), 'true');
+});
+
+test('known upstream rejections become fixed codes without forwarding messages or payloads', async () => {
+  for (const [message, code] of [
+    ['Delegated work is frozen; use workflow delegation to revise execution scope', 'WORKFLOW_FROZEN'],
+    ['Delete child resources first', 'CHILD_RESOURCES_EXIST'],
+    ['Finish or stop workflow execution before deleting', 'EXECUTION_NOT_FINISHED'],
+    ['Projectman parent was deleted', 'PARENT_CHANGED'],
+    ['Project for this codebase already exists in this workspace', 'PROJECT_ALREADY_EXISTS'],
+    ["Body cannot be empty when content-type is set to 'application/json'", 'JSON_BODY_REQUIRED'],
+    ['Bearer fixture-private-detail', undefined],
+  ]) {
+    const client = new ProjectmanClient('https://cms.example/api', 'fixture', async () => response({ message, detail: 'fixture-private-detail' }, 400));
+    await assert.rejects(client.list('workspace'), error => error.status === 400 && error.code === code && error.message === 'PH-CMS request failed (HTTP 400)' && !JSON.stringify(error).includes('fixture-private-detail'));
+  }
 });
 
 test('rejects insecure non-loopback and redacts API response', async () => {

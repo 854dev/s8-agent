@@ -71,10 +71,10 @@ export function consoleSessions({ baseUrl, clientFactory, authFactory = sdkAuthe
       try { const refresh = cookie(req, REFRESH_COOKIE); const entry = refresh && refreshes.get(keyOf(refresh)); if (entry) entry.canceled = true; } catch { /* Always clear malformed cookies as well. */ }
       cookies(req, res, null);
     },
-    async client(req, res) {
+    async client(req, res, { forceRefresh = false } = {}) {
       try {
         const access = cookie(req, ACCESS_COOKIE), refresh = cookie(req, REFRESH_COOKIE);
-        if (access) {
+        if (access && !forceRefresh) {
           try { return await checkedClient(access); }
           catch (error) { if (statusOf(error) !== 401) throw error; }
         }

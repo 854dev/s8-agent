@@ -18,8 +18,8 @@ test('unexpected successful HTML and null JSON cannot establish a session', asyn
 })
 
 test('backend error messages and successful responses are preserved', async () => {
-  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: '다시 로그인하세요.' }, { status: 401 })))
-  await expect(request('/session')).rejects.toMatchObject({ status: 401, message: '다시 로그인하세요.' })
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: '다시 로그인하세요.', code: 'SESSION_RENEWED' }, { status: 401 })))
+  await expect(request('/session')).rejects.toMatchObject({ status: 401, message: '다시 로그인하세요.', code: 'SESSION_RENEWED' })
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ authenticated: true })))
   await expect(request('/session')).resolves.toEqual({ authenticated: true })
 })

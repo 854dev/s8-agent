@@ -46,9 +46,10 @@ export default function ProjectmanPage() {
   const pending = useRef<{ uid: string; operation: Record<string, unknown> } | null>(null)
   const selectedTask = useRef(uid)
   selectedTask.current = uid
+  const eventCursor = useRef<number | undefined>(undefined)
   const eventSelection = useRef('')
   eventSelection.current = `${uid}:${selectedRun || detail?.execution?.workflow?.run?.id || ''}`
-  const fail = useCallback((cause: unknown) => { if (cause instanceof ConsoleError && cause.status === 401) { setAuthenticated(false); setEditor(null) } setError(cause instanceof Error ? cause.message : '연결에 실패했습니다.') }, [])
+  const fail = useCallback((cause: unknown) => { if (cause instanceof ConsoleError && cause.status === 401 && cause.code !== 'SESSION_RENEWED') { setAuthenticated(false); setEditor(null) } setError(cause instanceof Error ? cause.message : '연결에 실패했습니다.') }, [])
   const refresh = useCallback(async (signal?: AbortSignal) => {
     const [tasks, children, ws, ps] = await Promise.all([list('task', '', signal), list('subtask', '', signal), list('workspace', '', signal), list('project', '', signal)])
     if (!signal?.aborted) { setItems([...tasks.items, ...children.items]); setWorkspaces(ws.items); setProjects(ps.items); setLoaded(true) }
@@ -79,7 +80,7 @@ export default function ProjectmanPage() {
     return () => { controller.abort(); clearInterval(timer) }
   }, [authenticated, refresh, refreshDetail, fail])
   useEffect(() => { setAnswer(detail?.execution?.workflow?.review?.draft ?? ''); setConfirmedRevision(null); setAnswerRevision(null) }, [detail?.item.uid, detail?.execution?.workflow?.review?.id])
-  useEffect(() => { setEvents([]); setOffset(0) }, [uid, selectedRun, detail?.execution?.workflow?.run?.id])
+  useEffect(() => { setEvents([]); setOffset(0); eventCursor.current = undefined }, [uid, selectedRun, detail?.execution?.workflow?.run?.id])
   useEffect(() => { const update = () => { const query = new URLSearchParams(location.search), nextUid = query.get('task') ?? ''; if (selectedTask.current !== nextUid) { setDetail(null); pending.current = null } setUid(nextUid); setSelectedRun(query.get('run') ?? ''); setWorkspace(query.get('workspace') ?? ''); setHumanOnly(false) }; window.addEventListener('popstate', update); return () => window.removeEventListener('popstate', update) }, [])
   useEffect(() => { if (detail?.item.uid === uid) detailPanel.current?.scrollIntoView?.({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ? 'auto' : 'smooth', block: 'start' }) }, [detail?.item.uid, uid])
   const select = (next: string, button?: HTMLButtonElement) => { if (button) lastTaskButton.current = button; setUid(next); setSelectedRun(''); setDetail(null); setEvents([]); setOffset(0); setError(''); setNotice(''); pending.current = null; const url = new URL(location.href); url.searchParams.set('task', next); url.searchParams.delete('run'); history.pushState(null, '', url) }
@@ -100,7 +101,8 @@ export default function ProjectmanPage() {
   async function loadEvents(runId: string) {
     setBusy(true)
     const selection = eventSelection.current
-    try { const page = await request<{ events: unknown[]; nextOffset: number | null }>(`/runs/${runId}/events?offset=${offset ?? 0}`); if (eventSelection.current === selection) { setEvents(previous => [...previous, ...page.events]); setOffset(page.nextOffset) } } catch (cause) { fail(cause) } finally { setBusy(false) }
+    const query = new URLSearchParams({ offset: String(offset ?? 0), ...(eventCursor.current === undefined ? {} : { cursor: String(eventCursor.current) }) })
+    try { const page = await request<{ events: unknown[]; nextOffset: number | null; nextCursor?: number | null }>(`/runs/${runId}/events?${query}`); if (eventSelection.current === selection) { setEvents(previous => [...previous, ...page.events]); setOffset(page.nextOffset); eventCursor.current = page.nextCursor ?? undefined } } catch (cause) { fail(cause) } finally { setBusy(false) }
   }
   const itemById = new Map(items.map(item => [item.uid, item]))
   const projectOf = (item: Item): string | undefined => item.type === 'subtask' ? itemById.get(item.parent?.uid ?? '')?.parent?.uid : item.parent?.uid

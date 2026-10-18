@@ -20,6 +20,26 @@ export const projectmanJson = (value: unknown) => JSON.stringify(value, (key, da
 
 type Page = { content: ProjectmanContent[]; last: boolean };
 
+// Translate only exact known messages to fixed codes. Never propagate upstream text or payloads.
+const rejectionCodes = new Map([
+  ['Delegated work is frozen; use workflow delegation to revise execution scope', 'WORKFLOW_FROZEN'],
+  ['Delete child resources first', 'CHILD_RESOURCES_EXIST'],
+  ['Finish or stop workflow execution before deleting', 'EXECUTION_NOT_FINISHED'],
+  ['Projectman parent was deleted', 'PARENT_CHANGED'],
+  ['Project for this codebase already exists in this workspace; select its UID', 'PROJECT_ALREADY_EXISTS'],
+  ['Project for this codebase already exists in this workspace', 'PROJECT_ALREADY_EXISTS'],
+  ["Body cannot be empty when content-type is set to 'application/json'", 'JSON_BODY_REQUIRED'],
+]);
+
+export class ProjectmanError extends Error {
+  status: number;
+  code?: string;
+  constructor(status: number, code?: string) {
+    super(`PH-CMS request failed (HTTP ${status})`);
+    this.status = status; this.code = code;
+  }
+}
+
 export class ProjectmanClient {
   private base: string;
   private token: string;
@@ -41,10 +61,14 @@ export class ProjectmanClient {
   private async request<T>(path: string, init?: RequestInit, timeoutMs = 10000): Promise<T> {
     const response = await this.fetcher(new URL(`${this.base.replace(/\/$/, '')}/${path}`, undefined), {
       ...init,
-      headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${this.token}`, ...(init?.body != null ? { 'content-type': 'application/json' } : {}) },
       signal: this.signal ? AbortSignal.any([this.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
     });
-    if (!response.ok) throw new Error(`PH-CMS request failed (HTTP ${response.status})`);
+    if (!response.ok) {
+      let code: string | undefined;
+      try { code = rejectionCodes.get((await response.json())?.message); } catch { /* Non-JSON errors remain status-only. */ }
+      throw new ProjectmanError(response.status, code);
+    }
     return response.status === 204 ? undefined as T : response.json() as Promise<T>;
   }
 
