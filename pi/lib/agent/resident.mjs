@@ -80,7 +80,7 @@ export function pickReadyTask(items, workerId, skip = new Set()) {
   const state = new Map(items.map(item => [item.uid, item.detail?.attributes.state]));
   for (const item of items) {
     const workflow = item.detail?.attributes.workflow;
-    if (state.get(item.uid) !== 'ready' || !workflow?.grant || workflow.run || workflow.review?.pending) continue;
+    if (state.get(item.uid) !== 'ready' || !workflow?.grant || workflow.run?.status === 'running' || workflow.review?.pending) continue;
     const assignee = workflow.assignment?.assignee ?? workflow.spec?.assignee;
     if (assignee && assignee !== workerId) continue;
     if ((workflow.spec?.dependsOn ?? []).some(uid => state.get(uid) !== 'done')) continue;

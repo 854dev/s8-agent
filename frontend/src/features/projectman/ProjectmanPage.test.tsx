@@ -434,3 +434,18 @@ test('resident workers can switch modes, revert to config and take a ready task'
     { url: '/api/projectman/workers/dev-a/instructions', body: { uid: 'task-1' } },
   ])
 })
+
+test('a confirmed blocked task can be returned to ready with the same plan; a pending review hides it', async () => {
+  const f = fixture()
+  Object.assign(f.detail.execution.workflow!, { grant: { actorUid: 'human' }, confirmation: { actorUid: 'human', planHash: 'a'.repeat(64), planVersion: 1, message: 'ok' }, review: undefined, run: { id: 'run-1', status: 'finished', startedAt: '2026-10-20' } })
+  const user = userEvent.setup(); render(<ProjectmanPage />)
+  await user.click(await screen.findByRole('button', { name: '실행 대기로 되돌리기' }))
+  await waitFor(() => expect(f.operations).toHaveLength(1))
+  expect(f.operations[0]).toMatchObject({ action: 'retry', expectedRevision: 4 })
+  cleanup()
+  const g = fixture()
+  Object.assign(g.detail.execution.workflow!, { grant: { actorUid: 'human' }, confirmation: { actorUid: 'human', planHash: 'a'.repeat(64), planVersion: 1, message: 'ok' } })
+  render(<ProjectmanPage />)
+  await screen.findByText('카운터 구현', { selector: 'h2' })
+  expect(screen.queryByRole('button', { name: '실행 대기로 되돌리기' })).not.toBeInTheDocument()
+})

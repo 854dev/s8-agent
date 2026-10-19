@@ -46,7 +46,7 @@ export async function claimWork({ root, client, uid, workerId = 's8-developer' }
   let task = await client.getWorkflow(uid);
   if (!saved?.revision) {
     if (!saved) {
-      if (task.workflow?.run || task.executionAllowed === false || task.state !== 'ready' || !task.workflow?.grant || task.workflow.review?.pending) throw new Error(`실행 가능한 상태가 아닙니다(state: ${task.state}). 승인된 ready 작업만 claim합니다.`);
+      if (task.workflow?.run?.status === 'running' || task.executionAllowed === false || task.state !== 'ready' || !task.workflow?.grant || task.workflow.review?.pending) throw new Error(`실행 가능한 상태가 아닙니다(state: ${task.state}). 승인된 ready 작업만 claim합니다.`);
       await requireConfirmedPlan(client, uid);
       const runId = randomUUID();
       await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });

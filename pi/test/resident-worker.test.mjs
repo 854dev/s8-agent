@@ -25,12 +25,13 @@ test('ready task selection respects assignment, dependencies, runs and skipped r
   const items = [
     ready('other', { assignment: { assignee: 'dev-b' } }),
     ready('blocked', { spec: { dependsOn: ['dep'] } }), ready('dep', {}, 'doing'),
-    ready('running', { run: { id: 'r' } }), ready('question', { review: { pending: true } }),
+    ready('running', { run: { id: 'r', status: 'running' } }), ready('question', { review: { pending: true } }),
     ready('skipped'), ready('mine', { assignment: { assignee: 'dev-a' } }),
   ];
   assert.deepEqual(pickReadyTask(items, 'dev-a', new Set(['skipped:1'])), { uid: 'mine', revision: 1 });
   assert.equal(pickReadyTask([ready('free')], 'dev-a').uid, 'free');
   assert.equal(pickReadyTask([ready('todo', {}, 'todo')], 'dev-a'), null);
+  assert.equal(pickReadyTask([ready('retried', { run: { id: 'r', status: 'finished' } })], 'dev-a').uid, 'retried', 'a retried task keeps its finished run');
 });
 
 test('passive workers wait for instructions, take one task at a time and move on after the report', async t => {

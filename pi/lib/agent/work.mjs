@@ -45,7 +45,7 @@ export async function startWork(root, uid, { client = projectmanFromEnv(), run =
   else {
     const assignee = task.workflow?.assignment?.assignee ?? task.workflow?.spec?.assignee;
     if (assignee && assignee !== workerId) throw new Error(`${assignee}에게 배정된 작업입니다(현재 워커: ${workerId}).`);
-    if (task.workflow?.run || task.executionAllowed === false || task.state !== 'ready' || !task.workflow?.grant || task.workflow.review?.pending) throw new Error(`실행 가능한 상태가 아닙니다(state: ${task.state}). 사람이 계획을 확정한 ready 작업만 실행합니다.`);
+    if (task.workflow?.run?.status === 'running' || task.executionAllowed === false || task.state !== 'ready' || !task.workflow?.grant || task.workflow.review?.pending) throw new Error(`실행 가능한 상태가 아닙니다(state: ${task.state}). 사람이 계획을 확정한 ready 작업만 실행합니다.`);
     await requireConfirmedPlan(client, uid);
     const workspace = await prepareWorktree({ root, uid, repoPath: task.workflow.spec.repoPath });
     const inputTree = await importDependencies(root, client, uid, task, workspace.worktree);

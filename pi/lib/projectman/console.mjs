@@ -86,7 +86,7 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
       const action = /^\/api\/projectman\/items\/([a-zA-Z0-9_-]+)\/workflow$/.exec(url.pathname);
       if (req.method === 'POST' && action) {
         const input = await body(req);
-        if (!['authorize', 'draft', 'decide', 'complete', 'cancel', 'recover'].includes(input.action)) return json(res, 400, { error: '지원하지 않는 사용자 결정입니다.' });
+        if (!['authorize', 'draft', 'decide', 'complete', 'cancel', 'recover', 'retry'].includes(input.action)) return json(res, 400, { error: '지원하지 않는 사용자 결정입니다.' });
         return json(res, 200, input.action === 'complete' ? await submitCompletionReview({ root, client, uid: action[1], input }) : await client.workflow(action[1], input));
       }
       const finish = /^\/api\/projectman\/items\/([a-zA-Z0-9_-]+)\/finish-stopped-run$/.exec(url.pathname);
@@ -115,7 +115,7 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
         if (Object.keys(input).some(key => key !== 'uid') || typeof input.uid !== 'string' || !/^[a-zA-Z0-9_-]{1,120}$/.test(input.uid)) return json(res, 400, { error: '작업 UID를 확인하세요.' });
         // 사람 세션으로 작업을 확인한다. 실행은 워커가 claim할 때 PH-CMS가 다시 검사한다.
         const task = await client.getWorkflow(input.uid);
-        if (task.state !== 'ready' || !task.workflow?.grant || task.workflow.run) return json(res, 409, { error: '사람이 계획을 확정한 실행 대기(ready) 작업만 지시할 수 있습니다.' });
+        if (task.state !== 'ready' || !task.workflow?.grant || task.workflow.run?.status === 'running') return json(res, 409, { error: '사람이 계획을 확정한 실행 대기(ready) 작업만 지시할 수 있습니다.' });
         const assignee = task.workflow.assignment?.assignee ?? task.workflow.spec?.assignee;
         if (assignee && assignee !== worker.id) return json(res, 409, { error: `${assignee}에게 배정된 작업입니다.` });
         await queueInstruction(root, worker.id, input.uid, 'console');

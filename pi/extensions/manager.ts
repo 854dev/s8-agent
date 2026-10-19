@@ -117,7 +117,7 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
           const needsPreflight = item.detail?.attributes.state === 'todo' && !hasReviewedPreflight(item, workflow);
           const needsReview = item.detail?.attributes.state === 'review' && !workflow.managerReview;
           const humanQuestion = workflow.review?.pending;
-          const readyToRun = !residentActive && item.detail?.attributes.state === 'ready' && workflow.grant && !workflow.run;
+          const readyToRun = !residentActive && item.detail?.attributes.state === 'ready' && workflow.grant && workflow.run?.status !== 'running';
           if (!seen.has(key) && (needsPreflight || humanQuestion || needsReview || readyToRun)) {
             seen.add(key);
             if (seen.size > 1000) seen.delete(seen.values().next().value!);

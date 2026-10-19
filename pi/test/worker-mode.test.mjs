@@ -173,7 +173,10 @@ test('run_worker resumes a claimed run in the same worktree and refuses unconfir
   await assert.rejects(f.start('task2'), /confirmation/);
   f.rows.get('task3').state = 'todo';
   await assert.rejects(f.start('task3'), /ready/);
-  assert.deepEqual((await readdir(path.join(f.root, '.s8-runtime/worktrees'))).filter(name => !name.endsWith('.json')), ['task1']);
+  // 콘솔의 retry로 blocked에서 ready로 돌아온 작업은 끝난 실행 기록이 있어도 다시 실행한다.
+  Object.assign(f.rows.get('task3'), { state: 'ready', workflow: { ...f.rows.get('task3').workflow, run: { id: 'old', status: 'finished' } } });
+  assert.equal((await f.start('task3')).resumed, false);
+  assert.deepEqual((await readdir(path.join(f.root, '.s8-runtime/worktrees'))).filter(name => !name.endsWith('.json')).sort(), ['task1', 'task3']);
 });
 
 test('dependency results compose into the worktree of a later task', async t => {

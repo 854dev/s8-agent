@@ -44,6 +44,8 @@ test('decisions reject cross-origin writes and propagate version conflicts witho
   const success = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...input, expectedRevision: 1 }) }); assert.equal(success.status, 200);
   assert.equal(operations.length, 2);
   assert.equal((await fetch(url, { method: 'POST', headers, body: JSON.stringify({ action: 'claim' }) })).status, 400);
+  assert.equal((await fetch(url, { method: 'POST', headers, body: JSON.stringify({ action: 'retry', expectedRevision: 1, requestId: 'retry-request', message: 'again' }) })).status, 200);
+  assert.equal(operations.at(-1).input.action, 'retry');
 });
 
 
