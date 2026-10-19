@@ -43,6 +43,25 @@ function normalizeTelegram(telegram) {
   return { allowedUserIds, allowedGroupIds, scheduleChatId };
 }
 
+// 상주 워커 모드. active: ready 작업을 찾아 수행, passive: 지시를 받아야 수행, paused: 새 작업을 받지 않음.
+export const WORKER_MODES = ['active', 'passive', 'paused'];
+export const WORKER_ID = /^[a-z][a-z0-9-]{0,31}$/;
+
+function normalizeWorkers(workers) {
+  if (workers == null) return [];
+  if (!Array.isArray(workers) || workers.length > 20) throw new Error('s8-config.yml: workers must be a list of at most 20 entries');
+  const ids = new Set();
+  return workers.map(entry => {
+    const worker = fields(entry, ['id', 'mode'], 'workers[]');
+    if (typeof worker.id !== 'string' || !WORKER_ID.test(worker.id)) throw new Error('s8-config.yml: workers[].id must be lowercase letters, digits or -, starting with a letter (max 32)');
+    if (ids.has(worker.id)) throw new Error(`s8-config.yml: duplicate worker id: ${worker.id}`);
+    ids.add(worker.id);
+    const mode = worker.mode ?? 'passive';
+    if (!WORKER_MODES.includes(mode)) throw new Error(`s8-config.yml: workers[].mode must be ${WORKER_MODES.join(', ')}`);
+    return { id: worker.id, mode };
+  });
+}
+
 function httpUrl(value, name) {
   try {
     const url = new URL(value);
@@ -78,7 +97,7 @@ const expandHome = value => value === '~' || value.startsWith('~/') ? path.join(
 
 /** s8-config.yml을 읽어 검증하고 기본값을 채운다. 상대 kbRoot는 저장소 루트 기준 절대 경로로 바꾼다. */
 export function loadS8Config(root = agentRoot) {
-  const data = fields(readConfigFile(path.join(root, 's8-config.yml')), ['kbRoot', 'projectman', 'network', 'telegram', 'publicUrl'], 'top-level');
+  const data = fields(readConfigFile(path.join(root, 's8-config.yml')), ['kbRoot', 'projectman', 'network', 'workers', 'telegram', 'publicUrl'], 'top-level');
   const projectman = fields(data.projectman, ['apiUrl', 'startCommand'], 'projectman');
   const network = fields(data.network, ['bindIp', 'httpPort'], 'network');
   const bindIp = network.bindIp == null ? DEFAULTS.network.bindIp : text(network.bindIp, 'network.bindIp');
@@ -92,6 +111,7 @@ export function loadS8Config(root = agentRoot) {
       startCommand: projectman.startCommand == null ? DEFAULTS.projectman.startCommand : text(projectman.startCommand, 'projectman.startCommand'),
     },
     network: { bindIp, httpPort },
+    workers: normalizeWorkers(data.workers),
     telegram: normalizeTelegram(data.telegram),
     publicUrl: data.publicUrl == null ? null : httpUrl(data.publicUrl, 'publicUrl'),
   };

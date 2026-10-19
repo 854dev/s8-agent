@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { preflightFingerprint } from '../lib/projectman/preflight.mjs';
@@ -156,4 +156,31 @@ test('console finish fails closed with fixed messages when the agent key is miss
   const response = await fetch(`${refused.base}/api/projectman/items/task-1/finish-stopped-run`, { method: 'POST', headers: refused.headers, body });
   const result = await response.json();
   assert.equal(response.status, 409); assert.equal(result.code, 'FINISH_REFUSED'); assert.match(result.error, /거부/); assert.doesNotMatch(JSON.stringify(result), /secret/);
+});
+
+test('console lists resident workers, switches modes and queues instructions only for ready tasks', async t => {
+  let task = { state: 'todo', workflow: { revision: 3 } };
+  const { root, base, headers } = await fixture(t, { client: { getWorkflow: async () => task } });
+  await writeFile(path.join(root, 's8-config.yml'), 'workers:\n  - id: dev-a\n    mode: passive\n');
+  const status = async () => (await (await fetch(`${base}/api/projectman/workers`, { headers })).json()).workers;
+  assert.deepEqual((await status()).map(({ id, mode, configMode, overridden, queue }) => ({ id, mode, configMode, overridden, queue })), [{ id: 'dev-a', mode: 'passive', configMode: 'passive', overridden: false, queue: [] }]);
+  assert.equal((await fetch(`${base}/api/projectman/workers`)).status, 401);
+
+  const mode = body => fetch(`${base}/api/projectman/workers/dev-a/mode`, { method: 'POST', headers, body: JSON.stringify(body) });
+  assert.equal((await fetch(`${base}/api/projectman/workers/dev-a/mode`, { method: 'POST', headers: { ...headers, Origin: 'http://evil.invalid' }, body: '{"mode":"active"}' })).status, 403);
+  assert.equal((await mode({ mode: 'busy' })).status, 400);
+  assert.equal((await mode({ mode: 'active' })).status, 200);
+  assert.deepEqual((await status())[0].mode, 'active');
+  assert.equal((await mode({ mode: null })).status, 200);
+  assert.equal((await status())[0].overridden, false);
+  assert.equal((await fetch(`${base}/api/projectman/workers/dev-z/mode`, { method: 'POST', headers, body: '{"mode":"active"}' })).status, 404);
+
+  const instruct = uid => fetch(`${base}/api/projectman/workers/dev-a/instructions`, { method: 'POST', headers, body: JSON.stringify({ uid }) });
+  assert.equal((await instruct('task-1')).status, 409);
+  task = { state: 'ready', workflow: { revision: 3, grant: { actorUid: 'human' }, assignment: { assignee: 'dev-b' } } };
+  assert.equal((await instruct('task-1')).status, 409);
+  task = { state: 'ready', workflow: { revision: 3, grant: { actorUid: 'human' } } };
+  assert.equal((await instruct('../x')).status, 400);
+  assert.equal((await instruct('task-1')).status, 202);
+  assert.deepEqual((await status())[0].queue, ['task-1']);
 });

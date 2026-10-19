@@ -23,6 +23,7 @@ test('a missing file uses defaults, the file is the only source, and environment
     kbRoot: path.resolve(root, '../854_md'),
     projectman: { apiUrl: null, startCommand: null },
     network: { bindIp: '127.0.0.1', httpPort: 80 },
+    workers: [],
     telegram: { allowedUserIds: [], allowedGroupIds: [], scheduleChatId: null },
     publicUrl: null,
   });
@@ -33,6 +34,10 @@ projectman:
 network:
   bindIp: 100.64.0.1
   httpPort: 8080
+workers:
+  - id: dev-a
+    mode: active
+  - id: dev-b
 telegram:
   allowedUserIds: ["789", "789"]
   allowedGroupIds: ["-987"]
@@ -43,6 +48,7 @@ publicUrl: https://s8.example.invalid/s8/
     kbRoot: path.join(root, 'kb'),
     projectman: { apiUrl: 'http://127.0.0.1:8000/api/v2', startCommand: 'cd ../ph-cms && pnpm dev' },
     network: { bindIp: '100.64.0.1', httpPort: 8080 },
+    workers: [{ id: 'dev-a', mode: 'active' }, { id: 'dev-b', mode: 'passive' }],
     telegram: { allowedUserIds: ['789'], allowedGroupIds: ['-987'], scheduleChatId: '-987' },
     publicUrl: 'https://s8.example.invalid/s8/',
   });
@@ -84,7 +90,7 @@ test('malformed, unsafe, unknown, linked, or credential-bearing configs fail wit
     'network:\n  bindIp: 0.0.0.0', 'network:\n  bindIp: fixture-value-do-not-display', 'network:\n  httpPort: 0', 'network:\n  httpPort: "80"',
     'kbRoot: ["fixture-value-do-not-display"]', 'kbRoot: "a\\nfixture-value-do-not-display"',
     'publicUrl: https://s8.example.invalid/?token=fixture-value-do-not-display',
-    'infra:\n  runtime: native', 'workers: 1', 'worker-entries: {}',
+    'infra:\n  runtime: native', 'workers: 1', 'workers:\n  - id: Dev', 'workers:\n  - id: a\n  - id: a', 'workers:\n  - id: a\n    mode: busy', 'workers:\n  - id: a\n    extra: 1', 'worker-entries: {}',
   ]) {
     await writeFile(file, yaml);
     assert.throws(() => loadS8Config(root), error => !error.message.includes('fixture-value-do-not-display'), yaml);

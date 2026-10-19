@@ -7,6 +7,8 @@ import { consoleSessions } from './session.mjs';
 import { submitCompletionReview } from './completion-review.mjs';
 import { readEventPage } from './events.mjs';
 import { finishStoppedRun } from '../agent/finish.mjs';
+import { loadS8Config, WORKER_MODES } from '../config/s8-config.mjs';
+import { queueInstruction, setWorkerMode, workerStatuses } from '../agent/resident.mjs';
 
 const json = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(data)); };
 async function body(req) {
@@ -95,6 +97,29 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
         if ((await client.getWorkflow(finish[1])).workflow?.run?.id !== input.runId) return json(res, 409, { error: '현재 실행이 바뀌었습니다. 새로고침 후 다시 확인하세요.' });
         try { return json(res, 200, await finishStoppedRun({ root, client: agentClientFactory(), uid: finish[1], runId: input.runId, confirmed: true })); }
         catch (error) { if (error.code === 'FINISH_REFUSED') return json(res, 409, { code: error.code, error: error.message }); throw error; }
+      }
+      // 상주 워커: 목록·모드 변경·작업 지시. 워커 목록은 s8-config.yml의 workers다.
+      if (req.method === 'GET' && url.pathname === '/api/projectman/workers') {
+        return json(res, 200, { workers: await workerStatuses(root, loadS8Config(root).workers) });
+      }
+      const workerAction = /^\/api\/projectman\/workers\/([a-z][a-z0-9-]{0,31})\/(mode|instructions)$/.exec(url.pathname);
+      if (req.method === 'POST' && workerAction) {
+        const worker = loadS8Config(root).workers.find(item => item.id === workerAction[1]);
+        if (!worker) return json(res, 404, { error: 's8-config.yml에 없는 워커입니다.' });
+        const input = await body(req);
+        if (workerAction[2] === 'mode') {
+          if (Object.keys(input).some(key => key !== 'mode') || !(input.mode === null || WORKER_MODES.includes(input.mode))) return json(res, 400, { error: `모드는 ${WORKER_MODES.join(', ')} 또는 null(설정값)입니다.` });
+          await setWorkerMode(root, worker.id, input.mode);
+          return json(res, 200, { worker: (await workerStatuses(root, [worker]))[0] });
+        }
+        if (Object.keys(input).some(key => key !== 'uid') || typeof input.uid !== 'string' || !/^[a-zA-Z0-9_-]{1,120}$/.test(input.uid)) return json(res, 400, { error: '작업 UID를 확인하세요.' });
+        // 사람 세션으로 작업을 확인한다. 실행은 워커가 claim할 때 PH-CMS가 다시 검사한다.
+        const task = await client.getWorkflow(input.uid);
+        if (task.state !== 'ready' || !task.workflow?.grant || task.workflow.run) return json(res, 409, { error: '사람이 계획을 확정한 실행 대기(ready) 작업만 지시할 수 있습니다.' });
+        const assignee = task.workflow.assignment?.assignee ?? task.workflow.spec?.assignee;
+        if (assignee && assignee !== worker.id) return json(res, 409, { error: `${assignee}에게 배정된 작업입니다.` });
+        await queueInstruction(root, worker.id, input.uid, 'console');
+        return json(res, 202, { worker: (await workerStatuses(root, [worker]))[0] });
       }
       const events = /^\/api\/projectman\/runs\/([a-f0-9-]{36})\/events$/.exec(url.pathname);
       const patch = /^\/api\/projectman\/runs\/([a-f0-9-]{36})\/patch$/.exec(url.pathname);

@@ -17,6 +17,7 @@ const HELP = `사용법: ./s8.sh [--mode project|local] [--cwd 경로] [Pi 옵�
   work UID         승인된 작업의 워커를 s8-workers 세션에 실행 (start-worker-agent.sh)
   finish UID --run-id UUID --confirm-stopped  멈춘 실행을 실패로 보고해 마무리
   service scheduler  예약 데몬 전경 실행
+  service worker ID  상주 워커 루프 전경 실행 (s8-config.yml의 workers)
   --telegram take  이 세션으로 Telegram 연결 이전 (단독 --telegram도 호환)
   --telegram off   이 세션의 Telegram 연결 비활성 (--no-telegram도 호환)
   --no-telegram    Telegram 없이 단독 실행

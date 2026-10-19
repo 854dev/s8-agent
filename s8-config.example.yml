@@ -22,6 +22,20 @@ network:
   # 리눅스에서 1024 미만 포트는 한 번 허용해야 한다(README의 "80번 포트 허용" 참고). macOS는 필요 없다.
   httpPort: 80
 
+# 상주 워커. ./s8.sh로 런타임을 시작하면 항목마다 s8-workers:worker-<id> 창에 워커 루프가 뜬다. 기본값: 없음
+#   id    워커 이름. 소문자로 시작하고 소문자·숫자·-만 쓴다(32자 이하). 작업 spec.assignee에 이 이름을 쓸 수 있다
+#   mode  기본 모드. 기본값: passive
+#         active   실행 대기(ready) 작업을 스스로 맡는다
+#         passive  콘솔이나 매니저의 지시를 받아야 맡는다
+#         paused   새 작업을 맡지 않는다
+# 실행 중 모드는 S8 콘솔(작업과 결정 화면)이나 매니저에게 요청해 바꾼다. 바꾼 모드는 재시작해도 유지되고, 콘솔에서 설정값으로 되돌린다.
+workers: []
+# workers:
+#   - id: dev-1
+#     mode: active
+#   - id: dev-2
+#     mode: passive
+
 telegram:
   # 봇에 말을 걸 수 있는 사용자 ID(양수)와 그룹 ID(음수). 따옴표로 감싼다. 기본값: 없음(Telegram 사용 안 함)
   allowedUserIds:

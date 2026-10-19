@@ -404,3 +404,33 @@ test('finished or non-doing runs do not offer a manual finish', async () => {
   await screen.findByText('finished · 워커 기록 없음')
   expect(screen.queryByRole('button', { name: '실패로 마무리' })).not.toBeInTheDocument()
 })
+
+test('resident workers can switch modes, revert to config and take a ready task', async () => {
+  const f = fixture(), posts: { url: string; body: unknown }[] = []
+  f.detail.execution.state = 'ready'
+  Object.assign(f.detail.execution.workflow!, { grant: { actorUid: 'human' }, review: undefined })
+  const worker = { id: 'dev-a', mode: 'passive', configMode: 'passive', overridden: false, running: true, current: null, queue: [] as string[], lastError: null }
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/workers')) return Response.json({ workers: [structuredClone(worker)] })
+    if (url.includes('/workers/')) {
+      const body = JSON.parse(String(init?.body)); posts.push({ url, body })
+      if (url.endsWith('/mode')) Object.assign(worker, { mode: body.mode ?? worker.configMode, overridden: body.mode !== null })
+      else worker.queue.push(body.uid)
+      return Response.json({ worker })
+    }
+    return f.fetcher(url, init)
+  }))
+  const user = userEvent.setup(); render(<ProjectmanPage />)
+  const panel = await screen.findByRole('region', { name: '상주 워커' })
+  await user.click(await within(panel).findByRole('button', { name: '자동' }))
+  await waitFor(() => expect(within(panel).getByRole('button', { name: '자동' })).toHaveAttribute('aria-pressed', 'true'))
+  await user.click(within(panel).getByRole('button', { name: '설정값으로 되돌리기' }))
+  await waitFor(() => expect(within(panel).getByRole('button', { name: '지시 대기' })).toHaveAttribute('aria-pressed', 'true'))
+  await user.click(await screen.findByRole('button', { name: '이 워커에게 지시' }))
+  await waitFor(() => expect(within(panel).getByText(/대기 지시 task-1/)).toBeInTheDocument())
+  expect(posts).toEqual([
+    { url: '/api/projectman/workers/dev-a/mode', body: { mode: 'active' } },
+    { url: '/api/projectman/workers/dev-a/mode', body: { mode: null } },
+    { url: '/api/projectman/workers/dev-a/instructions', body: { uid: 'task-1' } },
+  ])
+})

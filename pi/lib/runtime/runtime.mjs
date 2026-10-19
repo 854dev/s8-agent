@@ -8,7 +8,7 @@ import { telegramOwner } from '../telegram/status.mjs';
 import { createHash } from 'node:crypto';
 import { validatePiOptions } from '../agent/launch.mjs';
 import { moveTelegram, validSession } from './managed-sessions.mjs';
-import { startPiServices } from './services.mjs';
+import { startPiServices, startResidentWorkers } from './services.mjs';
 import { sleep } from './process.mjs';
 import { runTmux, withTmuxLock, ensureSession, ensureWindow, stopWindow, windows, windowTail, quote, lockName, sessionOption } from './tmux-windows.mjs';
 
@@ -51,7 +51,10 @@ export async function startPiRuntime(root, { session = 's8-main', mode = 'projec
 
     log('기존 Pi 창 중지');
     await stopWindow(run, root, session, 'pi');
-    if (mode === 'project') await startPiServices(root, { session, scheduler, run, log });
+    if (mode === 'project') {
+      await startPiServices(root, { session, scheduler, run, log });
+      await startResidentWorkers(root, { run, log });
+    }
 
     const settings = { '@s8-telegram': telegram ? 'take' : 'off', '@s8-mode': mode, '@s8-cwd': cwd, '@s8-pi-args': JSON.stringify(args) };
     for (const [name, value] of Object.entries(settings)) await run(['set-option', '-t', session, name, value]);

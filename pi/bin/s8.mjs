@@ -2,7 +2,9 @@
 //   work UID              승인된 작업의 워커를 s8-workers 세션 창에 실행(lib/agent/work.mjs)
 //   finish UID --run-id UUID --confirm-stopped   멈춘 실행을 실패로 보고해 마무리(lib/agent/finish.mjs)
 //   service scheduler     예약 데몬을 이 프로세스에서 실행(tmux 서비스 창, 수동 진단)
+//   service worker ID     상주 워커 루프를 이 프로세스에서 실행(s8-workers:worker-ID 창, lib/agent/resident.mjs)
 //   그 밖                 런타임 시작: 옵션 해석·선택 메뉴·tmux 런타임 (재)시작(user-command.mjs)
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadEnv, kbRoot, preparePiEnvironment, usageError } from '../lib/agent/launch.mjs';
@@ -19,6 +21,31 @@ async function runScheduler(args) {
   const script = path.join(root, 'pi/bin/scheduler.mjs');
   process.argv.splice(1, Infinity, script);
   await import(pathToFileURL(script).href);
+}
+
+async function runResident(args) {
+  if (args.length !== 1) throw usageError('사용법: ./s8.sh service worker ID');
+  loadEnv(root);
+  const [{ loadS8Config }, resident, { startWork, WORK_SESSION }, { windows, runTmux }, { acquirePidLock }, { projectmanFromEnv }] = await Promise.all([
+    import('../lib/config/s8-config.mjs'), import('../lib/agent/resident.mjs'), import('../lib/agent/work.mjs'),
+    import('../lib/runtime/tmux-windows.mjs'), import('../lib/runtime/process.mjs'), import('../lib/projectman/client.ts'),
+  ]);
+  const worker = loadS8Config(root).workers.find(item => item.id === args[0]);
+  if (!worker) throw usageError(`s8-config.yml의 workers에 없는 워커입니다: ${args[0]}`);
+  const lock = resident.residentLockFile(root, worker.id);
+  await mkdir(path.dirname(lock), { recursive: true, mode: 0o700 });
+  const release = await acquirePidLock(lock);
+  const controller = new AbortController();
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.once(signal, () => controller.abort());
+  // Projectman 연결 설정이 없으면 지시도 ready 작업도 다룰 수 없으므로 시작하지 않는다.
+  const client = projectmanFromEnv();
+  try {
+    await resident.runResidentWorker(root, worker, {
+      client,
+      start: uid => startWork(root, uid, { client, workerId: worker.id }),
+      taskAlive: async uid => (await windows(runTmux, WORK_SESSION).catch(() => [])).some(window => window.name === uid && !window.dead),
+    }, { signal: controller.signal });
+  } finally { await release(); }
 }
 
 async function runWork([uid, ...rest]) {
@@ -44,8 +71,9 @@ try {
   if (command === 'work') await runWork(args);
   else if (command === 'finish') await runFinish(args);
   else if (command === 'service') {
-    if (args[0] !== 'scheduler') throw usageError('서비스는 scheduler만 있습니다.');
-    await runScheduler(args.slice(1));
+    if (args[0] === 'scheduler') await runScheduler(args.slice(1));
+    else if (args[0] === 'worker') await runResident(args.slice(1));
+    else throw usageError('서비스는 scheduler, worker ID입니다.');
   } else {
     // 런타임 제어 모듈은 사용자 실행에서만 불러온다(서비스 시작을 가볍게 유지).
     const { runUserCommand } = await import('../lib/runtime/user-command.mjs');

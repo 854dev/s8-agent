@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ConsoleError, createRequestId, list, request, type Detail, type Item } from './api'
+import { ConsoleError, createRequestId, list, request, type Detail, type Item, type ResidentWorker, type WorkerMode } from './api'
 import CompletionReviewForm from './CompletionReviewForm'
 import ResourceForm, { type ResourceEditor } from './ResourceForm'
+import WorkersPanel from './WorkersPanel'
 import './projectman.css'
 
 const labels: Record<string, string> = { todo: '일 시작 전', ready: '실행 대기', doing: '실행 중', blocked: '대기', review: '개발 완료 · 최종 확인 대기', done: '완료', canceled: '취소' }
@@ -33,6 +34,7 @@ export default function ProjectmanPage() {
   const [items, setItems] = useState<Item[]>([]), [projects, setProjects] = useState<Item[]>([]), [workspaces, setWorkspaces] = useState<Item[]>([])
   const [workspace, setWorkspace] = useState(new URLSearchParams(location.search).get('workspace') ?? ''), [humanOnly, setHumanOnly] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [workers, setWorkers] = useState<ResidentWorker[]>([]), [instructWorker, setInstructWorker] = useState('')
   const [editor, setEditor] = useState<ResourceEditor | null>(null)
   const resourceForm = useRef<HTMLDivElement>(null)
   useEffect(() => { if (editor) resourceForm.current?.scrollIntoView?.({ block: 'start' }) }, [editor])
@@ -55,8 +57,8 @@ export default function ProjectmanPage() {
   eventSelection.current = `${uid}:${selectedRun || detail?.execution?.workflow?.run?.id || ''}`
   const fail = useCallback((cause: unknown) => { if (cause instanceof ConsoleError && cause.status === 401 && cause.code !== 'SESSION_RENEWED') { setAuthenticated(false); setEditor(null) } setError(cause instanceof Error ? cause.message : '연결에 실패했습니다.') }, [])
   const refresh = useCallback(async (signal?: AbortSignal) => {
-    const [tasks, children, ws, ps] = await Promise.all([list('task', '', signal), list('subtask', '', signal), list('workspace', '', signal), list('project', '', signal)])
-    if (!signal?.aborted) { setItems([...tasks.items, ...children.items]); setWorkspaces(ws.items); setProjects(ps.items); setLoaded(true) }
+    const [tasks, children, ws, ps, resident] = await Promise.all([list('task', '', signal), list('subtask', '', signal), list('workspace', '', signal), list('project', '', signal), request<{ workers?: ResidentWorker[] }>('/workers', { signal })])
+    if (!signal?.aborted) { setItems([...tasks.items, ...children.items]); setWorkspaces(ws.items); setProjects(ps.items); setWorkers(resident.workers ?? []); setLoaded(true) }
   }, [])
   const refreshDetail = useCallback(async (signal?: AbortSignal) => {
     if (!uid) return
@@ -117,6 +119,15 @@ export default function ProjectmanPage() {
     } catch (cause) { fail(cause) }
     finally { setBusy(false) }
   }
+  // 상주 워커 모드 변경(null이면 설정값)과 실행 대기 작업 지시.
+  async function workerAction(endpoint: string, payload: Record<string, unknown>, message: string) {
+    setBusy(true); setError(''); setNotice('')
+    try { await request(endpoint, { method: 'POST', body: JSON.stringify(payload) }); setNotice(message); await refresh() }
+    catch (cause) { fail(cause) }
+    finally { setBusy(false) }
+  }
+  const setWorkerMode = (id: string, mode: WorkerMode | null) => workerAction(`/workers/${encodeURIComponent(id)}/mode`, { mode }, mode ? `${id} 모드를 바꿨습니다.` : `${id} 모드를 설정값으로 되돌렸습니다.`)
+  const instruct = (id: string) => workerAction(`/workers/${encodeURIComponent(id)}/instructions`, { uid }, `${id}에게 지시했습니다. 워커가 비어 있으면 곧 시작합니다.`)
   async function loadEvents(runId: string) {
     setBusy(true)
     const selection = eventSelection.current
@@ -151,6 +162,7 @@ export default function ProjectmanPage() {
         if (deleted && editor.item.type === 'workspace' && workspace === editor.item.uid) selectWorkspace('')
         await refresh(); if (!deleted && selectedTask.current === editor.item.uid) await refreshDetail()
       }} /></div>}
+      <WorkersPanel workers={workers} busy={busy} onMode={(id, mode) => { void setWorkerMode(id, mode) }} onOpenTask={next => select(next)} />
       <div className="pm-workspace-layout">
         <nav className="pm-workspaces" aria-label="워크스페이스">
           <h2>워크스페이스</h2>
@@ -181,6 +193,7 @@ export default function ProjectmanPage() {
         <section><h3>원래 요청</h3><p className="pm-text">{detail.item.detail?.text || '등록된 요청 본문이 없습니다.'}</p></section>
         {detail.execution.state === 'todo' && <section><h3>일 시작 전 · 매니저 검토</h3><p>요구사항의 누락·충돌·의문은 매니저가 먼저 확인하고 사용자 답변을 작업에 반영합니다. 최종 승인 후에는 개발 에이전트가 범위 안에서 스스로 결정하며 진행합니다.</p>{detail.execution.preflightReviewed ? <><p>매니저 사전 검토 완료 · 최종 승인 대기</p><p className="pm-text">{detail.item.detail?.attributes.s8Preflight?.summary}</p></> : <p>매니저 사전 검토가 끝나야 최종 승인할 수 있습니다.</p>}</section>}
         {workflow?.spec && <section><h3>실행 계획과 완료 조건</h3><ul>{workflow.spec.completionCriteria.map((value, i) => <li key={i}>{value}</li>)}</ul><dl><dt>저장소</dt><dd>{workflow.spec.repoPath}</dd><dt>실행 계획</dt><dd className="pm-text">{workflow.spec.plan}</dd><dt>계획 버전</dt><dd>{workflow.planVersion} · {workflow.planHash}</dd><dt>대화·결정 근거</dt><dd>{workflow.spec.decisionRefs.join(', ')}</dd><dt>명령</dt><dd>{workflow.spec.commandNames.join(', ') || '없음'}</dd><dt>선행 작업</dt><dd>{workflow.spec.dependsOn.join(', ') || '없음'}</dd></dl>{!workflow.grant && detail.execution.state === 'todo' && detail.execution.preflightReviewed && <><label className="pm-check"><input type="checkbox" checked={confirmed} onChange={event => setConfirmedRevision(event.target.checked ? workflow.revision : null)} />매니저와 논의한 최종 계획을 확인하고 이 버전으로 실행을 요청합니다.</label><button disabled={busy || !confirmed} className="pm-primary" onClick={() => { void mutate({ action: 'authorize', planHash: workflow.planHash, message: '사람과 매니저의 논의를 반영한 최종 계획을 확인하고 실행을 요청합니다.' }) }}>최종 계획 확정 · 실행</button></>}</section>}
+        {detail.execution.state === 'ready' && workflow?.grant && !workflow.run && workers.length > 0 && <section aria-label="워커 지시"><h3>워커에게 지시</h3><p className="pm-hint">자동 모드 워커는 이 작업을 스스로 맡을 수 있습니다. 특정 워커에게 맡기려면 지시하세요. 워커가 일시 정지면 지시는 대기합니다.</p><div className="pm-actions"><label>워커<select value={instructWorker || workers[0]!.id} onChange={event => setInstructWorker(event.target.value)}>{workers.map(worker => <option key={worker.id} value={worker.id}>{worker.id} · {worker.current ? '작업 중' : '쉬는 중'}</option>)}</select></label><button className="pm-primary" disabled={busy} onClick={() => { void instruct(instructWorker || workers[0]!.id) }}>이 워커에게 지시</button></div></section>}
         {review && <section className="pm-review" id={`review-${review.id}`}><h3>{review.pending ? review.audience === 'manager' ? '매니저가 확인할 내용' : '사람이 결정할 내용' : '기록된 결정'}</h3><small><a href={`?task=${detail.item.uid}#review-${review.id}`}>검토 {review.id}</a> · {review.audience === 'manager' ? '매니저 사실 확인' : '인간 결정'}</small><h4>{review.question}</h4><p>{review.reason}</p>{review.options?.length ? <ul>{review.options.map((option, i) => <li key={i}>{option}</li>)}</ul> : null}{review.impact && <p><b>영향</b> {review.impact}</p>}{review.recommendation && <p><b>권고안</b> {review.recommendation}</p>}{review.pending && !workflow?.run && !workflow?.confirmation && review.audience === 'manager' ? <p>매니저가 근거를 확인해 답변하거나 인간 검토로 전달합니다.</p> : review.pending && !workflow?.run && !workflow?.confirmation ? <><label htmlFor="pm-human-answer">내 답변</label><textarea id="pm-human-answer" rows={4} value={answer} onChange={event => { setAnswer(event.target.value); setAnswerRevision(previous => previous ?? workflow?.revision ?? null) }} /><p className="pm-hint">저장은 실행하지 않습니다. 답변을 작업 계획에 반영한 뒤 별도로 실행을 승인합니다.</p><label className="pm-check"><input type="checkbox" checked={confirmed} onChange={event => setConfirmedRevision(event.target.checked ? workflow.revision : null)} />답변과 승인 범위를 확인했습니다.</label><div className="pm-actions"><button disabled={busy} onClick={() => { void mutate({ action: 'draft', reviewId: review.id, answer }) }}>답변 저장</button><button className="pm-primary" disabled={busy || !answer.trim() || !confirmed} onClick={() => { void mutate({ action: 'decide', reviewId: review.id, decision: 'resume', answer }) }}>답변 확정 · 계획 반영</button><button disabled={busy || !answer.trim() || !confirmed} onClick={() => { void mutate({ action: 'decide', reviewId: review.id, decision: 'reject', answer }) }}>거절</button><button disabled={busy || !answer.trim() || !confirmed} onClick={() => { void mutate({ action: 'decide', reviewId: review.id, decision: 'cancel', answer }) }}>취소</button></div></> : review.pending ? <p>이전 검토 요청입니다. 필요한 변경은 새 work로 등록하세요.</p> : <><p className="pm-text">{review.answer}</p><small>결정자 {review.actorUid}</small>{review.resumedRunId && <p>재개 실행: {review.resumedRunId}</p>}</>}</section>}
         {workflow?.result && <section><h3>개발 결과와 검증</h3><p className="pm-text">{workflow.result.summary}</p><p>변경: {workflow.result.changedFiles.join(', ') || '없음'}</p>{(['remainingItems', 'decisions', 'executionErrors'] as const).map(key => workflow.result?.[key]?.length ? <div key={key}><h4>{({ remainingItems: '미완료 항목', decisions: '개발자의 판단과 근거', executionErrors: '실행 장애' })[key]}</h4><ul>{workflow.result[key]!.map((text, i) => <li key={i}>{text}</li>)}</ul></div> : null)}{workflow.result.checkpoint && <p className="pm-text">체크포인트: {workflow.result.checkpoint}</p>}<ul>{workflow.result.verification.map((check, i) => <li key={i}><b>{check.ok ? '통과' : '실패'} · {check.name}</b><pre>{check.summary}</pre></li>)}</ul>{workflow.managerReview && <p><b>매니저 검토</b> {workflow.managerReview.message}</p>}{detail.execution.state === 'review' && <CompletionReviewForm comment={completionComments[uid] ?? ''} onCommentChange={comment => setCompletionComments(previous => ({ ...previous, [uid]: comment }))} onSubmit={() => { void mutate({ action: 'complete', reviewComment: completionComments[uid] ?? '' }) }} managerReviewed={Boolean(workflow.managerReview)} busy={busy} pending={Boolean(pending.current)} />}</section>}
         {workflow?.run && <section><h3>실행 기록</h3><p>{workflow.run.status} · 워커 {workflow.run.workerId ?? '기록 없음'}</p><label>실행 선택<select value={runId} onChange={event => { setSelectedRun(event.target.value); const url = new URL(location.href); url.searchParams.set('run', event.target.value); history.pushState(null, '', url) }}>{runs.map(id => <option key={id} value={id}>{id}</option>)}</select></label><a href={`/api/projectman/runs/${runId}/patch`}>검토용 변경 패치 다운로드</a><p className="pm-hint">전달 프롬프트·공개 응답·도구 실행을 페이지 단위로 확인합니다.</p><button disabled={busy || offset === null} onClick={() => { void loadEvents(runId!) }}>{events.length ? '기록 더 보기' : '실행 기록 보기'}</button>{events.map((event, i) => <details key={i}><summary>기록 {i + 1}</summary><pre>{JSON.stringify(event, null, 2)}</pre></details>)}{detail.execution.state === 'doing' && workflow.run.status !== 'finished' && <div><h4>멈춘 실행 마무리</h4><p className="pm-hint">워커가 비정상 종료돼 실행이 끝나지 않을 때만 사용합니다. 모든 장비에서 이 작업의 워커를 먼저 멈추세요. 실행은 실패로 보고되고 작업 공간의 변경은 보존됩니다.</p><label className="pm-check"><input type="checkbox" checked={stoppedRun === workflow.run.id} onChange={event => setStoppedRun(event.target.checked ? workflow.run!.id : null)} />모든 장비에서 이 실행이 멈췄음을 확인했습니다.</label><button disabled={busy || stoppedRun !== workflow.run.id} className="pm-danger" onClick={() => { void finishStoppedRun(workflow.run!.id) }}>실패로 마무리</button></div>}</section>}
