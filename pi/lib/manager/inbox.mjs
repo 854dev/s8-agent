@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { saveJson } from '../storage/json-file.mjs';
 import path from 'node:path';
 import { readdir, readFile, open, rm, mkdir, link } from 'node:fs/promises';
-import { processAlive } from '../development/worker-pool.mjs';
+import { processAlive } from '../runtime/process.mjs';
 
 
 /** Delivery is acknowledged after injection; a crash in between may replay the report. */

@@ -1,8 +1,11 @@
 import { enqueueManagerMessage } from '../manager/inbox.mjs';
 import { saveJson } from '../storage/json-file.mjs';
 import { requireConfirmedPlan } from '../projectman/preflight.mjs';
-import { workerRequest, workerStates, processAlive } from './worker-pool.mjs';
-import { getWorkerState } from './worker-communicator.mjs';
+import { workerRequest, workerStates } from './worker-pool.mjs';
+import { getWorkerState, readWorkerResult, withdrawWorkerAssignment } from './worker-store.mjs';
+import { processAlive } from '../runtime/process.mjs';
+import { usesRemoteWorkspace } from './worker-identity.mjs';
+import { workerStateIsFresh } from './worker-protocol.mjs';
 import { loadS8Config } from '../config/s8-config.mjs';
 import { sendTelegram } from '../telegram/notify.mjs';
 import { randomUUID } from 'node:crypto';
@@ -14,7 +17,6 @@ import { writeWorkerInputPatch } from './worker-workspace.mjs';
 
 async function projectGuidelines(worktree) {
   const instructions = []; let visited = 0;
-  const relevant = () => true;
   async function visit(dir) {
     if (++visited > 1000) throw new Error('Project instruction scope too large');
     for (const filename of ['AGENTS.md', 'CLAUDE.md']) {
@@ -26,23 +28,47 @@ async function projectGuidelines(worktree) {
     }
     for (const entry of await readdir(path.join(worktree, dir), { withFileTypes: true })) {
       const relative = path.join(dir, entry.name);
-      if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules' && relevant(relative)) await visit(relative);
+      if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') await visit(relative);
     }
   }
   await visit(''); return instructions;
 }
 
 export async function loadDevelopmentPolicy(root) {
-  return { workerEntries: loadS8Config(root).workerEntries, commands: {} };
+  return { workerEntries: loadS8Config(root).workerEntries };
 }
 const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
-const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; } };
 export function reportForServer(value) {
   const strings = values => (Array.isArray(values) ? values : []).slice(0, 100).map(item => String(item).trim().slice(0, 3000)).filter(Boolean);
-  const report = { status: value?.status === 'completed' ? 'completed' : 'failed', summary: String(value?.summary ?? '').trim().slice(0, 8000) || 'No valid development summary was returned.', changedFiles: value?.changedFiles ?? [], verification: (value?.verification ?? []).slice(-20).map(item => ({ name: String(item.name).slice(0, 100), ok: item.ok === true, summary: String(item.summary ?? '').slice(0, 1000) })), remainingItems: strings(value?.remainingItems), decisions: strings(value?.decisions), executionErrors: strings(value?.executionErrors), checkpoint: String(value?.checkpoint ?? '').slice(0, 16000), ...(value?.baseCommit ? { baseCommit: value.baseCommit } : {}) };
-  if (['failed', 'blocked'].includes(report.status) && !report.executionErrors.length) report.executionErrors = [report.summary.slice(0, 3000)];
-  if (report.status === 'completed' && (report.remainingItems.length || report.executionErrors.length || report.verification.some(check => !check.ok))) report.status = 'failed';
+  const checks = Array.isArray(value?.verification) ? value.verification : [];
+  const failedChecks = checks.filter(check => check?.ok !== true);
+  const retained = [...failedChecks, ...checks.filter(check => check?.ok === true)].slice(0, 20);
+  const report = { status: value?.status === 'completed' ? 'completed' : 'failed', summary: String(value?.summary ?? '').trim().slice(0, 8000) || 'No valid development summary was returned.', changedFiles: value?.changedFiles ?? [], verification: retained.map(item => ({ name: String(item?.name ?? 'unnamed check').slice(0, 100) || 'unnamed check', ok: item?.ok === true, summary: String(item?.summary ?? '').slice(0, 1000) })), remainingItems: strings(value?.remainingItems), decisions: strings(value?.decisions), executionErrors: strings(value?.executionErrors), checkpoint: String(value?.checkpoint ?? '').slice(0, 16000), ...(value?.baseCommit ? { baseCommit: value.baseCommit } : {}) };
+  if (report.remainingItems.length || report.executionErrors.length || failedChecks.length) report.status = 'failed';
+  if (report.status === 'failed' && !report.executionErrors.length) report.executionErrors = [failedChecks.length ? 'One or more verification checks failed' : report.summary.slice(0, 3000)];
   return report;
+}
+
+/** Complete live runs and recovered runs through the same artifact and verification checks. */
+async function collectDevelopmentResult(request, result) {
+  const { run } = request;
+  let changedFiles;
+  if (request.transport?.kind === 'remote') {
+    let patch;
+    try { patch = await readFile(path.join(run.directory, 'task.patch'), 'utf8'); }
+    catch (error) { if (error.code !== 'ENOENT' || result.status === 'completed') throw error; }
+    if (patch !== undefined) await applyWorkspacePatch(run.workspace, patch, { expectedBaseTree: request.inputTree, allowAlreadyApplied: true });
+    // Uploaded artifacts are immutable: recovery must never replace them with a local export.
+    changedFiles = patch === undefined ? result.changedFiles ?? [] : (await workspaceChanges(run.workspace)).changedFiles;
+  } else {
+    changedFiles = (await workspaceChanges(run.workspace)).changedFiles;
+    await writeFile(path.join(run.directory, 'task.patch'), await workspacePatch(run.workspace, request.inputTree), { mode: 0o600 });
+    await writeFile(path.join(run.directory, 'changes.patch'), await workspacePatch(run.workspace), { mode: 0o600 });
+  }
+  if (result.status === 'completed' && (request.task.workflow.spec.commandNames ?? []).some(name => name !== 'install' && !result.verification?.some(check => check.name === name && check.ok))) {
+    result = { ...result, status: 'failed', executionErrors: ['Required verification is missing from the report'] };
+  }
+  return reportForServer({ ...result, baseCommit: request.baseCommit, changedFiles });
 }
 
 export async function runDeveloper(request, { signal } = {}) {
@@ -52,7 +78,7 @@ export async function runDeveloper(request, { signal } = {}) {
   catch {
     // A lost acknowledgement must not result in another assignment or a second execution.
     const state = await getWorkerState(root, workerId);
-    if (state.runId !== run.runId) throw new Error('Worker assignment was not accepted');
+    if (state?.runId !== run.runId) throw new Error('Worker assignment was not accepted');
   }
   let cancelSent = false;
   while (true) {
@@ -69,13 +95,9 @@ export async function runDeveloper(request, { signal } = {}) {
       // Preserve ownership during a communication outage; only a fresh connected state can finish the run.
       await new Promise(resolve => setTimeout(resolve, 1000)); continue;
     }
-    if (state.runId !== run.runId) throw new Error('Worker assignment changed');
+    if (state?.runId !== run.runId) throw new Error('Worker assignment changed');
     if (state.status === 'reported') {
-      const report = await readJson(path.join(run.directory, 'worker-result.json'));
-      if (request.transport?.kind === 'remote' && report.status === 'completed') {
-        const taskPatch = await readFile(path.join(run.directory, 'task.patch'), 'utf8');
-        await applyWorkspacePatch(run.workspace, taskPatch, { expectedBaseTree: request.inputTree });
-      }
+      const report = await readWorkerResult(run.directory);
       return { report, workerPid: state.pid };
     }
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -147,7 +169,8 @@ async function flushOutbox({ root, client, notify = sendTelegram, settings = loa
   return outcomes;
 }
 
-export async function runDevelopmentTask({ root, client, candidate, policy, signal, worker = runDeveloper, allowedRoot, workerId }) {
+export async function runDevelopmentTask({ root, client, candidate, policy, signal, worker = runDeveloper, workerId }) {
+  const remote = usesRemoteWorkspace(policy.workerEntries?.[workerId]);
   const locks = path.join(root, '.s8-runtime/development-locks');
   await mkdir(locks, { recursive: true, mode: 0o700 });
   const lockPath = path.join(locks, `${candidate.uid}.json`);
@@ -156,6 +179,8 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
   const runId = randomUUID();
   const controller = new AbortController();
   const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
   let poll, directory, claimed, workspace, inputTree, taskTitle = candidate.uid, stage = 'prepare';
   try {
     await lock.writeFile(JSON.stringify({ runId, workerId, supervisorPid: process.pid }));
@@ -191,21 +216,12 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
     inputTree = await importDevelopmentResults({ root, worktree: workspace.worktree, tasks: ordered });
     const run = { runId, directory, workspace: workspace.worktree };
     const projectInstructions = await projectGuidelines(workspace.worktree);
-    let executionNotes = '';
-    const previousId = task.workflow.run?.id;
-    if (previousId && /^[a-f0-9-]{36}$/.test(previousId)) {
-      try {
-        const events = (await readFile(path.join(root, '.s8-runtime/runs', previousId, 'developer.events.jsonl'), 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line));
-        executionNotes = events.filter(event => event.type === 'assistant' && event.text).map(event => event.text).join('\n').slice(-8000);
-      } catch { /* Durable result remains available if the previous transcript is missing. */ }
-    }
-    const workerEntry = policy.workerEntries?.[workerId];
     let transport;
-    if (workerEntry?.host && workerEntry.host !== 'local') {
-      const input = await writeWorkerInputPatch(directory, workspace.worktree, inputTree);
-      transport = { kind: 'remote', repoPath: task.workflow.spec.repoPath, baseCommit: workspace.baseCommit, baseTree: input.baseTree, inputTree, inputPatchSha256: input.sha256 };
+    if (remote) {
+      const input = await writeWorkerInputPatch(directory, workspace.worktree);
+      transport = { kind: 'remote', repoPath: task.workflow.spec.repoPath, baseCommit: workspace.baseCommit, inputPatchSha256: input.sha256 };
     }
-    const request = { root, run, workerId, inputTree, ...(transport ? { transport } : {}), task: { ...task, workflow: { ...claimed.workflow, runs: undefined, result: undefined } }, preflight: preflight.preflight, policy, previous: { ...task.workflow.result, executionNotes }, baseCommit: workspace.baseCommit, projectInstructions };
+    const request = { root, run, workerId, inputTree, ...(transport ? { transport } : {}), task: { ...task, workflow: { ...claimed.workflow, runs: undefined, result: undefined } }, preflight: preflight.preflight, baseCommit: workspace.baseCommit, projectInstructions };
     await saveJson(path.join(directory, 'request.json'), request);
     let polling = false;
     poll = setInterval(async () => {
@@ -218,15 +234,9 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
     }, 1500);
     stage = 'developer execution';
     const outcome = await worker(request, { signal: controller.signal });
-    const changes = await workspaceChanges(run.workspace);
     stage = 'artifact export';
-    await writeFile(path.join(directory, 'task.patch'), await workspacePatch(run.workspace, inputTree), { mode: 0o600 });
-    await writeFile(path.join(directory, 'changes.patch'), await workspacePatch(run.workspace), { mode: 0o600 });
-    if (outcome.report.status === 'completed' && (task.workflow.spec.commandNames ?? []).some(name => name !== 'install' && !outcome.report.verification?.some(check => check.name === name && check.ok))) {
-      outcome.report = { ...outcome.report, status: 'failed', executionErrors: ['Required verification is missing from the report'] };
-    }
-    let report = reportForServer({ ...outcome.report, baseCommit: workspace.baseCommit, changedFiles: changes.changedFiles });
-    if (controller.signal.aborted) report = reportForServer({ ...report, status: 'failed', checkpoint: report.checkpoint || 'Resume saved workspace and execution events.', summary: `Execution stopped; inspect the checkpoint before resuming. ${report.summary}`.slice(0, 8000), changedFiles: changes.changedFiles, verification: report.verification });
+    let report = await collectDevelopmentResult(request, outcome.report);
+    if (controller.signal.aborted) report = reportForServer({ ...report, status: 'failed', checkpoint: report.checkpoint || 'Resume saved workspace and execution events.', summary: `Execution stopped; inspect the checkpoint before resuming. ${report.summary}`.slice(0, 8000), verification: report.verification });
     await saveJson(path.join(directory, 'outbox.json'), { version: 2, uid: candidate.uid, title: taskTitle, runId, report, operation: { action: 'report', requestId: randomUUID(), expectedRevision: claimed.workflow.revision, runId, report } });
     await flushDevelopmentOutbox({ root, client });
     return { status: report.status, uid: candidate.uid, runId, worktree: run.workspace };
@@ -236,7 +246,7 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
       if (workspace) {
         try {
           changes = await workspaceChanges(workspace.worktree);
-          await writeFile(path.join(directory, 'changes.patch'), await workspacePatch(workspace.worktree), { mode: 0o600 });
+          if (!remote) await writeFile(path.join(directory, 'changes.patch'), await workspacePatch(workspace.worktree), { mode: 0o600 });
         } catch { /* Preserve the workspace for inspection when export itself failed. */ }
       }
       const report = reportForServer({ status: 'failed', summary: `Supervisor stopped during ${stage}; saved workspace and events remain available.`, executionErrors: [`Execution failed during ${stage}`], remainingItems: ['Inspect saved artifacts and finish the confirmed plan'], changedFiles: changes.changedFiles, verification: [] });
@@ -269,7 +279,7 @@ export async function runDevelopmentTask({ root, client, candidate, policy, sign
 const activeSlots = new Map();
 const finishedRuns = [];
 
-export async function developmentTick({ root, client, policy, signal, worker, allowedRoot, projectUid }) {
+export async function developmentTick({ root, client, policy, signal, worker, projectUid }) {
   root = path.resolve(root);
   await flushDevelopmentOutbox({ root, client });
   let candidates = [...await client.list('task', undefined, { state: 'ready' }), ...await client.list('subtask', undefined, { state: 'ready' })]
@@ -300,7 +310,7 @@ export async function developmentTick({ root, client, policy, signal, worker, al
         });
         if (index < 0) break;
         const [candidate] = candidates.splice(index, 1);
-        const result = await runDevelopmentTask({ root, client, candidate, policy, signal, worker, workerId: slot.workerId, allowedRoot });
+        const result = await runDevelopmentTask({ root, client, candidate, policy, signal, worker, workerId: slot.workerId });
         (worker ? results : finishedRuns).push(result);
         if (!worker && !['idle', 'locked', 'conflict', 'preflight_required'].includes(result.status)) break;
       }
@@ -324,6 +334,30 @@ export async function waitForDevelopmentRuns(root) {
   await Promise.all([...activeSlots].filter(([key]) => key.startsWith(`${root}:`)).map(([, task]) => task));
 }
 
+export function transientProjectmanError(error) {
+  const status = error.status ?? Number(/HTTP (\d+)/.exec(error.message ?? '')?.[1]);
+  return status === 408 || status === 429 || status >= 500 || (error.name === 'TypeError' && error.message === 'fetch failed') || ['TimeoutError', 'AbortError'].includes(error.name) || ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN'].includes(error.code);
+}
+
+export async function runDevelopmentLoop({ root, client, policy, signal, once = false, intervalMs = 5000, onResult = result => console.log(JSON.stringify(result)), onRetry = () => console.error('Projectman polling temporarily unavailable; retrying without releasing active runs.') }) {
+  do {
+    try {
+      await recoverDevelopmentRuns({ root, client });
+      for (const result of await developmentTick({ root, client, policy, signal })) onResult(result);
+    } catch (error) {
+      if (once || !transientProjectmanError(error)) throw error;
+      onRetry();
+    }
+    if (once || signal?.aborted) break;
+    await new Promise(resolve => {
+      const done = () => { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve(); };
+      const timer = setTimeout(done, intervalMs);
+      signal?.addEventListener('abort', done, { once: true });
+      if (signal?.aborted) done();
+    });
+  } while (!signal?.aborted);
+}
+
 export async function recoverDevelopmentRuns({ root, client }) {
   root = path.resolve(root);
   const locks = path.join(root, '.s8-runtime/development-locks');
@@ -340,12 +374,12 @@ export async function recoverDevelopmentRuns({ root, client }) {
     let pending;
     try { pending = await readJson(path.join(directory, 'outbox.json')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     let state;
-    if (lock.workerId) state = await getWorkerState(root, lock.workerId).catch(() => null);
+    if (lock.workerId) state = await withdrawWorkerAssignment(root, lock.workerId, lock.runId) ?? await getWorkerState(root, lock.workerId);
     if (state?.runId === lock.runId && ['busy', 'accepting', 'unknown'].includes(state.status)) {
-      const fresh = Number.isFinite(Date.parse(state.lastSeenAt)) && Date.now() - Date.parse(state.lastSeenAt) < 15000;
+      const fresh = workerStateIsFresh(state);
       outcomes.push({ runId: lock.runId, status: fresh ? 'worker-running' : 'worker-state-unknown' }); continue;
     }
-    if (!pending && alive(lock.supervisorPid) && (!lock.workerId || activeSlots.has(`${root}:${lock.workerId}`))) continue;
+    if (!pending && processAlive(lock.supervisorPid) && (!lock.workerId || activeSlots.has(`${root}:${lock.workerId}`))) continue;
     if (!pending) {
       let task = await client.getWorkflow(uid);
       if (task.state === 'ready') {
@@ -363,13 +397,8 @@ export async function recoverDevelopmentRuns({ root, client }) {
       let report = { status: 'failed', summary: 'Execution was interrupted; inspect saved workspace and logs. Create a new work for any remaining changes.', executionErrors: ['Worker or supervisor stopped before reporting'], changedFiles: [], verification: [] };
       if (state?.runId === lock.runId && state.status === 'reported') {
         const request = await readJson(path.join(directory, 'request.json'));
-        report = reportForServer(await readJson(path.join(directory, 'worker-result.json')));
-        try {
-          const changes = await workspaceChanges(request.run.workspace);
-          await writeFile(path.join(directory, 'task.patch'), await workspacePatch(request.run.workspace, request.inputTree), { mode: 0o600 });
-          await writeFile(path.join(directory, 'changes.patch'), await workspacePatch(request.run.workspace), { mode: 0o600 });
-          report = reportForServer({ ...report, baseCommit: request.baseCommit, changedFiles: changes.changedFiles });
-        } catch { report = reportForServer({ ...report, status: 'failed', executionErrors: ['Artifact export failed; workspace preserved'] }); }
+        try { report = await collectDevelopmentResult(request, await readWorkerResult(directory)); }
+        catch { report = reportForServer({ status: 'failed', summary: 'Artifact recovery failed; workspace and received artifacts preserved.', executionErrors: ['Artifact export failed; workspace preserved'] }); }
       } else if (!lock.workerId) {
         // Never kill an old developer process or container just because its supervisor disappeared.
         let oldProcess;

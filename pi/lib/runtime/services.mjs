@@ -1,3 +1,4 @@
+import { processAlive } from './process.mjs';
 import { createHash } from 'node:crypto';
 import { ensureWindow, stopWindow, windows, withTmuxLock, runTmux, quote } from './tmux-windows.mjs';
 import { ensureWorkerPool, workerStates } from '../development/worker-pool.mjs';
@@ -9,7 +10,6 @@ const definitions = {
   scheduler: { session: 's8-scheduler', lock: '.s8-runtime/scheduler/owner.lock' },
   supervisor: { session: 's8-development-supervisor', lock: '.s8-runtime/services/supervisor.lock' },
 };
-const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; } };
 async function ownerPid(file) {
   try { const value = (await readFile(file, 'utf8')).split('\n')[0]; if (!/^[1-9]\d*$/.test(value)) throw new Error('잘못된 서비스 잠금 파일입니다.'); return Number(value); }
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
@@ -51,8 +51,8 @@ export async function startPiServices(root, { session = 's8-main', scheduler = t
         } else {
           const pid = await ownerPid(path.join(root, service.lock));
           if (pid) {
-            if (restart && !alive(pid)) await rm(path.join(root, service.lock), { force: true });
-            else throw new Error(alive(pid)
+            if (restart && !processAlive(pid)) await rm(path.join(root, service.lock), { force: true });
+            else throw new Error(processAlive(pid)
               ? `${name}은 tmux 밖이나 이전 세션에서 실행 중입니다 (PID ${pid}). 기존 실행을 종료한 뒤 다시 실행하세요.`
               : `${name}의 종료된 프로세스 잠금이 남아 있습니다. 실행 여부를 확인한 뒤 ${service.lock}를 정리하세요.`);
           }
@@ -64,8 +64,8 @@ export async function startPiServices(root, { session = 's8-main', scheduler = t
         const file = path.join(root, service.lock);
         const deadline = Date.now() + 5000;
         let pid;
-        while ((pid = await ownerPid(file)) && alive(pid) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
-        if (pid && alive(pid)) throw new Error(`${name}의 기존 프로세스가 아직 실행 중입니다 (PID ${pid}).`);
+        while ((pid = await ownerPid(file)) && processAlive(pid) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+        if (pid && processAlive(pid)) throw new Error(`${name}의 기존 프로세스가 아직 실행 중입니다 (PID ${pid}).`);
         if (pid) await rm(file, { force: true });
       }
       const result = await ensureWindow(run, root, session, name, `exec bash ${quote(path.join(root, 'start-pi.sh'))} --service ${name}`);

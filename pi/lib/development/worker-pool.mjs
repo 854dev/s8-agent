@@ -1,18 +1,12 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, realpath } from 'node:fs/promises';
+import { mkdir, readdir, realpath } from 'node:fs/promises';
 import { ensureWindow, windows, withTmuxLock, runTmux, quote } from '../runtime/tmux-windows.mjs';
 import { loadS8Config } from '../config/s8-config.mjs';
 import { validWorkerId } from './worker-identity.mjs';
-import { enqueueWorkerMessage, getWorkerState, waitForWorkerMessage } from './worker-communicator.mjs';
+import { enqueueWorkerMessage, getWorkerState, waitForWorkerMessage, withdrawWorkerAssignment, workerDirectory } from './worker-store.mjs';
 import { ensureRemoteWorker, stopRemoteWorkerIfExited } from './ssh-worker.mjs';
-
-export { validWorkerId as validWorker };
-export const workerDirectory = root => path.join(root, '.s8-runtime/workers');
-export const processAlive = pid => {
-  if (!Number.isSafeInteger(pid) || pid < 1) return false;
-  try { process.kill(pid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; }
-};
+import { workerStateIsFresh } from './worker-protocol.mjs';
 
 export async function workerRequest(root, id, request, timeoutMs = 5000) {
   if (!validWorkerId(id)) throw new Error('Invalid worker ID');
@@ -22,12 +16,17 @@ export async function workerRequest(root, id, request, timeoutMs = 5000) {
     return state;
   }
   const { messageId } = await enqueueWorkerMessage(root, id, request.action, request);
-  const result = await waitForWorkerMessage(root, id, messageId, timeoutMs);
+  let result;
+  try { result = await waitForWorkerMessage(root, id, messageId, timeoutMs); }
+  catch (error) {
+    if (request.action === 'assign') await withdrawWorkerAssignment(root, id, request.runId);
+    throw error;
+  }
   if (result?.error) throw new Error(result.error);
   return result;
 }
 
-const localPiWorker = entry => entry.agent === 'pi' && entry.host === 'local' && entry.launch === 'managed';
+const localManagedWorker = entry => entry.host === 'local' && entry.launch === 'managed';
 
 export async function workerStates(root, entries = loadS8Config(root).workerEntries) {
   let saved = [];
@@ -36,20 +35,18 @@ export async function workerStates(root, entries = loadS8Config(root).workerEntr
   const ids = [...new Set([...Object.keys(entries), ...saved])];
   return Promise.all(ids.map(async workerId => {
     const config = entries[workerId];
-    try {
-      const state = JSON.parse(await readFile(path.join(workerDirectory(root), `${workerId}.json`), 'utf8'));
-      const fresh = state.connected === true && Number.isFinite(Date.parse(state.lastSeenAt)) && Date.now() - Date.parse(state.lastSeenAt) < 15000;
+    const state = await getWorkerState(root, workerId);
+    if (state) {
+      const fresh = workerStateIsFresh(state);
       return { ...state, workerId, ...(config ? { agent: config.agent, launch: config.launch, host: config.host, registered: true } : { registered: false }), alive: fresh };
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-      return { workerId, ...(config ? { agent: config.agent, launch: config.launch, host: config.host, registered: true } : { registered: false }), alive: false, status: 'offline' };
     }
+    return { workerId, ...(config ? { agent: config.agent, launch: config.launch, host: config.host, registered: true } : { registered: false }), alive: false, status: 'offline' };
   }));
 }
 
 export async function ensureWorkerPool(root, { run = runTmux, ssh, entries = loadS8Config(root).workerEntries } = {}) {
   root = await realpath(root);
-  const workerIds = Object.keys(entries).filter(id => localPiWorker(entries[id])).sort();
+  const workerIds = Object.keys(entries).filter(id => localManagedWorker(entries[id])).sort();
   const remoteEntries = Object.entries(entries).filter(([, entry]) => entry.launch === 'managed' && entry.host?.startsWith('ssh://'));
   const remoteWorkers = await Promise.all(remoteEntries.map(([workerId, entry]) => ensureRemoteWorker(workerId, entry, ssh ? { exec: ssh } : {})));
   let remoteDeferred = false;
@@ -86,7 +83,7 @@ export async function ensureWorkerPool(root, { run = runTmux, ssh, entries = loa
         let state;
         try { state = await getWorkerState(root, item.workerId ?? item.name); }
         catch { deferred = true; break; }
-        const fresh = state?.connected === true && Number.isFinite(Date.parse(state.lastSeenAt)) && Date.now() - Date.parse(state.lastSeenAt) < 15000;
+        const fresh = workerStateIsFresh(state);
         if (!fresh || state.status !== 'idle') { deferred = true; break; }
       }
     }

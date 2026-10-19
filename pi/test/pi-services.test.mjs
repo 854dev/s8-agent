@@ -108,7 +108,7 @@ test('legacy service sessions are linked without restarting their process', asyn
 test('worker pool uses explicit IDs and canonical checkout identity across launchers', async t => {
   const { ensureWorkerPool } = await import('../lib/development/worker-pool.mjs');
   const f = await fixture(t);
-  await writeFile(path.join(f.root, 's8-config.yml'), 'telegram: {}\nworker-entries:\n  local-a:\n    agent: pi\n    host: local\n    launch: managed\n  local-b:\n    agent: pi\n    host: local\n    launch: managed\n  local-c:\n    agent: pi\n    host: local\n    launch: managed\n');
+  await writeFile(path.join(f.root, 's8-config.yml'), 'telegram: {}\nworker-entries:\n  local-a:\n    agent: pi\n    host: local\n    launch: managed\n  local-b:\n    agent: pi\n    host: local\n    launch: managed\n  local-c:\n    agent: claude-code\n    host: local\n    launch: managed\n');
   const first = await ensureWorkerPool(f.root, { run: f.run });
   const second = await ensureWorkerPool(`${f.root}/`, { run: f.run });
   assert.equal(first.session, second.session);

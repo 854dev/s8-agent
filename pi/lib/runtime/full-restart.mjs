@@ -1,3 +1,4 @@
+import { processAlive } from './process.mjs';
 import { workerStates } from '../development/worker-pool.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -7,7 +8,6 @@ import { startPiRuntime } from './runtime.mjs';
 import { validSession } from './managed-sessions.mjs';
 import { runTmux, stopWindow, withTmuxLock } from './tmux-windows.mjs';
 
-const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; } };
 
 export async function runInfrastructure(root) {
   await new Promise((resolve, reject) => {
@@ -52,7 +52,7 @@ export async function runFullRestart(root, options, directory, { run = runTmux, 
   const handle = await withTmuxLock(run, lockName, async () => {
     try {
       const previous = JSON.parse(await readFile(lockFile, 'utf8'));
-      if (!Number.isInteger(previous.pid) || previous.pid < 1 || alive(previous.pid)) throw new Error('An all-service restart is already running');
+      if (!Number.isInteger(previous.pid) || previous.pid < 1 || processAlive(previous.pid)) throw new Error('An all-service restart is already running');
       await rm(lockFile);
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
     const file = await open(lockFile, 'wx', 0o600);

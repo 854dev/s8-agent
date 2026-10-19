@@ -29,14 +29,14 @@
 - KB: Markdown 검색·조회와 정책 확인, 버전 충돌 검사를 거친 문서 쓰기·삭제. 변경은 대화형 확인이 필요하다.
 - Scheduler: Projectman 예약만 관리한다. 임의 셸 예약은 관리 도구에서 변경할 수 없다.
 - 착수 전: `todo`를 **일 시작 전**으로 표시한다. 매니저가 원문·코드·지침·요구 충돌·누락·허용 범위·검증 계획을 검토하고 작은 의문도 사용자에게 확인한다. 확정 내용을 `delegate`한 뒤 `preflight_review`로 work의 `s8Preflight`에 기록한다. S8 콘솔과 슈퍼바이저는 이 기록이 현재 작업·spec과 일치해야 승인·실행을 허용한다. 내용이나 spec이 변경되면 재검토한다. 기존 승인 작업도 검토 기록이 없으면 실행되지 않는다.
-- 개발: `start-pi`가 `s8-config.yml`의 `worker-entries` 중 로컬 관리 Pi 워커를 전용 tmux 세션에 준비한다. 각 항목의 키가 worker ID이며 등록 항목 수가 슬롯 수다. s8 화면에서 승인된 ready work를 UID로 배정하고 작업별 독립 git worktree에서 실행한다.
+- 개발: `start-pi`가 `s8-config.yml`의 `worker-entries` 중 로컬 관리 워커(Pi·Claude Code)를 전용 tmux 세션에 준비한다. 각 항목의 키가 worker ID이며 등록 항목 수가 슬롯 수다. s8 화면에서 승인된 ready work를 UID로 배정하고 작업별 독립 git worktree에서 실행한다.
 - 개발 중 판단: 최종 승인된 작업의 구현 선택과 일반 테스트 실패는 워커가 스스로 해결한다. work당 토큰·시간·명령·실행 횟수 예산은 없다. 실제 실패·취소는 결과와 기록을 보존한다.
 - 완료: 워커가 결과를 보고하면 review로 저장하고 매니저에게 보고를 전달한다. 사용자는 Telegram으로 요약과 work 링크를 받는다. 매니저 검토 후 사용자가 화면에서 선택적으로 검토의견을 적고 완료를 제출한다. 원본은 done으로 확정되며 매니저가 의견을 보고 추가 조치 없음·새 work 작성·질문을 판단한다. 새 work는 별도 실행 승인을 받는다.
 - 기록: `.s8-runtime/runs/<run-id>/`의 전달 프롬프트·공개 응답·도구 이벤트·결과·검증·패치와 Projectman 작업 이력을 연결한다. 모델 내부 추론과 인증정보는 기록 대상이 아니다.
 
 역할별 기준은 [관리 지침](agents/manager/SYSTEM.md), [개발 지침](agents/developer/WORKER_SYSTEM.md)과 [워커 개편 계획](docs/worker-pool-redesign-plan.md)에 있다. 실행 방법은 아래 안내를, 화면·프록시 구성은 [프런트엔드 README](frontend/README.md)를 따른다.
 
-로컬·원격 공통 워커의 설정, 인증 통신기, 장치별 작업 공간·산출물 전송, managed SSH와 Claude Code 실행 어댑터까지 코드에 반영했다. 실제 두 장치 운영과 전체 통합 검증은 아직 남아 있다. 구현 현황과 다음 확인 항목은 [handoff](docs/remote-worker-handoff.md), 설계 기준은 [구현 계획](docs/remote-worker-implementation-plan.md)을 참고한다.
+로컬·원격 공통 워커의 설정, 인증 통신기, 장치별 작업 공간·산출물 전송, managed SSH와 Claude Code 실행 어댑터까지 코드에 반영했다. 실제 두 장치 운영 검증은 아직 남아 있다. 구현 현황과 다음 확인 항목은 [handoff](docs/remote-worker-handoff.md), 설계 기준은 [구현 계획](docs/remote-worker-implementation-plan.md)을 참고한다.
 
 `854_md` 지식베이스를 사용하는 개인용 AI 작업 오케스트레이터와 운영 콘솔이다. 지식과 에이전트 설정을 각각 `854_md`, `s8-agent` 저장소로 분리한다.
 
@@ -342,7 +342,7 @@ Pi 1.3.0에도 내장 MCP가 있지만 `pi-mcp-extension@1.5.0`의 설치와 패
 
 - S8이 비관리자 agent 서비스 키를 `PHCMS_ACCESS_TOKEN`에 보관한다. 변수 이름은 기존 호환성을 유지하지만 MCP 호출에는 JWT가 아닌 서비스 키가 필요하다.
 - Projectman 도구는 `PHCMS_API_URL`의 API를 직접 사용하며, 카운트 테스트 실행기는 MCP 요청에 `Authorization: Bearer <서비스 키>`를 보낸다.
-- MCP는 그 요청의 헤더를 PH-CMS API에 전달할 뿐 키를 저장하거나 S8 환경 파일을 읽지 않는다. MCP의 JSON 설정 파일은 사용하지 않는다.
+- MCP는 요청의 인증 헤더를 PH-CMS API에 전달하며 S8 환경 파일을 읽지 않는다. Pi는 직접 API를 사용한다. Claude 실행기는 upstream MCP에 접속하고, run별 JSON 설정에는 배정 UID 조회 전용 로컬 MCP 주소와 임시 인증만 기록한다.
 - `start-pi.sh`가 시작 시 로드한 환경을 도구에 전달한다. 기본 허용 목록에 `projectman`·`scheduler`를 포함하므로 데이터·예약 조회는 이 도구로 요청한다. 도구가 인증에 환경변수를 사용하며 에이전트는 키 원문이나 환경 파일을 조회하지 않는다.
 - 실행 중인 Pi에는 실행 인자 변경이 즉시 반영되지 않는다. 종료 후 `./start-pi.sh --continue`로 재개하거나 Telegram `/restart`로 재시작한다. 관리 진입점에서는 `--tools`, 임의 확장·세션 파일·파일 첨부 옵션으로 허용 목록을 바꿀 수 없다.
 - PH-CMS 루트에서 `pnpm dev -- --server --mcp`로 API·MCP를 실행한다. 서버·관리자 UI·MCP의 API prefix를 같은 값으로 맞춘다. 현재 카운트 테스트 CLI의 MCP URL은 장비별 소스 설정이므로 다른 장비에서는 변경해야 한다.
@@ -406,6 +406,8 @@ git diff --check
 
 `s8-config.example.yml`을 참고해 `s8-config.yml`에 설정한다. 봇 토큰 등 인증 값은 YAML에 넣지 않는다.
 
+구성별 예제는 [로컬 Pi 2개](s8-config.local.example.yml), [로컬 Pi 2개 + 원격 Claude 1개](s8-config.remote-claude.example.yml)다. 선택한 파일을 중앙 장치의 `s8-config.yml`로 복사한다. 원격 구성을 선택하면 [원격 daemon 설정](s8-config.remote-daemon.example.yml)도 원격 장치의 `s8-config.yml`로 복사하고 예시 IP·SSH 사용자·경로를 실제 값으로 바꾼다. 기존 Telegram 알림을 사용한다면 `telegram`과 `publicUrl`도 기존 설정에서 옮긴다.
+
 ```yaml
 worker-entries:
   local-s8-1:
@@ -428,8 +430,23 @@ publicUrl: https://your-host.example/s8/
 
 `worker-communicator`는 중앙 장치의 실제 Tailscale IPv4를 사용하고, `repository-mappings`는 승인된 저장소 경로를 원격 checkout에 연결한다. managed SSH 워커는 원격 s8-agent checkout의 절대 `root` 경로가 필요하다. 실제 장치 등록·기동·완료 전달은 아직 검증해야 한다. 기존 `workers.count` 설정은 `node pi/bin/s8-config.mjs migrate-workers`로 `worker-1..N` 명시적 항목으로 바꿀 수 있다. 기존 담당자 ID와 실행 기록을 유지한다.
 
+`launch: external` 워커는 SSH 주소 없이 등록할 수 있으며, 자동 기동 대신 daemon의 접속을 기다린다. external과 managed SSH는 모두 패치·결과 전송 및 `repository-mappings`를 사용한다. 로컬 managed는 Pi와 Claude Code를 같은 방식으로 기동한다.
+
+중앙 상태(`.s8-runtime/workers/<workerId>.json`)는 communicator만 기록한다. daemon의 재시작 기록은 `.s8-runtime/worker-daemons/<workerId>.json`에 별도로 저장하며, 업그레이드 시 이전 경로의 기록을 읽어 이어받는다. 원격 결과 복구는 수신한 패치를 보존하고, 이미 적용한 패치를 중복 적용하지 않는다.
+
 알림 대상은 기존 `telegram.scheduleChatId`를 사용한다. 공개 URL과 수신자가 없으면 알림을 미전송 상태로 보존한다. Telegram 오류는 완료 처리나 다음 배정을 막지 않는다. 응답 유실 때는 동일 알림이 중복될 수 있다.
 
 PH-CMS는 수정하지 않는다. 기존 `workflowVersion: 2`, `atomicClaims: true`, `idempotentReports: true` 계약을 사용한다. 성공 report는 review로 저장한다. 매니저 review_result 후 사용자가 최종 완료하면 done이 되고 의존 작업이 실행 가능해진다. 워커는 review 상태에서도 다음 독립 작업을 받는다. 서버의 기존 예산 필드는 유지되며 s8는 시간·토큰 제한이나 동일 work 재실행에 사용하지 않는다.
 
-로컬 Pi 워커 세션은 `s8-workers-<저장소 해시>`, 창은 설정의 worker ID를 사용한다. 매니저 재시작 시 진행 중 워커는 유지한다. 항목 변경은 기존 워커가 idle로 확인될 때 적용한다. 작업 종료 뒤 다시 실행해 적용한다.
+로컬 managed 워커 세션은 `s8-workers-<저장소 해시>`, 창은 설정의 worker ID를 사용한다. 매니저 재시작 시 진행 중 워커는 유지한다. 항목 변경은 기존 워커가 idle로 확인될 때 적용한다. 작업 종료 뒤 다시 실행해 적용한다.
+
+
+### 원격 실행 장애 처리
+
+- 배정 ACK를 기다리다 실패하면 아직 실행 허가를 받지 않은 assign을 취소한다. 이미 실행 허가를 받은 run은 응답 유실만으로 실패 처리하거나 다시 배정하지 않는다. daemon은 실행 허가를 확인한 뒤 시작하며, 실제 daemon 재시작 후 실행 여부가 불명확하면 `unknown`으로 보존한다.
+- 원격 checkout의 현재 HEAD가 달라도 승인된 baseCommit이 저장소에 있으면 그 커밋으로 worktree를 생성한다. 없는 커밋을 자동으로 fetch하거나 기존 checkout을 변경하지 않는다.
+- 통신 장애는 재접속 후 같은 산출물로 재시도한다. 파일 검증 오류·크기 초과·산출물 충돌은 `worker-failure.json`으로 실패를 별도 보고한다. 기존 `worker-result.json`과 패치를 덮어쓰지 않으며, 업로드 중 취소도 전송을 중단하고 실패로 보고한다.
+- Claude에는 `projectman_get_workflow` 한 도구와 배정 UID만 노출한다. 실행 전과 완료 제출 전에 현재 doing/run ID를 검사하고, 턴 중 실제 UID 조회를 거치지 않은 결과는 거절한다. PH-CMS URL과 서비스 키는 Claude 자식 프로세스 환경에서 제거한다.
+- supervisor는 Projectman의 일시적인 연결 오류·타임아웃·408·429·5xx를 다음 polling 회차에 재시도한다. 인증·권한·설정 오류는 실패로 드러낸다. 검증 결과를 20개로 줄여 전송할 때도 전체 검사의 실패 여부와 실패 기록을 보존한다.
+
+Claude 워커의 조회 전용 MCP는 Pi 패키지의 `@modelcontextprotocol/sdk`를 사용한다. 코드 업데이트 후 중앙·원격 checkout에서 `npm ci --prefix pi`로 의존성을 맞춘다. 실제 두 장치 간 SSH·Tailscale과 인증된 Claude CLI/MCP 실행은 별도의 실장치 확인이 필요하다.

@@ -1,15 +1,13 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { mkdir, readFile, writeFile, lstat, readdir, realpath, unlink, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { git } from './git.mjs';
 
-const exec = promisify(execFile);
 export const safePath = value => typeof value === 'string' && value.length > 0 && !path.isAbsolute(value) && !value.includes('\\') && value.split('/').every(part => part && part !== '..' && part !== '.' && !/secret/i.test(part) && !['.git', '.env', '.pi-runtime', '.s8-runtime', 'auth.json', 'firebase.json', 'node_modules'].includes(part) && (!part.startsWith('.env.') || part === '.env.example')) && !/\.(pem|key)$/i.test(value);
-const git = (cwd, args) => exec('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args], { cwd, maxBuffer: 1024 * 1024, timeout: 15000 });
 
-export async function prepareWorktree({ root, uid, repoPath }) {
+export async function prepareWorktree({ root, uid, repoPath, baseCommit: requestedCommit }) {
   if (!/^[a-zA-Z0-9_-]{1,120}$/.test(uid)) throw new Error('Invalid task ID');
+  if (requestedCommit !== undefined && !/^[a-f0-9]{40,64}$/.test(requestedCommit)) throw new Error('Invalid approved base commit');
   const repo = await realpath(repoPath);
   if ((await git(repo, ['rev-parse', '--show-toplevel'])).stdout.trim() !== repo) throw new Error('Repository root required');
   const worktree = path.join(root, '.s8-runtime/worktrees', uid);
@@ -18,12 +16,13 @@ export async function prepareWorktree({ root, uid, repoPath }) {
   try {
     const info = JSON.parse(await readFile(meta, 'utf8'));
     if (info.repo !== repo || (await realpath(worktree)) !== worktree) throw new Error('Worktree identity changed');
+    if (requestedCommit && info.baseCommit !== requestedCommit) throw new Error('Saved worktree has a different approved base commit');
     const common = (await git(worktree, ['rev-parse', '--git-common-dir'])).stdout.trim();
     if (await realpath(path.resolve(worktree, common)) !== await realpath(path.join(repo, '.git'))) throw new Error('Worktree repository mismatch');
     return { worktree, ...info };
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const baseCommit = (await git(repo, ['rev-parse', 'HEAD'])).stdout.trim();
-  const tracked = (await git(repo, ['ls-files', '-z'])).stdout.split('\0').filter(Boolean);
+  const baseCommit = (await git(repo, ['rev-parse', '--verify', `${requestedCommit ?? 'HEAD'}^{commit}`])).stdout.trim();
+  const tracked = (await git(repo, ['ls-tree', '-r', '--name-only', '-z', baseCommit])).stdout.split('\0').filter(Boolean);
   if (tracked.some(file => !safePath(file) && !['AGENTS.md', 'CLAUDE.md', '.gitignore', '.gitattributes'].includes(file) && !file.startsWith('.github/'))) throw new Error('Repository contains protected tracked paths; prepare a clean development repository');
   await git(repo, ['worktree', 'add', '--detach', worktree, baseCommit]);
   const info = { repo, baseCommit, uid };
@@ -50,6 +49,10 @@ export function developmentWorkspace(root) {
     return cursor;
   }
   return {
+    async validate(relative) {
+      const stat = await lstat(await resolve(relative, false));
+      if (!stat.isFile() || stat.size > 150_000) throw new Error('Read a regular, smaller file');
+    },
     async read(relative) {
       const file = await resolve(relative, false);
       const stat = await lstat(file);
@@ -80,12 +83,12 @@ export async function workspaceChanges(worktree) {
   const untracked = (await git(worktree, ['ls-files', '--others', '--exclude-standard', '-z'])).stdout.split('\0').filter(Boolean);
   const changedFiles = [...new Set([...tracked, ...untracked])];
   if (changedFiles.some(file => !safePath(file))) throw new Error('Changes contain protected paths');
-  const fingerprints = [];
+  const workspace = developmentWorkspace(worktree);
   for (const file of changedFiles) {
-    try { fingerprints.push({ path: file, hash: createHash('sha256').update((await developmentWorkspace(worktree).read(file)).content).digest('hex') }); }
-    catch (error) { if (error.code === 'ENOENT') fingerprints.push({ path: file, deleted: true }); else throw error; }
+    try { await workspace.validate(file); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
-  return { changedFiles, fingerprints };
+  return { changedFiles };
 }
 
 export async function workspacePatch(worktree, baseline = 'HEAD') {
@@ -102,7 +105,7 @@ export async function workspacePatch(worktree, baseline = 'HEAD') {
   return patch;
 }
 
-export async function applyWorkspacePatch(worktree, patch, { expectedBaseTree, expectedTree } = {}) {
+export async function applyWorkspacePatch(worktree, patch, { expectedBaseTree, expectedTree, allowAlreadyApplied = false } = {}) {
   if (typeof patch !== 'string' || Buffer.byteLength(patch) > 64 * 1024 * 1024) throw new Error('Workspace input patch is invalid or too large');
   const temporary = path.join(path.dirname(worktree), `.s8-input-${createHash('sha256').update(`${worktree}:${Date.now()}`).digest('hex').slice(0, 24)}.patch`);
   await writeFile(temporary, patch, { mode: 0o600, flag: 'wx' });
@@ -111,7 +114,14 @@ export async function applyWorkspacePatch(worktree, patch, { expectedBaseTree, e
     if (before.changedFiles.length) await git(worktree, ['add', '--', ...before.changedFiles]);
     const baseTree = (await git(worktree, ['write-tree'])).stdout.trim();
     await git(worktree, ['read-tree', 'HEAD']);
-    if (expectedBaseTree && baseTree !== expectedBaseTree) throw new Error('Worker repository does not match the approved patch baseline');
+    if (expectedBaseTree && baseTree !== expectedBaseTree) {
+      if (allowAlreadyApplied && patch) {
+        // Recovery may run after patch application but before the outbox was saved.
+        await git(worktree, ['apply', '--reverse', '--check', temporary]);
+        return baseTree;
+      }
+      throw new Error('Worker repository does not match the approved patch baseline');
+    }
     if (patch) {
       await git(worktree, ['apply', '--check', temporary]);
       await git(worktree, ['apply', temporary]);

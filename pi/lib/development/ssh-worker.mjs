@@ -1,15 +1,18 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
+import { parseWorkerHost } from './worker-identity.mjs';
 
 const run = promisify(execFile);
 const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 export const remoteWorkerSession = workerId => `s8-worker-${createHash('sha256').update(workerId).digest('hex').slice(0, 12)}`;
 
 function targetOf(host) {
-  let url;
-  try { url = new URL(host); } catch { throw new Error('Invalid SSH worker address'); }
-  if (url.protocol !== 'ssh:' || !url.username || !url.hostname || url.password || url.port || url.pathname || url.search || url.hash) throw new Error('Invalid SSH worker address');
+  let parsed;
+  try { parsed = parseWorkerHost(host); }
+  catch { throw new Error('Invalid SSH worker address'); }
+  if (parsed.kind !== 'ssh') throw new Error('Invalid SSH worker address');
+  const url = new URL(parsed.value);
   return `${decodeURIComponent(url.username)}@${url.hostname}`;
 }
 

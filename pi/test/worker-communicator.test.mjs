@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
-import { acknowledgeWorkerMessage, connectWorker, enqueueWorkerMessage, getWorkerState, readWorkerToken, startWorkerCommunicator, waitForWorkerMessage, workerMessagesDirectory } from '../lib/development/worker-communicator.mjs';
+import { readWorkerToken } from '../lib/development/worker-auth.mjs';
+import { acknowledgeWorkerMessage, connectWorker, postWorkerState, postWorkerHeartbeat } from '../lib/development/worker-client.mjs';
+import { enqueueWorkerMessage, getWorkerState, waitForWorkerMessage, workerMessagesDirectory } from '../lib/development/worker-store.mjs';
+import { startWorkerCommunicator } from '../lib/development/worker-communicator.mjs';
 
 async function freePort() {
   const server = net.createServer();
@@ -46,4 +49,21 @@ test('authenticated worker polling persists commands and replays unprocessed mes
   const stored = JSON.parse(await readFile(path.join(workerMessagesDirectory(root, workerId), `${messageId}.json`), 'utf8'));
   assert.equal(stored.status, 'processed');
   assert.equal(stored.deliveryCount, 2);
+
+  const assignment = { runId: message.payload.runId, uid: message.payload.uid };
+  await postWorkerState(root, workerId, replacement.connectionId, { ...assignment, status: 'busy' });
+  const directory = path.join(root, '.s8-runtime/runs', assignment.runId);
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, 'worker-result.json'), JSON.stringify({ status: 'failed', summary: 'fixture' }));
+  await Promise.all([
+    postWorkerState(root, workerId, replacement.connectionId, { ...assignment, status: 'reported' }),
+    postWorkerHeartbeat(root, workerId, replacement.connectionId),
+  ]);
+  assert.equal((await getWorkerState(root, workerId)).status, 'reported', 'Heartbeat cannot overwrite a result state');
+  await assert.rejects(postWorkerState(root, workerId, replacement.connectionId, { ...assignment, status: 'busy' }), /HTTP 409/);
+  await postWorkerState(root, workerId, replacement.connectionId, { status: 'idle', lastRunId: assignment.runId });
+  assert.equal((await getWorkerState(root, workerId)).runId, undefined, 'Release clears the previous assignment');
+
+  await startWorkerCommunicator({ root, entries: {}, settings });
+  await assert.rejects(connectWorker(root, workerId, 'claude-code'), /HTTP 401/, 'Removed worker IDs lose access');
 });

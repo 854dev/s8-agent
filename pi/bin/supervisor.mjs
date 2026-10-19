@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { ensureWorkerPool } from '../lib/development/worker-pool.mjs';
 import { supervisorOwner } from '../lib/runtime/services.mjs';
 import { projectmanFromEnv } from '../lib/projectman/client.ts';
-import { loadDevelopmentPolicy, developmentTick, recoverDevelopmentRuns, waitForDevelopmentRuns } from '../lib/development/supervisor.mjs';
+import { loadDevelopmentPolicy, runDevelopmentLoop, waitForDevelopmentRuns } from '../lib/development/supervisor.mjs';
 import { startWorkerCommunicator } from '../lib/development/worker-communicator.mjs';
 import { loadS8Config } from '../lib/config/s8-config.mjs';
 
@@ -24,19 +24,7 @@ else {
       releaseOwner = await supervisorOwner(root);
       communicator = await startWorkerCommunicator({ root, entries: policy.workerEntries, settings: loadS8Config(root).workerCommunicator });
       await ensureWorkerPool(root);
-      await recoverDevelopmentRuns({ root, client });
-      do {
-        await recoverDevelopmentRuns({ root, client });
-        const results = await developmentTick({ root, client, policy, signal: controller.signal });
-        for (const result of results) console.log(JSON.stringify(result));
-        if (process.argv.includes('--once') || controller.signal.aborted) break;
-        await new Promise(resolve => {
-          const done = () => { clearTimeout(timer); controller.signal.removeEventListener('abort', done); resolve(); };
-          const timer = setTimeout(done, 5000);
-          controller.signal.addEventListener('abort', done, { once: true });
-          if (controller.signal.aborted) done();
-        });
-      } while (!controller.signal.aborted);
+      await runDevelopmentLoop({ root, client, policy, signal: controller.signal, once: process.argv.includes('--once') });
     }
   } catch (error) {
     const status = /HTTP (\d+)/.exec(error.message ?? '')?.[1];

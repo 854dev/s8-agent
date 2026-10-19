@@ -20,7 +20,8 @@ try {
   } else if (action === 'worker-token' || action === 'rotate-worker-token') {
     const workerId = process.argv[3], config = loadS8Config();
     if (!workerId || !config.workerEntries[workerId]) throw new Error('A configured worker ID is required');
-    const { getWorkerState, workerTokenForProvisioning, rotateWorkerToken } = await import('../lib/development/worker-communicator.mjs');
+    const { getWorkerState } = await import('../lib/development/worker-store.mjs');
+    const { workerTokenForProvisioning, rotateWorkerToken } = await import('../lib/development/worker-auth.mjs');
     if (action === 'rotate-worker-token') {
       const state = await getWorkerState(agentRoot, workerId);
       if (state?.runId && !['idle', 'stopping'].includes(state.status)) throw new Error('Cannot rotate authentication while the worker owns an active or unknown run');

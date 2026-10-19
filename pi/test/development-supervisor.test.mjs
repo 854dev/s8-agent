@@ -7,10 +7,34 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { preflightFingerprint } from '../lib/projectman/preflight.mjs';
-import { developmentTick, runDevelopmentTask, flushDevelopmentOutbox, recoverDevelopmentRuns } from '../lib/development/supervisor.mjs';
+import { developmentTick, runDevelopmentTask, flushDevelopmentOutbox, recoverDevelopmentRuns, reportForServer, runDevelopmentLoop } from '../lib/development/supervisor.mjs';
 import { developmentWorkspace, workspaceChanges } from '../lib/development/workspace.mjs';
 
 const exec = promisify(execFile);
+
+test('report truncation retains failures and never converts failed verification to completion', () => {
+  const verification = [{ name: 'first failure', ok: false, summary: 'failed' }, ...Array.from({ length: 25 }, (_, index) => ({ name: `passed-${index}`, ok: true }))];
+  const report = reportForServer({ status: 'completed', summary: 'fixture', verification });
+  assert.equal(report.status, 'failed');
+  assert.equal(report.verification.length, 20);
+  assert.equal(report.verification[0].ok, false);
+  assert.ok(report.executionErrors.length);
+});
+
+test('supervisor retries transient Projectman failures and leaves permanent errors visible', async t => {
+  const f = await fixture(t), controller = new AbortController();
+  let calls = 0, retries = 0;
+  f.client.list = async () => {
+    if (++calls === 1) throw Object.assign(new Error('PH-CMS request failed (HTTP 503)'), { status: 503 });
+    controller.abort();
+    return [];
+  };
+  await runDevelopmentLoop({ ...f, signal: controller.signal, intervalMs: 1, onRetry: () => retries++ });
+  assert.equal(retries, 1);
+  assert.ok(calls >= 2);
+  f.client.list = async () => { throw Object.assign(new Error('PH-CMS request failed (HTTP 403)'), { status: 403 }); };
+  await assert.rejects(runDevelopmentLoop({ ...f, once: true }), /HTTP 403/);
+});
 async function fixture(t, count = 1) {
   const base = await mkdtemp(path.join(os.tmpdir(), 's8-supervisor-'));
   t.after(() => rm(base, { recursive: true, force: true }));
@@ -42,7 +66,7 @@ async function fixture(t, count = 1) {
     },
   };
   const workerEntries = Object.fromEntries(Array.from({ length: count }, (_, index) => [`worker-${index + 1}`, { agent: 'pi', host: 'local', launch: 'managed' }]));
-  const policy = { workerEntries, commands: {} };
+  const policy = { workerEntries };
   return { base, root, repo, rows, client, reports, policy };
 }
 
@@ -55,7 +79,7 @@ test('two real Git worktrees run concurrently without changing the source reposi
     await new Promise(resolve => setTimeout(resolve, 80)); active--;
     return { report: { status: 'completed', summary: 'Changed isolated workspace', verification: [] } };
   };
-  const results = await developmentTick({ ...f, allowedRoot: f.base, worker });
+  const results = await developmentTick({ ...f, worker });
   assert.equal(max, 2); assert.equal(results.length, 2); assert.equal(f.reports.length, 2);
   assert.deepEqual([...f.rows.values()].map(row => row.state), ['review', 'review']);
   assert.equal((await exec('git', ['status', '--porcelain'], { cwd: f.repo })).stdout, '');
@@ -71,11 +95,11 @@ test('lost report response is replayed from durable outbox without running the d
     if (operation.action === 'report' && lost) { lost = false; throw new Error('Response lost'); }
     return result;
   };
-  await developmentTick({ ...f, allowedRoot: f.base, worker: async () => { executions++; return { report: { status: 'completed', summary: 'done', verification: [] } }; } });
+  await developmentTick({ ...f, worker: async () => { executions++; return { report: { status: 'completed', summary: 'done', verification: [] } }; } });
   assert.equal(executions, 1);
   const flushed = await flushDevelopmentOutbox(f);
   assert.equal(flushed[0].delivered, true); assert.equal(f.reports.length, 1);
-  await developmentTick({ ...f, allowedRoot: f.base, worker: async () => { throw new Error('Must not rerun'); } });
+  await developmentTick({ ...f, worker: async () => { throw new Error('Must not rerun'); } });
   assert.equal(executions, 1);
 });
 
@@ -84,7 +108,7 @@ test('missing or outdated human plan confirmation never starts a worker', async 
   const row = f.rows.get('task0');
   for (const invalidate of [() => { row.workflow.planHash = 'changed'; }, () => { delete row.workflow.confirmation; }]) {
     invalidate();
-    const result = await runDevelopmentTask({ ...f, allowedRoot: f.base, candidate: { uid: 'task0' }, worker: async () => { assert.fail('Must not execute before manager review'); } });
+    const result = await runDevelopmentTask({ ...f, candidate: { uid: 'task0' }, worker: async () => { assert.fail('Must not execute before manager review'); } });
     assert.equal(result.status, 'preflight_required');
     assert.equal(row.state, 'ready');
     assert.equal(f.reports.length, 0);
@@ -131,7 +155,7 @@ test('restart recovers a dead worker checkpoint and never executes an orphan aga
 
 test('revoked execution aborts a running worker and preserves the stopped report', async t => {
   const f = await fixture(t)
-  const result = await runDevelopmentTask({ ...f, allowedRoot: f.base, candidate: { uid: 'task0' }, worker: async (_request, { signal }) => {
+  const result = await runDevelopmentTask({ ...f, candidate: { uid: 'task0' }, worker: async (_request, { signal }) => {
     f.rows.get('task0').executionAllowed = false
     await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }))
     return { report: { status: 'completed', summary: 'Must not be accepted as complete', verification: [] } }
@@ -160,7 +184,7 @@ test('legacy execution budgets and per-repository limits do not restrict the poo
 
 test('deletion patches preserve protected file and directory checks', async t => {
   const f = await fixture(t)
-  const result = await runDevelopmentTask({ ...f, allowedRoot: f.base, candidate: { uid: 'task0' }, worker: async request => {
+  const result = await runDevelopmentTask({ ...f, candidate: { uid: 'task0' }, worker: async request => {
     const workspace = developmentWorkspace(request.run.workspace)
     await assert.rejects(workspace.remove('.git'), /Protected/)
     await assert.rejects(workspace.remove('src'), /regular files/)

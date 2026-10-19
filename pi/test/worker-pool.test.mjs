@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { startDeveloperWorker } from '../lib/development/worker-daemon.mjs';
 import { workerRequest } from '../lib/development/worker-pool.mjs';
 import { startWorkerCommunicator } from '../lib/development/worker-communicator.mjs';
+import { getWorkerState } from '../lib/development/worker-store.mjs';
 import { drainManagerInbox } from '../lib/manager/inbox.mjs';
 
 const until = async check => { for (let i = 0; i < 100; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 10)); } assert.fail('condition timeout'); };
@@ -29,6 +30,13 @@ test('persistent worker accepts one UID, survives duplicate delivery, and waits 
   assert.equal((await workerRequest(root, 'worker-1', first)).accepted, true);
   await assert.rejects(workerRequest(root, 'worker-1', second));
   assert.equal(executions, 1);
+  const central = await getWorkerState(root, 'worker-1');
+  const journal = JSON.parse(await readFile(path.join(root, '.s8-runtime/worker-daemons/worker-1.json'), 'utf8'));
+  assert.equal(central.status, 'busy', 'Rejected or duplicate assignments preserve the active state');
+  assert.equal(central.host, 'local');
+  assert.ok(central.connectionId);
+  assert.equal(journal.runId, first.runId);
+  assert.equal(journal.connectionId, undefined, 'Daemon journal cannot replace the central connection generation');
   complete();
   await until(() => worker.state().status === 'reported');
   await assert.rejects(workerRequest(root, 'worker-1', second));

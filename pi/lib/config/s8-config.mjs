@@ -84,7 +84,7 @@ export function loadS8Config(root = agentRoot, env = process.env) {
     if (!lstatSync(file).isFile()) throw new Error();
     fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   }
-  catch (error) { if (error.code === 'ENOENT') return { telegram: telegramConfigFromEnv(env), workerEntries: {}, workerCommunicator: normalizeWorkerCommunicator(null), publicUrl: null }; throw new Error('Cannot open s8-config.yml as a regular file'); }
+  catch (error) { if (error.code === 'ENOENT') return { telegram: telegramConfigFromEnv(env), workerEntries: {}, workerCommunicator: normalizeWorkerCommunicator(null), repositoryMappings: {}, publicUrl: null }; throw new Error('Cannot open s8-config.yml as a regular file'); }
   let data;
   try {
     const stat = fstatSync(fd);

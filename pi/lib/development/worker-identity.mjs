@@ -1,5 +1,8 @@
-/** Worker IDs are persisted in Projectman workflow runs and used as file/socket names. */
+/** Worker IDs are persisted in Projectman workflow runs and used as file/window names. */
 export const validWorkerId = id => typeof id === 'string' && id !== 'shell' && /^[a-zA-Z0-9_-]{1,100}$/.test(id);
+
+/** External workers exchange artifacts even when no SSH launch address is configured. */
+export const usesRemoteWorkspace = entry => entry?.launch === 'external' || entry?.host?.startsWith('ssh://') === true;
 
 export function parseWorkerHost(host, { required = true } = {}) {
   if (host == null && !required) return null;
