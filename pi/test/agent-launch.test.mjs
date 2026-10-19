@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { loadSkills } from '@earendil-works/pi-coding-agent';
 import { loadProfile, resolveMode } from '../lib/agent/profile.mjs';
 import { piArgs, validatePiOptions } from '../lib/agent/launch.mjs';
 
@@ -32,6 +36,7 @@ test('Pi arguments disable discovery and load only profile, Telegram or control 
   const args = piArgs('/s8', profile, { sessionDir: '/s8/.pi-runtime/x' });
   for (const flag of ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-context-files']) assert.ok(args.includes(flag));
   assert.deepEqual(args.filter((_, i) => args[i - 1] === '--extension'), profile.extensions);
+  assert.deepEqual(args.filter((_, i) => args[i - 1] === '--skill'), profile.skills);
   assert.equal(args[args.indexOf('--tools') + 1], profile.tools.join(','));
   assert.equal(args[args.indexOf('--session-dir') + 1], '/s8/.pi-runtime/x');
   assert.ok(piArgs('/s8', profile, { telegram: true }).includes('/s8/pi/extensions/telegram.mjs'));
@@ -45,4 +50,21 @@ test('user Pi options reject permission, session, file and prompt injection', ()
   for (const input of [['--tools', 'bash'], ['-e', 'evil.ts'], ['--session', 'old.jsonl'], ['@/tmp/file'], ['--model', '--extension'], ['--', 'prompt'], ['hello']]) {
     assert.throws(() => validatePiOptions(input), /Unsupported/);
   }
+});
+
+test('Pi loads every profile skill without diagnostics, and vendored skills keep their license and source', () => {
+  const names = {};
+  for (const mode of ['general', 'manager', 'worker']) {
+    const { skills } = loadProfile(mode);
+    const result = loadSkills({ cwd: os.tmpdir(), agentDir: path.join(os.tmpdir(), 's8-no-agent-dir'), skillPaths: skills, includeDefaults: false });
+    assert.deepEqual(result.diagnostics, [], mode);
+    names[mode] = result.skills.map(skill => skill.name);
+    for (const directory of skills.filter(directory => directory.includes('/vendor/'))) {
+      for (const file of ['LICENSE', 'SOURCE.md']) assert.ok(existsSync(path.join(directory, '..', file)), `${directory}: ${file}`);
+    }
+  }
+  // 워커는 구현·검증 스킬, 매니저는 설계 스킬을 받는다. 커밋·서브에이전트를 지시하는 스킬은 넣지 않는다.
+  assert.deepEqual(names.worker, ['ponytail', 'test-driven-development', 'systematic-debugging', 'verification-before-completion', 's8-self-review']);
+  assert.deepEqual(names.manager, ['s8-operations', 's8-requirements', 's8-task-plan', 's8-plan-review']);
+  assert.deepEqual(names.general, ['ponytail']);
 });

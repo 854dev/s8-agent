@@ -2,6 +2,7 @@
   "systemPrompt": "SYSTEM.md",
   "extensions": ["general.mjs"],
   "tools": ["read", "bash", "edit", "write", "grep", "find", "ls"],
+  "skills": ["vendor/ponytail/ponytail"],
   "workDir": "cwd",
   "loadEnv": false
 }

@@ -19,7 +19,15 @@
 ./start-general-agent.sh --print --model <모델> # 비대화형 실행
 ```
 
-모드별 도구·확장·시스템 지침은 `agents/<모드>/profile.json`에 있다. 범용 모드는 `.env`를 읽지 않고, 매니저 모드는 `.env`를 읽어 Projectman 연결 설정을 사용한다. `/restart`로 종료하면 최근 대화로 다시 시작한다.
+모드별 도구·확장·스킬·시스템 지침은 `agents/<모드>/profile.json`에 있다. Pi의 스킬 자동 발견은 끄고, 프로필의 `skills`(`pi/skills/` 아래 경로)만 `--skill`로 로드한다.
+
+| 모드 | 스킬 |
+|---|---|
+| 매니저 | `s8-requirements`(요구사항 대화), `s8-task-plan`(실행 계획), `s8-plan-review`(계획 점검), `s8-operations` |
+| 워커 | `ponytail`, `test-driven-development`, `systematic-debugging`, `verification-before-completion`, `s8-self-review`(보고 전 자기 검토) |
+| 범용 | `ponytail` |
+
+외부 스킬은 `pi/skills/vendor/`에 원본 그대로 두고 출처·버전은 각 `SOURCE.md`, 라이선스는 `LICENSE`에 있다. S8 규칙과 다른 지시(사람에게 묻기, 커밋 등)는 역할 `SYSTEM.md`가 우선한다. 범용 모드는 `.env`를 읽지 않고, 매니저 모드는 `.env`를 읽어 Projectman 연결 설정을 사용한다. `/restart`로 종료하면 최근 대화로 다시 시작한다.
 
 워커 모드는 task·subtask UID 하나를 직접 claim하고 결과를 보고한다. `--uid` 없이 실행하면 "uid xxx 의 업무를 수행해라"처럼 대화로 지시한다. claim·보고 요청은 `.s8-runtime/worker-claims/`와 `.s8-runtime/runs/<runId>/outbox.json`에 먼저 기록해 재시도해도 한 번만 반영된다. 보고는 Projectman에 저장되고 매니저 수신함과 Telegram으로 전달된다(실패분은 매니저가 15초마다 재전달). claim 전과 보고 후에는 파일·명령 도구를 막고, bash에는 토큰·비밀번호 환경변수를 넘기지 않는다. 승인(사람의 계획 확인)된 ready 작업만 claim한다.
 

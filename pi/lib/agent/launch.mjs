@@ -81,7 +81,7 @@ export function validatePiOptions(input) {
 }
 
 /**
- * 프로필과 실행 옵션으로 Pi 실행 인자를 만든다. 자동 발견을 끄고 프로필의 확장만 로드한다.
+ * 프로필과 실행 옵션으로 Pi 실행 인자를 만든다. 자동 발견을 끄고 프로필의 확장·스킬만 로드한다.
  * control: tmux 런타임 창에서 실행(세션 제어 확장이 Telegram을 맡는다). telegram: 단독 실행에서 Telegram 연결.
  */
 export function piArgs(root, profile, { sessionDir, telegram = false, control = false } = {}) {
@@ -91,6 +91,7 @@ export function piArgs(root, profile, { sessionDir, telegram = false, control = 
   return [
     '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-context-files',
     ...extensions.flatMap(file => ['--extension', file]),
+    ...profile.skills.flatMap(directory => ['--skill', directory]),
     '--system-prompt', profile.systemPrompt,
     '--tools', profile.tools.join(','),
     ...(sessionDir ? ['--session-dir', sessionDir] : []),
