@@ -48,7 +48,8 @@ console.log(JSON.stringify(process.argv.slice(2)));
   const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: dir, PHCMS_API_URL: 'http://127.0.0.1:8000/api/v2', PHCMS_ACCESS_TOKEN: key } };
   await writeFile(path.join(dir, 'tmux'), '#!/bin/sh\nprintf s8-fixture\n', { mode: 0o755 });
   options.env.PATH = `${dir}:${process.env.PATH}`;
-  const output = execFileSync('bash', [script, '--mode', 'project', '--managed', '--no-scheduler', '--no-supervisor'], options);
+  const managed = (...args) => execFileSync('bash', [script, '--managed', '--mode', 'project', '--cwd', dir, ...args], options);
+  const output = managed('--telegram');
   assert.equal(output.includes(key), false);
   const args = JSON.parse(output);
   const tools = args[args.indexOf('--tools') + 1].split(',');
@@ -59,12 +60,13 @@ console.log(JSON.stringify(process.argv.slice(2)));
   assert.ok(args.includes('--no-extensions'));
   assert.ok(args.includes('--no-context-files'));
   assert.ok(args.includes(path.join(dir, 'pi/extensions/managed-session.mjs')));
-  const standalone = JSON.parse(execFileSync('bash', [script, '--mode', 'project', '--managed', '--no-telegram'], options));
+  const standalone = JSON.parse(managed('--no-telegram'));
   assert.ok(standalone.includes(path.join(dir, 'pi/extensions/managed-session.mjs')));
-  assert.throws(() => execFileSync('bash', [script, '--mode', 'project', '--managed', '--tools', 'read'], { ...options, stdio: 'pipe' }));
+  assert.throws(() => execFileSync('bash', [script, '--managed', '--mode', 'project', '--cwd', dir, '--no-telegram', '--tools', 'read'], { ...options, stdio: 'pipe' }));
+  assert.throws(() => execFileSync('bash', [script, '--managed', '--mode', 'project'], { ...options, stdio: 'pipe' }), /내부 실행 인자/);
 });
 
-test('launcher dispatches background runtime options and keeps utility commands in the foreground', async t => {
+test('launcher forwards user commands to the Node entrypoint and runs foreground commands directly', async t => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-combined-launcher-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const script = path.join(dir, 'start-pi.sh');
@@ -77,16 +79,12 @@ test('launcher dispatches background runtime options and keeps utility commands 
   await writeFile(path.join(dir, 'pi/bin/pi-runtime.mjs'), 'console.log(JSON.stringify({runtime:process.argv.slice(2)}));');
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), '#!/usr/bin/env node\nconsole.log(JSON.stringify({pi:process.argv.slice(2)}));\n', { mode: 0o755 });
   const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: dir } };
-  for (const input of [[], ['--telegram'], ['--no-telegram'], ['--no-scheduler', '--no-supervisor'], ['--model', 'fixture model', '--no-supervisor'], ['--session', 'work', '--telegram']]) {
-    const result = JSON.parse(execFileSync('bash', [script, '--mode', 'project', ...input], options));
-    const expected = ['--mode', 'project', '--cwd', process.cwd(), ...input.filter(arg => !['--telegram', '--no-telegram'].includes(arg)), ...(input.includes('--no-telegram') ? ['--telegram', 'off'] : input.includes('--telegram') ? ['--telegram', 'take'] : [])];
-    assert.deepEqual([...result.runtime].sort(), expected.sort());
-    assert.ok(!result.runtime.includes(''));
+  for (const input of [[], ['--mode', 'project', '--telegram', 'off', '--session', 'work'], ['--help']]) {
+    assert.deepEqual(JSON.parse(execFileSync('bash', [script, ...input], options)).runtime, input);
   }
-  assert.match(execFileSync('bash', [script, '--help'], options), /자동 접속 없음/);
-  for (const input of [['--version'], ['--print'], ['list']]) {
-    const result = JSON.parse(execFileSync('bash', [script, '--mode', 'project', ...input], options));
-    assert.ok(result.pi);
-    assert.equal(result.runtime, undefined);
-  }
+  const foreground = args => JSON.parse(execFileSync('bash', [script, '--foreground', '--mode', 'local', '--cwd', dir, '--no-telegram', ...args], options));
+  assert.deepEqual(foreground(['list']).pi, ['list']);
+  const version = foreground(['--version']).pi;
+  assert.ok(version.includes('--version'));
+  assert.ok(!version.includes(path.join(dir, 'pi/extensions/managed-session.mjs')));
 });
