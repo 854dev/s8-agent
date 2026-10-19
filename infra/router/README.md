@@ -1,6 +1,6 @@
 # S8 라우터
 
-상위 정책은 [`../../INFRASTRUCTURE.md`](../../INFRASTRUCTURE.md), 실제 운영 절차는 [`../../OPERATIONS.md`](../../OPERATIONS.md)를 따른다.
+상위 정책과 운영 절차는 [`../../README.md`](../../README.md)의 인프라와 웹 콘솔 절을 따른다.
 
 `router.mjs`는 의존성 없는 Node 프로세스다. `s8-config.yml`의 `network.bindIp:httpPort` 하나로 받아 경로별로 로컬 서비스에 전달한다. `./start-infra.sh`가 `s8-infra` 세션의 `router` 창에서 실행한다.
 
