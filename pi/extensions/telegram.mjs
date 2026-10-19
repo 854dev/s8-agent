@@ -8,6 +8,7 @@ import { agentRoot, loadTelegramConfig } from '../lib/config/s8-config.mjs';
 import { queuePiRuntimeRestart } from '../lib/runtime/restart.mjs';
 import { telegramOwner } from '../lib/telegram/status.mjs';
 import { validSession } from '../lib/runtime/managed-sessions.mjs';
+import { waitUntil } from '../lib/runtime/process.mjs';
 
 async function requestFullRestart(notification) {
   if (!process.env.TMUX) throw new Error('전체 재시작은 start-pi 관리 세션에서 사용할 수 있습니다.');
@@ -174,13 +175,10 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
     if ((force || !stopOwner) && !start(context)) throw new Error('Telegram 허용 채팅 설정이 올바르지 않습니다.');
     enabled = true;
   };
+  // 폴링 소유 세션이 predicate를 만족할 때까지 최대 6.5초 기다리고 마지막 소유자를 돌려준다.
   const waitOwner = async predicate => {
     let owner;
-    for (let i = 0; i < 65; i++) {
-      owner = await telegramOwner({ port });
-      if (predicate(owner)) return owner;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+    await waitUntil(async () => predicate(owner = await telegramOwner({ port })), { timeoutMs: 6500 });
     return owner;
   };
   const describe = owner => `Telegram: ${owner ? owner + ' 연결' : '연결 없음'} · 이 세션 ${enabled ? owner === session ? '수신 중' : '연결 대기' : '꺼짐'}`;

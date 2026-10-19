@@ -4,7 +4,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
-import { sleep } from './process.mjs';
+import { waitUntil } from './process.mjs';
 
 const exec = promisify(execFile);
 export const runTmux = args => exec('tmux', args, { timeout: 10000, maxBuffer: 65536 });
@@ -53,13 +53,11 @@ export async function stopWindow(run, root, session, name, { timeoutMs = 20000 }
   const window = await ownedWindow(run, root, session, name);
   if (!window || window.dead) return;
   await run(['send-keys', '-t', window.id, 'C-c']);
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const stopped = await waitUntil(async () => {
     const current = (await windows(run, session)).find(item => item.id === window.id);
-    if (!current || current.dead) return;
-    await sleep(100);
-  }
-  throw new Error(`${session}:${name}가 정상 종료되지 않았습니다. 중복 실행을 막기 위해 재시작을 중단했습니다.`);
+    return !current || current.dead;
+  }, { timeoutMs });
+  if (!stopped) throw new Error(`${session}:${name}가 정상 종료되지 않았습니다. 중복 실행을 막기 위해 재시작을 중단했습니다.`);
 }
 
 /** 창이 살아 있으면 재사용하고, 죽어 있으면 같은 창에서 다시 실행하고, 없으면 새로 만든다. */

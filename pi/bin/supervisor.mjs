@@ -31,7 +31,7 @@ else {
     }
   } catch (error) {
     const status = /HTTP (\d+)/.exec(error.message ?? '')?.[1];
-    const reason = error.stoppedRunDiagnostic ?? (status ? `Projectman HTTP ${status}` : error.code === 'EEXIST' ? 'A supervisor is running or its owner lock needs inspection' : /required/.test(error.message ?? '') ? 'Required connection configuration is missing' : 'Connection or trusted policy unavailable');
+    const reason = error.stoppedRunDiagnostic ?? (status ? `Projectman HTTP ${status}` : error.code === 'ELOCKED' ? 'A supervisor is already running' : /required/.test(error.message ?? '') ? 'Required connection configuration is missing' : 'Connection or trusted policy unavailable');
     console.error(`Development supervisor unavailable: ${reason}. Credentials were not printed.`); process.exitCode = 1;
   } finally { await waitForDevelopmentRuns(root); await communicator?.close(); await releaseOwner?.(); }
 }

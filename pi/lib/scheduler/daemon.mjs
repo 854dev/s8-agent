@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { open, readFile, rename, rm, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, rename, rm, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { dueDate, isDue, validId, validateJob } from './store.mjs';
 import { visible } from '../../../apps/telegram-gateway/gateway.mjs';
 import { loadTelegramConfig, telegramConfigFromEnv } from '../config/s8-config.mjs';
 import { runProjectmanTurn } from '../projectman/dispatch.ts';
+import { acquirePidLock } from '../runtime/process.mjs';
 
 const MAX_OUTPUT = 8000;
 const RUN_TIMEOUT = 10 * 60_000;
@@ -76,14 +77,10 @@ export async function runScheduler({ root, cwd = process.cwd(), bash, env = proc
   const stateFile = path.join(root, 'state.json');
   const lockFile = path.join(root, 'owner.lock');
   await mkdir(root, { recursive: true, mode: 0o700 });
-  let lock;
-  try { lock = await open(lockFile, 'wx', 0o600); }
-  catch (error) {
-    if (error.code === 'EEXIST') throw new Error('Scheduler lock exists. If no scheduler is running, remove .s8-runtime/scheduler/owner.lock and retry.');
-    throw error;
-  }
-  // ponytail: fail closed on stale locks rather than risk two schedulers; manually remove the lock after an unclean crash.
-  await lock.writeFile(`${process.pid}\nexpiresAt-v1\nprojectman-v1\n`);
+  // 스케줄러는 체크아웃당 하나. 소유 프로세스가 죽은 잠금만 자동으로 정리한다.
+  const releaseLock = await acquirePidLock(lockFile, { extra: 'expiresAt-v1\nprojectman-v1\n' }).catch(error => {
+    throw error.code === 'ELOCKED' ? new Error(`Scheduler is already running (PID ${error.pid}). Stop it before starting another.`) : error;
+  });
   let activeProjectman;
   const executeDue = async () => {
     const data = await readJson(jobsFile, { version: 1, jobs: [] });
@@ -194,8 +191,7 @@ export async function runScheduler({ root, cwd = process.cwd(), bash, env = proc
       process.off('SIGINT', stopSignals);
       process.off('SIGTERM', stopSignals);
       process.off('SIGHUP', stopSignals);
-      await lock.close();
-      await rm(lockFile, { force: true });
+      await releaseLock();
     })();
     return stopPromise;
   };

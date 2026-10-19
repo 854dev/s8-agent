@@ -50,20 +50,19 @@ test('a same-name service from a different checkout is rejected without stopping
   await f.run(['has-session', '-t', '=s8-main']);
 });
 
-test('a live owner outside tmux is not duplicated; a dead owner lock is cleared', async t => {
+test('a live owner outside tmux is not duplicated; a dead owner lock does not block startup', async t => {
   const f = await fixture(t), directory = path.join(f.root, '.s8-runtime/scheduler');
   await mkdir(directory, { recursive: true }); const file = path.join(directory, 'owner.lock');
   await writeFile(file, `${process.pid}\n`);
   await assert.rejects(startPiServices(f.root, { run: f.run, supervisor: false }), /실행 중/);
   await writeFile(file, '2147483647\n');
   await startPiServices(f.root, { run: f.run, supervisor: false });
-  await assert.rejects(readFile(file), { code: 'ENOENT' });
   assert.equal((await readFile(path.join(f.root, 'starts'), 'utf8')).trim(), 'scheduler');
 });
 
 test('supervisor singleton lock rejects concurrent owners and releases on shutdown', async t => {
   const f = await fixture(t), release = await supervisorOwner(f.root);
-  await assert.rejects(supervisorOwner(f.root), { code: 'EEXIST' });
+  await assert.rejects(supervisorOwner(f.root), { code: 'ELOCKED' });
   await release(); const next = await supervisorOwner(f.root); await next();
 });
 

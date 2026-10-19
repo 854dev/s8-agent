@@ -2,7 +2,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import net from 'node:net';
-import { sleep } from './process.mjs';
+import { waitUntil } from './process.mjs';
 
 const exec = promisify(execFile);
 
@@ -20,21 +20,18 @@ export async function listSessions() {
     .filter(([name, managed]) => managed === '1' && validSession(name)).map(([name]) => name);
 }
 
-/** 세션의 Pi 제어 소켓에 Telegram 연결을 가져오라고 요청한다. Pi가 막 시작된 경우 소켓이 열릴 때까지 최대 약 10초 재시도한다. */
+/** 세션의 Pi 제어 소켓에 Telegram 연결을 가져오라고 요청한다. Pi가 막 시작된 경우 소켓이 열릴 때까지 최대 10초 재시도한다. */
 export async function moveTelegram(socket) {
-  for (let attempt = 0; attempt < 50; attempt++) {
-    try {
-      return await new Promise((resolve, reject) => {
-        const client = net.connect(socket);
-        client.setTimeout(10000, () => client.destroy(new Error('Session control timeout')));
-        client.on('connect', () => client.write('telegram'));
-        client.on('error', reject);
-        client.on('data', data => { client.end(); data.toString() === 'ok' ? resolve() : reject(new Error('Telegram activation failed')); });
-      });
-    } catch (error) {
-      if (!['ENOENT', 'ECONNREFUSED'].includes(error.code)) throw error;
-      await sleep(200);
-    }
-  }
-  throw new Error('Pi session control is not ready');
+  const request = () => new Promise((resolve, reject) => {
+    const client = net.connect(socket);
+    client.setTimeout(10000, () => client.destroy(new Error('Session control timeout')));
+    client.on('connect', () => client.write('telegram'));
+    client.on('error', reject);
+    client.on('data', data => { client.end(); data.toString() === 'ok' ? resolve(true) : reject(new Error('Telegram activation failed')); });
+  });
+  const done = await waitUntil(() => request().catch(error => {
+    if (['ENOENT', 'ECONNREFUSED'].includes(error.code)) return false;
+    throw error;
+  }), { timeoutMs: 10000, intervalMs: 200 });
+  if (!done) throw new Error('Pi session control is not ready');
 }

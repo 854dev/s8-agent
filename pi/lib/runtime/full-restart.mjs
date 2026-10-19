@@ -1,13 +1,13 @@
 // 전체 재시작(/restart all): 공유 서비스 중지 → 인프라(start-infra.sh) 재시작 → 준비 확인 → Pi 런타임 교체.
 // 진행 단계는 <directory>/progress.json에 기록해 실패 시 어느 단계에서 멈췄는지 확인할 수 있게 한다.
 import { spawn } from 'node:child_process';
-import { open, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { processAlive, sleep } from './process.mjs';
+import { acquirePidLock, waitUntil } from './process.mjs';
 import { workersBusy } from '../development/worker-pool.mjs';
 import { startPiRuntime, savedRuntimeOptions } from './runtime.mjs';
 import { validSession } from './managed-sessions.mjs';
-import { runTmux, stopWindow, withTmuxLock, lockName, sessionOption } from './tmux-windows.mjs';
+import { runTmux, stopWindow, sessionOption } from './tmux-windows.mjs';
 
 /** start-infra.sh를 실행한다. 출력에 내부 정보가 있을 수 있어 버리고 성공 여부만 본다. */
 export async function runInfrastructure(root) {
@@ -37,12 +37,8 @@ export async function waitForInfrastructure({ fetchImpl = fetch, timeoutMs = 180
       return statuses.includes(response.status);
     } catch { return false; }
   };
-  const deadline = Date.now() + timeoutMs;
-  while (true) {
-    if ((await Promise.all(targets.map(check))).every(Boolean)) return;
-    if (Date.now() >= deadline) throw new Error('Infrastructure readiness timeout');
-    await sleep(500);
-  }
+  const ready = await waitUntil(async () => (await Promise.all(targets.map(check))).every(Boolean), { timeoutMs, intervalMs: 500 });
+  if (!ready) throw new Error('Infrastructure readiness timeout');
 }
 
 /**
@@ -59,20 +55,9 @@ export async function runFullRestart(root, options, directory, { run = runTmux, 
   if (saved.mode === 'local') return runtime(root, saved);
   if (await workersBusy(root)) throw new Error('개발 작업이 진행 중이거나 워커 상태를 확인할 수 없습니다. 작업·연결 상태를 확인한 뒤 전체 재시작하세요.');
 
-  // 중복 실행 방지: tmux 잠금 안에서 PID 잠금 파일을 확인·생성한다.
-  // 잠금 파일은 tmux 서버가 재시작돼도 남으므로, 소유 프로세스가 죽은 경우에만 정리한다.
-  const lock = lockName('s8-full-restart-', root);
-  const lockFile = path.join(root, '.s8-runtime/runtime-restarts/all.lock');
-  const handle = await withTmuxLock(run, lock, async () => {
-    try {
-      const previous = JSON.parse(await readFile(lockFile, 'utf8'));
-      if (!Number.isInteger(previous.pid) || previous.pid < 1 || processAlive(previous.pid)) throw new Error('An all-service restart is already running');
-      await rm(lockFile);
-    } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    const file = await open(lockFile, 'wx', 0o600);
-    await file.writeFile(JSON.stringify({ pid: process.pid, directory }));
-    return file;
-  });
+  // 중복 실행 방지. 잠금 파일 둘째 줄에 실행 기록 디렉터리를 남긴다.
+  const release = await acquirePidLock(path.join(root, '.s8-runtime/runtime-restarts/all.lock'), { extra: `${directory}\n` })
+    .catch(error => { throw error.code === 'ELOCKED' ? new Error('An all-service restart is already running') : error; });
 
   let stage = 'stop-services';
   const progress = async value => {
@@ -99,10 +84,7 @@ export async function runFullRestart(root, options, directory, { run = runTmux, 
   } catch {
     // 원본 오류에는 인프라 내부 출력이 들어 있을 수 있어 단계 이름만 알린다.
     throw new Error(`전체 재시작 실패: ${stage}. 실행 기록에서 해당 단계를 확인하세요.`);
-  } finally {
-    await handle.close();
-    await withTmuxLock(run, lock, () => rm(lockFile, { force: true }));
-  }
+  } finally { await release(); }
 }
 
 /** 재시작을 요청한 Telegram 채팅(주제 포함)에 결과를 보낸다. 실패해도 예외 없이 false를 돌려준다. */
