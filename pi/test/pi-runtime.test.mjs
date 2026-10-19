@@ -52,14 +52,20 @@ import('node:fs').then(async fs => {
   const launch = args => exec('bash', [path.join(root, 's8.sh'), '--mode', 'project', ...args], {
     env: { ...process.env, PATH: `${root}/tools:${process.env.PATH}`, TMUX: '' }, timeout: 12000,
   });
-  return { root, run, launch };
+  // project 모드는 s8-infra 세션의 서비스 창이 실행 중이어야 시작한다(start-infra.sh 대역).
+  const infra = async () => {
+    await run(['new-session', '-d', '-s', 's8-infra', '-n', 'router', 'sleep 600']);
+    for (const name of ['kb-browser', 'frontend', 'projectman-console', 'terminal-gateway']) await run(['new-window', '-d', '-t', '=s8-infra:', '-n', name, 'sleep 600']);
+  };
+  await infra();
+  return { root, run, launch, infra };
 }
 
 test('s8 runtime recreates all sessions and services and connects Telegram by default', async t => {
   const f = await fixture(t);
   const result = await f.launch(['--model', 'fixture model']);
   assert.match(result.stdout, /tmux 세션: s8-main/);
-  for (const step of ['기존 tmux 세션 모두 종료', 'scheduler: 실행 확인', 'Pi 실행 확인']) assert.ok(result.stdout.includes(step), step);
+  for (const step of ['s8-infra를 뺀 기존 tmux 세션 종료', 'scheduler: 실행 확인', 'Pi 실행 확인']) assert.ok(result.stdout.includes(step), step);
   for (const name of ['shell', 'pi', 'scheduler']) assert.ok(result.stdout.includes(`s8-main:${name}`));
   assert.equal((await f.run(['list-clients'])).stdout.trim(), '');
   const record = JSON.parse((await readFile(path.join(f.root, 'starts'), 'utf8')).trim());
@@ -75,7 +81,7 @@ test('s8 runtime recreates all sessions and services and connects Telegram by de
   assert.equal(records.length, 2);
   assert.ok(!records[1].args.includes('--continue'));
   assert.ok(!records[1].args.includes('--model'));
-  assert.deepEqual((await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n'), ['s8-main']);
+  assert.deepEqual((await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n').sort(), ['s8-infra', 's8-main']);
   const after = (await readFile(path.join(f.root, 'service-starts'), 'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(after.length, 2);
   assert.ok(after.slice(1).every(item => !before.some(previous => previous.pid === item.pid)));
@@ -104,16 +110,31 @@ test('each launch replaces the prior session and honors its Telegram option', as
   const f = await fixture(t);
   await f.launch([]);
   await f.launch(['--session', 'work']);
-  await f.launch(['--session', 'local', '--no-telegram']);
+  await f.launch(['--session', 'general', '--no-telegram']);
   assert.deepEqual((await readFile(path.join(f.root, 'telegram'), 'utf8')).trim().split('\n'), ['s8-main', 's8-work']);
   const records = (await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').map(JSON.parse);
-  const local = records.find(record => record.session === 's8-local');
-  assert.ok(local.args.includes(path.join(f.root, 'pi/extensions/managed-session.mjs')));
-  assert.equal((await f.run(['show-option', '-qv', '-t', 's8-local', '@s8-telegram'])).stdout.trim(), 'off');
+  const general = records.find(record => record.session === 's8-general');
+  assert.ok(general.args.includes(path.join(f.root, 'pi/extensions/managed-session.mjs')));
+  assert.equal((await f.run(['show-option', '-qv', '-t', 's8-general', '@s8-telegram'])).stdout.trim(), 'off');
   await f.launch([]);
   assert.deepEqual((await readFile(path.join(f.root, 'telegram'), 'utf8')).trim().split('\n'), ['s8-main', 's8-work', 's8-main']);
   const sessions = (await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n').sort();
-  assert.deepEqual(sessions, ['s8-main']);
+  assert.deepEqual(sessions, ['s8-infra', 's8-main']);
+});
+
+test('project mode stops without touching sessions when infrastructure is not running', async t => {
+  const f = await fixture(t);
+  await f.launch([]);
+  await f.run(['respawn-window', '-k', '-t', 's8-infra:frontend', 'bash']);
+  await f.run(['kill-window', '-t', 's8-infra:router']);
+  await assert.rejects(f.launch([]), error => /인프라가 실행 중이 아닙니다.*router, frontend(.|\n)*start-infra\.sh/.test(error.stderr));
+  assert.equal((await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').length, 1);
+  await f.run(['kill-session', '-t', '=s8-infra']);
+  await assert.rejects(f.launch([]), /인프라가 실행 중이 아닙니다/);
+  await f.run(['has-session', '-t', '=s8-main']);
+  await f.launch(['--mode', 'general', '--no-telegram']);
+  await f.infra();
+  await f.launch([]);
 });
 
 test('concurrent launchers serialize restarts without duplicate service processes', async t => {
@@ -165,36 +186,36 @@ test('restart finishes even when it kills the Pi pane that requested it', async 
   assert.equal((await f.run(['display-message', '-p', '-t', 's8-main:pi', '#{pane_dead}'])).stdout.trim(), '0');
 });
 
-test('local mode works without KB or project config and does not start services', async t => {
+test('general mode works without KB or project config and does not start services', async t => {
   const f = await fixture(t);
-  const result = await f.launch(['--mode', 'local', '--cwd', f.root]);
-  assert.match(result.stdout, /s8-local/);
+  const result = await f.launch(['--mode', 'general', '--cwd', f.root]);
+  assert.match(result.stdout, /s8-general/);
   await assert.rejects(readFile(path.join(f.root, 'service-starts')), { code: 'ENOENT' });
   const first = JSON.parse((await readFile(path.join(f.root, 'starts'), 'utf8')).trim());
   assert.ok(first.args.includes(path.join(f.root, 'pi/extensions/general.mjs')));
   assert.ok(first.args.includes(path.join(f.root, 'pi/extensions/managed-session.mjs')));
   assert.equal(first.args[first.args.indexOf('--tools') + 1], 'read,bash,edit,write,grep,find,ls');
-  await f.launch(['--mode', 'local', '--cwd', f.root]);
+  await f.launch(['--mode', 'general', '--cwd', f.root]);
   const second = (await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').map(JSON.parse).at(-1);
   assert.ok(!second.args.includes('--continue'));
   const other = path.join(f.root, 'other');
   await mkdir(other);
-  await f.launch(['--mode', 'local', '--cwd', other]);
+  await f.launch(['--mode', 'general', '--cwd', other]);
   const changed = (await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').map(JSON.parse).at(-1);
   assert.ok(!changed.args.includes('--continue'));
   assert.notEqual(changed.args[changed.args.indexOf('--session-dir') + 1], first.args[first.args.indexOf('--session-dir') + 1]);
   await f.launch([]);
   const services = await readFile(path.join(f.root, 'service-starts'), 'utf8');
-  await f.launch(['--mode', 'local', '--cwd', other]);
+  await f.launch(['--mode', 'general', '--cwd', other]);
   assert.equal(await readFile(path.join(f.root, 'service-starts'), 'utf8'), services);
-  assert.deepEqual((await f.run(['list-windows', '-t', 's8-local', '-F', '#W'])).stdout.trim().split('\n').sort(), ['pi', 'shell']);
+  assert.deepEqual((await f.run(['list-windows', '-t', 's8-general', '-F', '#W'])).stdout.trim().split('\n').sort(), ['pi', 'shell']);
 });
 
 test('noninteractive mode selection fails early; help and invalid modes are explicit', async t => {
   const f = await fixture(t);
   await assert.rejects(exec('bash', [path.join(f.root, 's8.sh')]), /--mode project/);
-  await assert.rejects(f.launch(['--mode', 'invalid']), /모드는 project 또는 local/);
-  assert.match((await f.launch(['--help'])).stdout, /--mode project\|local/);
+  await assert.rejects(f.launch(['--mode', 'invalid']), /모드는 project 또는 general/);
+  assert.match((await f.launch(['--help'])).stdout, /--mode project\|general/);
 });
 
 test('telegram take/off aliases work and unspecified preference resets to the mode default', async t => {
@@ -242,6 +263,6 @@ sys.exit(p.wait())
   assert.match(stdout, /Telegram 현재 연결/);
   assert.match(stdout, /현재 연결 유지/);
   assert.match(stdout, /여기로 가져오기/);
-  assert.match(stdout, /s8-local/);
-  assert.equal((await f.run(['show-option', '-qv', '-t', 's8-local', '@s8-telegram'])).stdout.trim(), 'off');
+  assert.match(stdout, /s8-general/);
+  assert.equal((await f.run(['show-option', '-qv', '-t', 's8-general', '@s8-telegram'])).stdout.trim(), 'off');
 });

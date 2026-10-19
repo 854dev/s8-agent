@@ -41,7 +41,7 @@ export async function waitForInfrastructure({ fetchImpl = fetch, timeoutMs = 180
 }
 
 /**
- * 전체 재시작을 수행한다. local 모드 세션은 인프라 없이 Pi만 다시 시작한다.
+ * 전체 재시작을 수행한다. general 모드 세션은 인프라 없이 Pi만 다시 시작한다.
  * 의존성(run, infra, ready, runtime)은 테스트에서 교체할 수 있다.
  */
 export async function runFullRestart(root, { session, directory }, { run = runTmux, infra = runInfrastructure, ready = waitForInfrastructure, runtime = startPiRuntime } = {}) {
@@ -50,7 +50,7 @@ export async function runFullRestart(root, { session, directory }, { run = runTm
   if (await sessionOption(run, session, '@s8-runtime-root') !== root) throw new Error('Restart session belongs to another checkout');
   // 현재 세션의 모드·작업 디렉터리·Telegram·Pi 인자를 그대로 이어서 다시 시작한다.
   const saved = await savedRuntimeOptions(session, { run });
-  if (saved.mode === 'local') return runtime(root, saved);
+  if (saved.mode === 'general') return runtime(root, saved);
 
   // 중복 실행 방지. 잠금 파일 둘째 줄에 실행 기록 디렉터리를 남긴다.
   const release = await acquirePidLock(path.join(root, '.s8-runtime/runtime-restarts/all.lock'), { extra: `${directory}\n` })

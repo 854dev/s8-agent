@@ -8,13 +8,42 @@ import path from 'node:path';
 import { acquirePidLock, waitUntil } from './process.mjs';
 
 /**
- * tmux 서버 전체를 종료하는 재시작을 디스크 잠금으로 직렬화한다(최대 2분 대기).
- * tmux wait-for 잠금은 kill-server와 함께 사라지므로 쓸 수 없다.
+ * tmux 세션을 종료하는 재시작을 디스크 잠금으로 직렬화한다(최대 2분 대기).
+ * tmux wait-for 잠금은 세션 종료로 tmux 서버가 사라지면 함께 사라지므로 쓸 수 없다.
  */
 export async function withRuntimeResetLock(root, action) {
   const release = await acquirePidLock(path.join(root, '.s8-runtime/runtime-reset.lock'), { waitMs: 120000 })
     .catch(error => { throw error.code === 'ELOCKED' ? new Error('tmux 재시작 잠금 대기 시간이 지났습니다.') : error; });
   try { return await action(); } finally { await release(); }
+}
+
+/**
+ * s8-infra 세션에서 서비스가 돌고 있지 않은 창 이름 목록(모두 실행 중이면 빈 목록).
+ * start-infra.sh는 셸 창에 명령을 입력하므로, 창이 없거나 셸만 남은 창을 꺼진 서비스로 본다.
+ * phcms 창은 projectman.startCommand를 설정한 경우만 확인한다.
+ */
+export async function stoppedInfrastructure(run, { phcms = false } = {}) {
+  const names = ['router', 'kb-browser', 'frontend', 'projectman-console', 'terminal-gateway', ...(phcms ? ['phcms'] : [])];
+  let stdout = '';
+  try { ({ stdout } = await run(['list-windows', '-t', '=s8-infra', '-F', '#{window_name}\t#{pane_dead}\t#{pane_current_command}'])); }
+  catch { return names; }
+  const shells = new Set(['bash', 'zsh', 'sh', 'fish', 'dash']);
+  const running = new Set(stdout.trim().split('\n').map(line => line.split('\t'))
+    .filter(([, dead, command]) => dead === '0' && !shells.has(command)).map(([name]) => name));
+  return names.filter(name => !running.has(name));
+}
+
+/** 인프라 세션(s8-infra)을 뺀 모든 tmux 세션을 종료한다. 인프라는 start-infra.sh가 따로 관리한다. */
+export async function resetTmuxSessions(run, { keep = ['s8-infra'] } = {}) {
+  let stdout;
+  try { ({ stdout } = await run(['list-sessions', '-F', '#{session_name}'])); }
+  catch (error) {
+    if (/no server running|no sessions|error connecting|No such file or directory/i.test(error.stderr ?? '')) return [];
+    throw error;
+  }
+  const closed = stdout.trim().split('\n').filter(name => name && !keep.includes(name));
+  for (const name of closed) await run(['kill-session', '-t', `=${name}`]);
+  return closed;
 }
 
 /** 요청을 기록하고 분리된 제어 프로세스를 띄운다. 결과를 기다리지 않는다. */

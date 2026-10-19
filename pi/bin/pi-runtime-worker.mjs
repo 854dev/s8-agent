@@ -5,7 +5,7 @@ import path from 'node:path';
 import { appendFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { startPiRuntime } from '../lib/runtime/runtime.mjs';
-import { progressLog, saveRestartResult, withRuntimeResetLock } from '../lib/runtime/restart.mjs';
+import { progressLog, resetTmuxSessions, saveRestartResult, withRuntimeResetLock } from '../lib/runtime/restart.mjs';
 import { runFullRestart, notifyFullRestart } from '../lib/runtime/full-restart.mjs';
 import { runTmux } from '../lib/runtime/tmux-windows.mjs';
 import { telegramOwner } from '../lib/telegram/status.mjs';
@@ -23,11 +23,8 @@ async function restart() {
   if (options.telegram === 'keep') options.telegram = (await telegramOwner()) === options.session;
   if (options.resetTmux) {
     // 이 프로세스는 분리돼 있어 호출자의 창이 종료돼도 계속 실행된다.
-    log('기존 tmux 세션 모두 종료');
-    try { await runTmux(['kill-server']); }
-    catch (error) {
-      if (!/no server running|no sessions|No such file or directory/i.test(error.stderr ?? '')) throw error;
-    }
+    log('s8-infra를 뺀 기존 tmux 세션 종료');
+    await resetTmuxSessions(runTmux);
   }
   return options.all ? runFullRestart(root, { session: options.session, directory }) : startPiRuntime(root, { ...options, log });
 }

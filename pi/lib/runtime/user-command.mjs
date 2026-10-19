@@ -2,17 +2,19 @@
 // tmux 런타임을 (재)시작하고 창 목록을 출력한다. 에이전트 단독 실행(--print 등)은 start-*-agent.sh가 맡는다.
 import { realpath } from 'node:fs/promises';
 import readline from 'node:readline';
-import { restartPiRuntime } from './restart.mjs';
+import { restartPiRuntime, stoppedInfrastructure } from './restart.mjs';
+import { runTmux } from './tmux-windows.mjs';
+import { loadS8Config } from '../config/s8-config.mjs';
 import { validSession, listSessions } from './managed-sessions.mjs';
 import { telegramOwner } from '../telegram/status.mjs';
 import { isPackageCommand, validatePiOptions, usageError } from '../agent/launch.mjs';
 
-const HELP = `사용법: ./s8.sh [--mode project|local] [--cwd 경로] [Pi 옵션]
+const HELP = `사용법: ./s8.sh [--mode project|general] [--cwd 경로] [Pi 옵션]
   --mode project  Projectman 관리·개발 위임 (기존 실행)
-  --mode local    로컬 범용 에이전트 (프로젝트 서비스 없음)
-  --cwd 경로      로컬 작업 디렉터리 (기본: 실행 위치)
+  --mode general  범용 에이전트 (프로젝트 서비스 없음)
+  --cwd 경로      범용 모드 작업 디렉터리 (기본: 실행 위치)
   모드 생략 시 터미널에서 선택, 자동화에서는 명시 필수
-  (인자 없음)      프로젝트 / 로컬 모드 선택
+  (인자 없음)      프로젝트 / 범용 모드 선택
   --no-scheduler   스케줄러 자동 시작 제외
   work UID         승인된 작업의 워커를 s8-workers 세션에 실행 (start-worker-agent.sh)
   finish UID --run-id UUID --confirm-stopped  멈춘 실행을 실패로 보고해 마무리
@@ -23,7 +25,8 @@ const HELP = `사용법: ./s8.sh [--mode project|local] [--cwd 경로] [Pi 옵�
   --no-telegram    Telegram 없이 단독 실행
   --manager        기본 매니저의 별칭 (일반 대화·파일·Bash·Projectman·KB·예약)
   --sessions       실행 중인 S8 tmux 세션 목록
-  --session 이름   모든 tmux 세션 종료 후 s8-이름 생성 (자동 접속 없음)
+  --session 이름   s8-infra를 뺀 tmux 세션 종료 후 s8-이름 생성 (자동 접속 없음)
+  project 모드는 인프라(./start-infra.sh)가 떠 있어야 시작한다
   --help, -h       이 도움말 표시
   Pi 옵션: --continue, --no-session, --model, --provider, --thinking
   에이전트 하나만 이 터미널에서 실행하려면 ./start-general-agent.sh, ./start-manager-agent.sh, ./start-worker-agent.sh를 사용한다.
@@ -69,10 +72,10 @@ function createPrompt() {
 }
 
 async function chooseMode(prompt) {
-  console.log('실행 모드: 1) Projectman 프로젝트 관리·개발  2) 로컬 범용 에이전트');
+  console.log('실행 모드: 1) Projectman 프로젝트 관리·개발  2) 범용 에이전트');
   const selected = await prompt.ask('선택 [1/2]: ');
   if (selected === '1' || selected === 'project') return 'project';
-  if (selected === '2' || selected === 'local') return 'local';
+  if (selected === '2' || selected === 'general') return 'general';
   throw usageError('잘못된 모드 선택입니다.');
 }
 
@@ -87,10 +90,19 @@ async function chooseTelegram(prompt) {
 }
 
 async function startRuntime(root, options) {
-  options.session ??= options.mode === 'local' ? 's8-local' : 's8-main';
+  options.session ??= options.mode === 'general' ? 's8-general' : 's8-main';
   // tmux 서버를 종료하기 전에 검증해야 잘못된 입력으로 기존 세션을 잃지 않는다.
   if (!validSession(options.session)) throw new Error('잘못된 세션 이름입니다.');
   validatePiOptions(options.args);
+  // project 모드는 웹 콘솔·Projectman이 필요하다. 인프라가 없으면 아무것도 바꾸지 않고 멈춘다.
+  if (options.mode === 'project') {
+    const down = await stoppedInfrastructure(runTmux, { phcms: Boolean(loadS8Config(root).projectman.startCommand) });
+    if (down.length) {
+      const error = new Error(`인프라가 실행 중이 아닙니다(s8-infra에서 꺼진 창: ${down.join(', ')}).\n  ./start-infra.sh로 인프라를 먼저 시작한 뒤 다시 실행하세요. 기존 세션은 그대로 두었습니다.`);
+      error.exitCode = 1;
+      throw error;
+    }
+  }
   console.log(`S8 런타임 시작: ${options.session} (${options.mode} 모드)`);
   const result = await restartPiRuntime(root, { ...options, resetTmux: true }, { onProgress: line => console.log(`  - ${line}`) });
   console.log(`tmux 세션: ${result.session}`);
@@ -114,10 +126,10 @@ export async function runUserCommand(root, input) {
   try {
     // 모드 미지정이면 터미널에서 선택받는다.
     if (!options.mode) {
-      if (!prompt) throw usageError('--mode project 또는 --mode local을 지정하세요.');
+      if (!prompt) throw usageError('--mode project 또는 --mode general을 지정하세요.');
       options.mode = await chooseMode(prompt);
     }
-    if (!['project', 'local'].includes(options.mode)) throw usageError('모드는 project 또는 local이어야 합니다.');
+    if (!['project', 'general'].includes(options.mode)) throw usageError('모드는 project 또는 general이어야 합니다.');
     if (options.telegram === undefined && prompt) options.telegram = await chooseTelegram(prompt);
   } finally { prompt?.close(); }
   options.cwd = await realpath(options.cwd);

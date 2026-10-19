@@ -66,13 +66,13 @@ test('infrastructure runner uses a fixed script and completion notifications pre
   assert.equal(await notifyFullRestart({ chat: 1 }, 'Failed', { token: 'fixture-token', fetchImpl: async () => { throw new Error('offline'); } }), false);
 });
 
-test('local full restart leaves project infrastructure and services untouched', async t => {
+test('general full restart leaves project infrastructure and services untouched', async t => {
   const f = await fixture(t);
-  f.options['@s8-mode'] = 'local';
+  f.options['@s8-mode'] = 'general';
   await runFullRestart(f.root, { session: 's8-work', directory: f.directory }, { ...f.deps, runtime: async (_root, options) => {
-    assert.equal(options.mode, 'local');
+    assert.equal(options.mode, 'general');
     assert.equal(options.cwd, f.root);
-    f.events.push('local-pi');
+    f.events.push('general-pi');
   } });
-  assert.deepEqual(f.events, ['local-pi']);
+  assert.deepEqual(f.events, ['general-pi']);
 });

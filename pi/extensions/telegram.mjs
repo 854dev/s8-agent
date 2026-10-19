@@ -222,4 +222,4 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
 }
 
 // 단독 실행(start-*-agent.sh --telegram): 실행기가 알려준 모드에 맞는 Telegram 메뉴를 쓴다.
-export default pi => attach(pi, { mode: process.env.S8_AGENT_MODE === 'general' ? 'local' : 'project' });
+export default pi => attach(pi, { mode: process.env.S8_AGENT_MODE === 'general' ? 'general' : 'project' });

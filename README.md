@@ -107,7 +107,7 @@ sysctl net.ipv4.ip_unprivileged_port_start   # 80이면 적용됨
 ./start-worker-agent.sh --uid <UID>             # 실행 위치 저장소에서 UID 작업 claim·수행·보고
 
 ./s8.sh --mode project                          # 매니저·스케줄러·상주 워커
-./s8.sh --mode local --cwd /path/to/work        # 범용 에이전트(프로젝트 서비스 없음)
+./s8.sh --mode general --cwd /path/to/work      # 범용 에이전트(프로젝트 서비스 없음)
 ./s8.sh --continue                              # 최근 대화 이어가기
 ./s8.sh --session work                          # s8-work 세션으로 시작
 ./s8.sh --no-scheduler                          # 스케줄러 제외
@@ -122,9 +122,10 @@ sysctl net.ipv4.ip_unprivileged_port_start   # 80이면 적용됨
 
 `s8.sh` 동작:
 
-- 런타임을 시작하면 현재 tmux 서버의 모든 세션을 `kill-server`로 종료한 뒤 선택한 세션을 새로 만든다. 다른 S8 세션, 워커, `s8-infra`, 개인 tmux 세션도 종료되므로 인프라는 `./start-infra.sh`로 다시 시작한다. `--sessions`, `work`, `finish`, `service`, 도움말은 세션을 종료하지 않는다.
-- 터미널에서 모드를 생략하면 `project` / `local`을 고른다. 자동화는 `--mode`를 명시한다. `--manager`는 `--mode project`의 별칭이다.
-- project 모드는 `s8-main` 세션에 `shell`·`pi`·`scheduler` 창을 만들고 `s8-workers` 세션에 상주 워커 창을 띄운다. 작업 디렉터리는 `kbRoot`다. local 모드는 `s8-local` 세션을 쓰고 KB·Projectman 설정과 서비스 없이 실행하며, 대화 이력은 세션·작업 디렉터리별로 나눈다.
+- project 모드는 먼저 `s8-infra` 세션의 서비스 창(router, kb-browser, frontend, projectman-console, terminal-gateway, `projectman.startCommand`를 설정했으면 phcms)이 실행 중인지 확인한다. 창이 없거나 서비스가 종료돼 셸만 남은 창이 있으면 `./start-infra.sh`로 먼저 시작하라고 안내하고 아무것도 바꾸지 않은 채 종료한다. general 모드는 확인하지 않는다.
+- 런타임을 시작하면 `s8-infra`를 뺀 현재 tmux 서버의 모든 세션을 종료한 뒤 선택한 세션을 새로 만든다. 다른 S8 세션, 워커, 웹 터미널 호스트 셸(`s8-host-shell`), 개인 tmux 세션도 종료된다. `--sessions`, `work`, `finish`, `service`, 도움말은 세션을 종료하지 않는다.
+- 터미널에서 모드를 생략하면 `project` / `general`을 고른다. 자동화는 `--mode`를 명시한다. `--manager`는 `--mode project`의 별칭이다.
+- project 모드는 `s8-main` 세션에 `shell`·`pi`·`scheduler` 창을 만들고 `s8-workers` 세션에 상주 워커 창을 띄운다. 작업 디렉터리는 `kbRoot`다. general 모드는 `s8-general` 세션에서 범용 에이전트(`start-general-agent.sh`)를 KB·Projectman 설정과 서비스 없이 실행하며, 대화 이력은 세션·작업 디렉터리별로 나눈다.
 - 자동 접속하지 않고 창 목록만 출력한다. 웹 터미널에서 세션을 고르거나 `tmux attach-session -t s8-main`으로 접속한다.
 - 재시작 제어는 터미널과 분리된 프로세스가 끝까지 수행한다. 현재 Pi 안에서 `s8.sh`를 호출해 호출자가 종료돼도 새 Pi와 Telegram 연결을 올린다. 결과는 `.s8-runtime/runtime-restarts/`에 남는다.
 - 런타임을 다시 시작하면 작업 중인 워커 창도 종료된다. 진행 중이던 작업은 `./s8.sh work <UID>`로 같은 worktree에서 이어간다.
@@ -270,11 +271,11 @@ publicUrl: https://<호스트>/s8/
 - 개인 채팅은 `from.id`가 허용 사용자 목록에, 그룹은 `chat.id`가 허용 그룹 목록에 있어야 한다. 허용 그룹의 모든 참여자가 봇을 쓸 수 있으므로, 권한이 과하면 개인 사용자 ID만 쓴다. 그룹 전체 메시지를 받으려면 BotFather의 privacy mode를 확인한다.
 - 빈 허용 목록은 접근을 막는다. `scheduleChatId`는 허용 목록에 있는 ID여야 하며 `null`이면 알림을 보내지 않는다. 작업 알림의 링크는 `publicUrl`을 쓴다. 대상이나 URL이 없으면 알림을 미전송 상태로 보존한다. Telegram 오류는 완료 처리를 막지 않는다.
 - 설정을 바꾸면 Telegram 연결 세션과 스케줄러를 재시작한다.
-- `./s8.sh`를 터미널에서 실행하면 현재 연결 세션을 보여 주고 현재 연결 유지 / 여기로 가져오기를 고른다. `--telegram take`는 이 세션으로 연결을 옮기고 `--telegram off`는 이 세션만 끈다(`--telegram`, `--no-telegram`은 별칭). 비대화형 실행에서 생략하면 project는 연결, local은 꺼짐이다.
+- `./s8.sh`를 터미널에서 실행하면 현재 연결 세션을 보여 주고 현재 연결 유지 / 여기로 가져오기를 고른다. `--telegram take`는 이 세션으로 연결을 옮기고 `--telegram off`는 이 세션만 끈다(`--telegram`, `--no-telegram`은 별칭). 비대화형 실행에서 생략하면 project는 연결, general은 꺼짐이다.
 - TUI의 `/telegram`은 상태와 선택 메뉴, `/telegram take`·`/telegram off`는 즉시 이전·해제다. 연결 순서는 명시적인 take 시점을 따른다. off하면 대기 중인 다른 세션이 연결을 이어받는다. 설정은 Pi 재시작과 전체 재시작에도 유지된다.
 - 첫 메시지를 보낸 허용 채팅에만 터미널을 연결한다. 연결된 채팅은 터미널과 같은 대화와 도구 진행을 공유한다.
 - 명령: `/help`, `/status`(토큰 누계 포함), `/abort`, `/new`, `/model`, `/restart`, `/restart all`, `/jobs`. 키보드 버튼으로도 쓸 수 있다.
-- `/restart`는 같은 실행 옵션으로 Pi만 다시 열고 대화와 연결을 이어간다. `/restart all`(키보드 `전체 재시작`)은 모델 호출 없이 분리된 제어 프로세스가 작업 실행기 정리, `start-infra.sh`, 인프라 준비 확인, Pi·스케줄러 재시작을 차례로 하고 결과를 요청한 채팅으로 보낸다. 준비 확인에 실패하면 기존 Pi를 유지한다. 중복 실행은 막고 결과는 `.s8-runtime/runtime-restarts/<실행ID>/`에 남는다. git pull이나 의존성 설치는 하지 않는다. local 모드는 인프라를 건드리지 않는다. 모델 작업 중에는 먼저 `/abort`한다.
+- `/restart`는 같은 실행 옵션으로 Pi만 다시 열고 대화와 연결을 이어간다. `/restart all`(키보드 `전체 재시작`)은 모델 호출 없이 분리된 제어 프로세스가 작업 실행기 정리, `start-infra.sh`, 인프라 준비 확인, Pi·스케줄러 재시작을 차례로 하고 결과를 요청한 채팅으로 보낸다. 준비 확인에 실패하면 기존 Pi를 유지한다. 중복 실행은 막고 결과는 `.s8-runtime/runtime-restarts/<실행ID>/`에 남는다. git pull이나 의존성 설치는 하지 않는다. general 모드는 인프라를 건드리지 않는다. 모델 작업 중에는 먼저 `/abort`한다.
 - 오프라인 중 온 메시지는 재연결 시 실행하지 않는다. 다른 장비에서 같은 봇 토큰으로 polling하지 않는다. Telegram 요청 중 확인 대화상자가 열리면 중단을 요청하므로, 추가 확인이 필요한 작업과 민감한 작업은 터미널에서 한다. 정규식 기반 redaction은 완전한 유출 방지책이 아니다.
 
 ## 스케줄러
