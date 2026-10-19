@@ -5,11 +5,34 @@ import { git } from './git.mjs';
 
 export const safePath = value => typeof value === 'string' && value.length > 0 && !path.isAbsolute(value) && !value.includes('\\') && value.split('/').every(part => part && part !== '..' && part !== '.' && !/secret/i.test(part) && !['.git', '.env', '.pi-runtime', '.s8-runtime', 'auth.json', 'firebase.json', 'node_modules'].includes(part) && (!part.startsWith('.env.') || part === '.env.example')) && !/\.(pem|key)$/i.test(value);
 
+// 저장소에 커밋돼 있으면 안 되는 경로. AGENTS.md 등 지침 파일과 .github/는 허용한다.
+const protectedTracked = files => files.filter(file => !safePath(file) && !['AGENTS.md', 'CLAUDE.md', '.gitignore', '.gitattributes'].includes(file) && !file.startsWith('.github/'));
+
+/**
+ * 실행 위치(repoPath)를 git 저장소로 준비한다. 폴더가 없거나 비어 있으면 만들고 git init 후 빈 첫 커밋을 남긴다.
+ * 커밋이 없는 저장소에는 빈 첫 커밋만 만든다(파일은 커밋하지 않는다). 파일이 있는데 git 저장소가 아니면
+ * 무엇을 커밋할지(가상환경·빌드 결과·비밀값 등) 사람이 정해야 하므로 거부한다. { repo, initialized }를 돌려준다.
+ */
+export async function ensureRepository(repoPath) {
+  if (typeof repoPath !== 'string' || !path.isAbsolute(repoPath)) throw new Error('Absolute repoPath required');
+  await mkdir(repoPath, { recursive: true });
+  const repo = await realpath(repoPath);
+  const hasGit = await lstat(path.join(repo, '.git')).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
+  if (!hasGit) {
+    if ((await readdir(repo)).length) throw new Error(`${repo}는 파일이 있는 폴더지만 git 저장소가 아닙니다. 커밋할 파일을 정해 git init과 첫 커밋을 한 뒤 다시 실행하세요.`);
+    await git(repo, ['init', '-q']);
+  }
+  if ((await git(repo, ['rev-parse', '--show-toplevel'])).stdout.trim() !== repo) throw new Error('Repository root required');
+  if (await git(repo, ['rev-parse', '--verify', '-q', 'HEAD^{commit}']).then(() => true, () => false)) return { repo, initialized: false };
+  const identity = await git(repo, ['config', '--get', 'user.email']).then(() => [], () => ['-c', 'user.name=S8', '-c', 'user.email=s8@localhost']);
+  await git(repo, [...identity, 'commit', '-q', '--allow-empty', '--only', '-m', 'S8 첫 커밋']);
+  return { repo, initialized: true };
+}
+
 export async function prepareWorktree({ root, uid, repoPath, baseCommit: requestedCommit }) {
   if (!/^[a-zA-Z0-9_-]{1,120}$/.test(uid)) throw new Error('Invalid task ID');
   if (requestedCommit !== undefined && !/^[a-f0-9]{40,64}$/.test(requestedCommit)) throw new Error('Invalid approved base commit');
-  const repo = await realpath(repoPath);
-  if ((await git(repo, ['rev-parse', '--show-toplevel'])).stdout.trim() !== repo) throw new Error('Repository root required');
+  const { repo } = await ensureRepository(repoPath);
   const worktree = path.join(root, '.s8-runtime/worktrees', uid);
   const meta = `${worktree}.json`;
   await mkdir(path.dirname(worktree), { recursive: true, mode: 0o700 });
@@ -23,7 +46,7 @@ export async function prepareWorktree({ root, uid, repoPath, baseCommit: request
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const baseCommit = (await git(repo, ['rev-parse', '--verify', `${requestedCommit ?? 'HEAD'}^{commit}`])).stdout.trim();
   const tracked = (await git(repo, ['ls-tree', '-r', '--name-only', '-z', baseCommit])).stdout.split('\0').filter(Boolean);
-  if (tracked.some(file => !safePath(file) && !['AGENTS.md', 'CLAUDE.md', '.gitignore', '.gitattributes'].includes(file) && !file.startsWith('.github/'))) throw new Error('Repository contains protected tracked paths; prepare a clean development repository');
+  if (protectedTracked(tracked).length) throw new Error('Repository contains protected tracked paths; prepare a clean development repository');
   await git(repo, ['worktree', 'add', '--detach', worktree, baseCommit]);
   const info = { repo, baseCommit, uid };
   await writeFile(meta, `${JSON.stringify(info)}\n`, { mode: 0o600, flag: 'wx' });
