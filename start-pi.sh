@@ -5,7 +5,7 @@
 # 루트 .env의 연결 설정을 자식 프로세스에 전달하며 인증 값은 출력하지 않는다.
 # 모델 인증·대화는 .pi-runtime에 보관한다. 처음 실행하면 Pi에서 /login을 수행한다.
 # 매니저·공유 서비스는 런타임 창에, 개발 Pi 워커는 전용 공유 tmux 세션에 유지한다. --no-scheduler / --no-supervisor로 자동 시작을 제외한다.
-# 제외 옵션은 이미 실행 중인 공유 서비스를 종료하지 않는다.
+# 대화형 런타임 시작은 기존 tmux 서버의 모든 세션을 종료한 뒤 새로 만든다.
 set -euo pipefail
 
 # 현재 터미널 위치와 관계없이 스크립트가 있는 저장소를 기준으로 경로를 계산한다.
@@ -88,7 +88,7 @@ if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
         '  --no-telegram    Telegram 없이 단독 실행' \
         '  --manager        기본 매니저의 별칭 (일반 대화·파일·Bash·Projectman·KB·예약)' \
         '  --sessions       실행 중인 S8 tmux 세션 목록' \
-        '  --session 이름   s8-이름 세션 생성·재시작 후 목록 출력 (자동 접속 없음)' \
+        '  --session 이름   모든 tmux 세션 종료 후 s8-이름 생성 (자동 접속 없음)' \
         '  --help, -h       이 도움말 표시' \
         '  관리 역할 옵션: --continue, --print, --no-session, --version, --model, --provider, --thinking' \
         '  Telegram 인증: TELEGRAM_BOT_TOKEN (환경변수)' \

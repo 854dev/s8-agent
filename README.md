@@ -18,7 +18,7 @@
 ./start-pi.sh --mode local --telegram off  # 이 세션 연결 비활성
 ```
 
-로컬 모드는 기본 `s8-local` 세션을 사용하고, KB·Projectman 설정과 프로젝트 서비스 없이 실행한다. 첫 비대화형 실행의 Telegram 연결은 꺼져 있다. 터미널 실행에서는 현재 연결 세션을 보여주고 **현재 연결 유지 / 여기로 가져오기**를 선택한다. 기본 선택은 현재 연결 유지이며, 명시적인 `--telegram take/off`가 있으면 선택을 생략한다. 기존 세션은 저장된 연결 설정을 재사용한다. 프로젝트 모드는 기존 `s8-main` 세션과 서비스를 사용한다. 인증은 공유하지만 로컬 대화 이력은 세션·작업 디렉터리별로 분리한다. 로컬 실행과 전체 재시작은 기존 프로젝트 서비스를 건드리지 않는다. `--manager`는 `--mode project`의 별칭이다. `--help`, `--sessions`, `--service`와 패키지 관리 명령은 모드 선택을 생략한다.
+로컬 모드는 기본 `s8-local` 세션을 사용하고, KB·Projectman 설정과 프로젝트 서비스 없이 실행한다. 첫 비대화형 실행의 Telegram 연결은 꺼져 있다. 터미널 실행에서는 현재 연결 세션을 보여주고 **현재 연결 유지 / 여기로 가져오기**를 선택한다. 기본 선택은 현재 연결 유지이며, 명시적인 `--telegram take/off`가 있으면 선택을 생략한다. 실행할 때마다 모든 tmux 세션을 종료하고, 프로젝트 모드는 `s8-main` 세션과 서비스를 새로 만든다. 인증은 공유하지만 로컬 대화 이력은 세션·작업 디렉터리별로 분리한다. 로컬 실행도 기존 tmux 세션을 모두 종료하며, 프로젝트 서비스를 새로 시작하지 않는다. `--manager`는 `--mode project`의 별칭이다. `--help`, `--sessions`, `--service`와 패키지 관리 명령은 모드 선택을 생략한다.
 
 아래 기존 운영 안내의 서비스·Telegram 기본 동작은 `project` 모드 기준이다. 모드를 직접 지정하려면 실행 예시에 `--mode project`를 추가한다.
 
@@ -152,7 +152,7 @@ tmux attach-session -t s8-main
 ./start-pi.sh
 ./start-pi.sh --continue
 ./start-pi.sh --no-telegram           # Telegram 없이 단독 실행
-./start-pi.sh --session work          # 별도 세션 재시작 및 Telegram 연결 이전
+./start-pi.sh --session work          # 모든 세션 종료 후 work 세션 시작
 ./start-pi.sh --no-scheduler           # 스케줄러 자동 시작 제외
 ./start-pi.sh --no-supervisor          # 개발 슈퍼바이저 자동 시작 제외
 ./start-pi.sh --no-scheduler --no-supervisor  # 매니저만 실행
@@ -180,14 +180,14 @@ PHCMS_API_URL=http://127.0.0.1:8000/api/v2
 
 | 스크립트 | 역할 | 실행 예 |
 | --- | --- | --- |
-| `start-pi.sh` | 선택한 모드로 재시작 + Telegram 연결 유지/가져오기 선택 | `./start-pi.sh --session manager` |
+| `start-pi.sh` | 모든 tmux 세션 종료 후 선택한 모드로 시작 | `./start-pi.sh --session manager` |
 | `start-infra.sh` | 기존 `s8-infra` 창과 Nginx·KB Browser 컨테이너를 교체하고 frontend·콘솔 API·터미널 게이트웨이를 재시작 (PHCMS 명령은 선택 설정) | `./start-infra.sh` |
 | `start-pi.sh --service supervisor` | 통합 실행에서 사용하는 개발 감독 진입점. 단독 실행·진단도 지원 | `./start-pi.sh --service supervisor` |
 | `start-pi.sh --service scheduler` | 통합 실행에서 사용하는 예약 데몬 진입점. 단독 실행도 지원 | `./start-pi.sh --service scheduler` |
 
-- `start-pi.sh`는 선택한 관리 세션의 Pi와 공유 스케줄러·개발 감독을 매번 정상 종료한 뒤 새로 실행한다. 같은 세션의 최근 대화와 기존 실행 옵션은 기본으로 이어가고, 명시한 새 옵션은 재시작에 반영한다. `--session 이름`으로 세션을 선택하며 자동 접속 없이 창 목록을 출력한다. `--sessions`는 조회만 한다.
+- `start-pi.sh`로 런타임을 시작하면 현재 tmux 서버의 모든 세션을 `kill-server`로 종료한 뒤 선택한 세션을 새로 만든다. 다른 S8 세션, 워커, 인프라, 개인 tmux 세션도 종료된다. 기존 tmux 안에서 호출해도 분리된 제어 프로세스가 재시작을 완료한다. `--session 이름`으로 새 세션을 선택하며 자동 접속 없이 창 목록을 출력한다. 기존 창에 저장된 실행 옵션은 초기화되므로 필요한 옵션을 다시 지정한다. 대화 파일은 디스크에 남으며 `--continue`로 이어갈 수 있다. `--sessions`는 조회만 한다. `--service`, 도움말, 버전 조회, 패키지 관리 명령은 전체 세션 종료를 수행하지 않는다.
 - 감독 `--check`는 연결·API 기능을 확인한다. `--once`는 승인된 작업을 **실제 실행할 수 있는** 1회 감독 주기다. 인자 없이 실행하면 계속 대기한다.
-- 기본 실행은 `s8-main` 세션에 `shell`·`pi`·`scheduler`·`supervisor` 창을 준비한다. `--session manager`를 지정하면 `s8-manager`를 사용한다. 같은 저장소의 서비스 창은 다른 런타임에도 링크해 중복 실행을 막으며, start-pi 실행 시 같은 창에서 프로세스를 교체한다. 다른 매니저 세션과 shell 창은 유지한다. 이전 버전의 서비스 세션도 저장소 소유 표시가 일치하면 기존 창을 링크한다. tmux 밖에서 살아 있는 서비스는 중복 실행하지 않는다. 재시작 시 종료된 PID의 남은 서비스 잠금만 정리하며 살아 있는 프로세스의 잠금은 보존한다.
+- 기본 실행은 `s8-main` 세션에 `shell`·`pi`·`scheduler`·`supervisor` 창을 준비한다. `--session manager`를 지정하면 `s8-manager`를 사용한다. tmux 밖에서 살아 있는 서비스는 중복 실행하지 않는다. 재시작 시 종료된 PID의 남은 서비스 잠금만 정리하며 살아 있는 프로세스의 잠금은 보존한다. 인프라 세션이 필요하면 `./start-infra.sh`로 다시 시작한다.
 - `--no-scheduler`, `--no-supervisor`는 해당 호출의 자동 시작만 제외한다. 이미 실행 중인 공유 서비스를 종료하지 않는다. 옵션은 `--session manager`와 함께 사용할 수 있다. 제외한 공유 서비스는 재시작하지 않는다.
 - 도움말·버전·세션 목록·패키지 관리 명령과 일회성 `--print` 실행은 서비스를 시작하지 않는다. 서비스 시작에 실패하면 오류를 표시하며, 해당 제외 옵션으로 매니저를 따로 실행할 수 있다.
 - 재시작 제어는 터미널과 분리된 프로세스에서 끝까지 수행한다. 현재 Pi에서 start-pi를 호출해 호출자가 종료되어도 새 Pi와 Telegram 연결을 올린다. 실행 결과는 `.s8-runtime/runtime-restarts/`에 저장한다.
@@ -235,7 +235,7 @@ npm --prefix frontend run preview -- --host 127.0.0.1 --port 4178 --strictPort
 - `/s8/terminal`은 기본으로 호스트 셸에 접속한다. 세션 선택에서 같은 호스트 사용자·tmux 서버의 PHCMS, S8 스케줄러·개발 감독, Pi 등 모든 실행 세션을 제어한다. Pi 관리 표시가 없어도 접속할 수 있으며, tmux 밖의 서비스는 호스트 셸에서 운영 명령으로 제어한다.
 - `./start-infra.sh`는 저장소 루트 `.env`를 Compose에 명시 전달하고, 실행할 때마다 기존 `s8-infra` 창 전체(PHCMS 포함)와 Nginx·KB Browser 컨테이너를 교체한 뒤 frontend·Projectman 콘솔 API·터미널 게이트웨이를 재시작한다. 사전에 `pi`, `frontend`, `apps/terminal-gateway`의 npm 의존성을 설치한다. PHCMS 실행은 선택 사항이며 `.env`의 `PHCMS_START_COMMAND`에 명령을 지정하면 새 `phcms` 창에서 실행한다. 기본값은 미설정으로, PHCMS 창은 비워 둔다. 실행 중인 창의 프로세스는 종료되므로 필요한 작업은 먼저 저장한다. 웹 터미널 세션 목록에서 `s8-infra`를 선택해 접속한다. `NGINX_BIND_IP`가 셸 환경변수나 `.env`에 없으면 localhost(`127.0.0.1`)에만 바인딩한다.
 - `./start-pi.sh --sessions`로 목록, `./start-pi.sh --session main`으로 생성·재시작한 뒤 창 목록을 출력한다. 접속은 웹 터미널이나 `tmux attach -t s8-main`을 사용한다.
-- `./start-pi.sh --mode project --session main --telegram take`는 해당 Pi와 공유 서비스를 재시작하고 Telegram 연결을 가져온다. `--telegram`은 `--telegram take`, `--no-telegram`은 `--telegram off`의 호환 별칭이다. 연결을 끈 세션에서도 TUI의 `/telegram`으로 나중에 연결할 수 있다.
+- `./start-pi.sh --mode project --session main --telegram take`는 모든 tmux 세션을 종료한 뒤 Pi와 공유 서비스를 새로 시작하고 Telegram을 연결한다. `--telegram`은 `--telegram take`, `--no-telegram`은 `--telegram off`의 호환 별칭이다. 연결을 끈 세션에서도 TUI의 `/telegram`으로 나중에 연결할 수 있다.
 - backend 설치·실행, Tailscale 전용 노출 및 복구는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.
 - 별도 웹 인증은 없으므로 Tailscale IP와 ACL을 접근 권한 경계로 유지한다. 셸은 호스트 사용자 권한으로 실행되며 Pi의 파일 보호 확장은 직접 터미널 입력을 제한하지 않는다.
 - 글자 크기·전체화면·모바일 붙여넣기를 지원한다. Nerd Font 아이콘은 웹폰트로 제공하고 한글·다른 언어는 클라이언트의 시스템 폰트로 대체한다.
@@ -269,11 +269,11 @@ chmod 600 .env
 ./start-pi.sh --mode project --telegram take
 ```
 
-`./start-pi.sh --help`로 실행 방법을 확인할 수 있다. 터미널 실행 시 현재 Telegram 연결 세션을 표시하고 **현재 연결 유지 / 여기로 가져오기**를 선택한다. `--telegram take`는 이 세션으로 연결을 이전하고, `--telegram off`는 이 세션의 연결을 비활성화한다. 기존 `--telegram`과 `--no-telegram`도 각각의 별칭으로 지원한다. 비대화형 첫 실행은 project에서 연결 활성, local에서 비활성이고, 재실행은 저장된 선택을 유지한다. 토큰과 허용 채팅 설정이 필요하다.
+`./start-pi.sh --help`로 실행 방법을 확인할 수 있다. 터미널 실행 시 현재 Telegram 연결 세션을 표시하고 **현재 연결 유지 / 여기로 가져오기**를 선택한다. `--telegram take`는 이 세션으로 연결을 이전하고, `--telegram off`는 이 세션의 연결을 비활성화한다. 기존 `--telegram`과 `--no-telegram`도 각각의 별칭으로 지원한다. 비대화형 실행에서 연결 옵션을 생략하면 project는 연결 활성, local은 비활성이다. 모든 세션 종료 시 다른 세션의 Telegram 연결도 종료된다. 토큰과 허용 채팅 설정이 필요하다.
 
 TUI에서 `/telegram`은 연결 상태와 선택 메뉴를 표시하며, `/telegram take`로 가져오고 `/telegram off`로 해제한다. 연결을 가져오는 순서는 프로세스 실행 시각이 아니라 명시적인 take 실행 시점을 따른다. off는 해당 세션만 비활성화하고, 대기 중인 다른 세션이 있으면 그 세션으로 연결이 돌아간다. 결과에 실제 연결 세션을 표시하며 설정은 Pi 재시작과 전체 재시작에도 유지한다. 연결이 꺼진 세션은 polling 소유권 경쟁에 참여하지 않는다.
 
-첫 번째로 메시지를 보낸 허용 채팅에만 해당 터미널을 연결하며, 다른 채팅은 응답하지 않는다. 터미널과 연결된 Telegram 채팅은 같은 대화와 도구 진행을 공유한다. 텔레그램 키보드에서 상태, 중단, 배치, 새 대화, 모델 선택, 재시작, 도움말을 사용할 수 있으며 `/help`, `/status`, `/abort`, `/new`, `/model`, `/restart`, `/restart all`, `/jobs` 명령도 지원한다. `/jobs`는 모델 호출 없이 예약 목록·정지·재개·실행 중인 배치 중단을 처리한다. `/status`는 현재 세션의 입력·출력·캐시 토큰 누계를 표시한다. Telegram `/restart`는 동일한 실행 옵션으로 Pi만 다시 열고 현재 대화와 Telegram 연결을 이어간다. `/restart all` 또는 키보드의 `전체 재시작`은 모델 호출 없이 별도 제어 프로세스를 시작해 공유 작업 실행기를 정상 종료하고, `start-infra.sh` 실행과 인프라 준비 확인 후 요청한 세션의 Pi·스케줄러·슈퍼바이저를 재시작한다. 저장된 Telegram 연결 설정으로 복구하고 성공·실패 결과를 요청한 채팅·토픽으로 보낸다. local 모드의 전체 재시작은 프로젝트 인프라를 건드리지 않는다. 모델 작업 중에는 먼저 `/abort`로 중단한다. 중복 전체 재시작은 차단하고, 실패 단계와 실행 결과는 `.s8-runtime/runtime-restarts/`에 보관한다. `start-pi.sh` 재실행은 공유 스케줄러·개발 감독까지 재시작한다. 기존 독립 Telegram 세션은 자동 이관하지 않는다. 오프라인 중 전송된 메시지는 재연결 시 재실행하지 않고 건너뛴다. 다른 장비에서 같은 봇 토큰으로 polling하지 않는다. Telegram 요청 중 Pi 확인 대화상자가 열리면 중단을 요청한다. 터미널에서 추가 확인이 필요한 작업은 직접 처리한다. 민감한 결과를 다루는 작업은 Telegram으로 요청하지 않는다. 정규식 기반 redaction은 완전한 유출 방지책이 아니다.
+첫 번째로 메시지를 보낸 허용 채팅에만 해당 터미널을 연결하며, 다른 채팅은 응답하지 않는다. 터미널과 연결된 Telegram 채팅은 같은 대화와 도구 진행을 공유한다. 텔레그램 키보드에서 상태, 중단, 배치, 새 대화, 모델 선택, 재시작, 도움말을 사용할 수 있으며 `/help`, `/status`, `/abort`, `/new`, `/model`, `/restart`, `/restart all`, `/jobs` 명령도 지원한다. `/jobs`는 모델 호출 없이 예약 목록·정지·재개·실행 중인 배치 중단을 처리한다. `/status`는 현재 세션의 입력·출력·캐시 토큰 누계를 표시한다. Telegram `/restart`는 동일한 실행 옵션으로 Pi만 다시 열고 현재 대화와 Telegram 연결을 이어간다. `/restart all` 또는 키보드의 `전체 재시작`은 모델 호출 없이 별도 제어 프로세스를 시작해 공유 작업 실행기를 정상 종료하고, `start-infra.sh` 실행과 인프라 준비 확인 후 요청한 세션의 Pi·스케줄러·슈퍼바이저를 재시작한다. 저장된 Telegram 연결 설정으로 복구하고 성공·실패 결과를 요청한 채팅·토픽으로 보낸다. local 모드의 전체 재시작은 프로젝트 인프라를 건드리지 않는다. 모델 작업 중에는 먼저 `/abort`로 중단한다. 중복 전체 재시작은 차단하고, 실패 단계와 실행 결과는 `.s8-runtime/runtime-restarts/`에 보관한다. `start-pi.sh` 재실행은 모든 tmux 세션을 종료하고 선택한 모드의 런타임을 새로 시작한다. 기존 독립 Telegram 세션은 자동 이관하지 않는다. 오프라인 중 전송된 메시지는 재연결 시 재실행하지 않고 건너뛴다. 다른 장비에서 같은 봇 토큰으로 polling하지 않는다. Telegram 요청 중 Pi 확인 대화상자가 열리면 중단을 요청한다. 터미널에서 추가 확인이 필요한 작업은 직접 처리한다. 민감한 결과를 다루는 작업은 Telegram으로 요청하지 않는다. 정규식 기반 redaction은 완전한 유출 방지책이 아니다.
 
 검증: `node --test apps/telegram-gateway/gateway.test.mjs`
 

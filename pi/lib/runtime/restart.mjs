@@ -1,7 +1,32 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, open, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
+
+// A tmux wait-for lock disappears with kill-server; serialize destructive
+// restarts on disk for the lifetime of the detached controller instead.
+export async function withRuntimeResetLock(root, action) {
+  const file = path.join(root, '.s8-runtime/runtime-reset.lock');
+  const deadline = Date.now() + 120000;
+  let handle;
+  while (!handle) {
+    try { handle = await open(file, 'wx', 0o600); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      try {
+        const pid = Number(await readFile(file, 'utf8'));
+        if (Number.isInteger(pid) && pid > 0) {
+          try { process.kill(pid, 0); }
+          catch (error) { if (error.code === 'ESRCH') await unlink(file); else throw error; }
+        }
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (Date.now() >= deadline) throw new Error('tmux 재시작 잠금 대기 시간이 지났습니다.');
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+  try { await handle.writeFile(String(process.pid)); return await action(); }
+  finally { await handle.close(); await unlink(file); }
+}
 
 // The caller may be inside the Pi pane being stopped. A detached controller owns
 // the entire restart so closing the caller's terminal cannot interrupt it.
