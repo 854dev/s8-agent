@@ -15,7 +15,9 @@ const SECRET = /(?:TOKEN|PASSWORD|SECRET|API_KEY|ACCESS_KEY|AUTHORIZATION|COOKIE
 const CHECK_INTERVAL_MS = 30_000;
 const json = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }], details: undefined });
 
-export default function worker(pi: ExtensionAPI, { root = fileURLToPath(new URL('../..', import.meta.url)), client = projectmanFromEnv(), workerId = process.env.S8_WORKER_ID || 's8-developer' } = {}) {
+export default function worker(pi: ExtensionAPI, { root = fileURLToPath(new URL('../..', import.meta.url)), client = undefined as any, workerId = process.env.S8_WORKER_ID || 's8-developer' } = {}) {
+  // 연결 설정이 없어도 확장(도구 차단)은 반드시 로드되도록 클라이언트는 처음 쓸 때 만든다.
+  const api = () => (client ??= projectmanFromEnv());
   const assigned = process.env.S8_WORKER_UID || undefined;
   let claim: any, reported = false, checkedAt = 0;
 
@@ -33,14 +35,14 @@ export default function worker(pi: ExtensionAPI, { root = fileURLToPath(new URL(
       if (uid && args.uid !== uid) throw new Error(`이 세션은 ${uid}만 다룹니다.`);
       if (reported) throw new Error('이미 보고했습니다. 턴을 끝내세요.');
       if (args.action === 'get') {
-        const result = await claimWork({ root, client, uid: args.uid, workerId });
+        const result = await claimWork({ root, client: api(), uid: args.uid, workerId });
         claim = result.claim; checkedAt = Date.now();
         return json(result.work);
       }
       if (!claim) throw new Error('먼저 projectman get으로 작업을 claim하세요.');
       if (!args.status || !args.summary?.trim()) throw new Error('report에는 status와 summary가 필요합니다.');
       const { action: _action, uid: _uid, ...result } = args;
-      const outcome = await reportWork({ root, client, claim, result, cwd: ctx.cwd });
+      const outcome = await reportWork({ root, client: api(), claim, result, cwd: ctx.cwd });
       reported = true;
       return json(outcome);
     },
@@ -59,7 +61,7 @@ export default function worker(pi: ExtensionAPI, { root = fileURLToPath(new URL(
     // 회수된 작업을 계속 수행하지 않도록 주기적으로 소유권을 확인한다. 일시적 조회 실패는 막지 않는다.
     if (Date.now() - checkedAt > CHECK_INTERVAL_MS) {
       checkedAt = Date.now();
-      if (await stillActive(client, claim).catch(() => true) === false) {
+      if (await stillActive(api(), claim).catch(() => true) === false) {
         reported = true;
         return { block: true, reason: '작업이 회수되었습니다. 변경을 멈추고 턴을 끝내세요.' };
       }

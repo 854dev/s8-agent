@@ -5,7 +5,7 @@ S8 관리 대화의 `scheduler` 도구로 Projectman 예약을 관리하고, 별
 ## 실행
 
 ```bash
-./s8.sh                    # 매니저 + 스케줄러 + 개발 슈퍼바이저
+./s8.sh                    # 매니저 + 스케줄러
 ./s8.sh --no-scheduler     # 스케줄러 자동 시작 제외
 ./s8.sh service scheduler            # 예약 데몬만 전경에서 실행
 ```
@@ -42,8 +42,8 @@ S8 대화에서 자연어로 `scheduler` 도구를 호출해 관리한다.
 
 ## Projectman 지시 잡
 
-- 예약 틱은 지정 프로젝트의 승인된 ready 작업을 조회한다. 실제 UID 배정은 공유 supervisor가 담당하며 스케줄러가 별도 개발 프로세스를 실행하지 않는다.
-- 현재 계획에 대한 사용자 승인, 예정 시각과 의존성 검증은 유지한다. 병렬도는 s8-config.yml의 worker-entries 중 연결된 유휴 워커 수다.
+- 예약 틱은 지정 프로젝트의 승인된 ready 작업을 조회해 알린다. 워커 실행은 매니저의 `run_worker`나 `./s8.sh work <UID>`가 하며 스케줄러가 개발 프로세스를 실행하지 않는다.
+- 현재 계획에 대한 사용자 승인, 예정 시각과 의존성 검증은 유지한다.
 - 워커는 작업별 worktree에서 구현·검증하고 결과·패치를 보존한다. 성공 보고는 review로 저장하고 매니저 전달과 Telegram 개발 완료 알림을 독립적으로 수행한다. 매니저 review_result와 사람의 최종 complete 후 done이 된다.
 - s8의 work당 실행 예산과 자동 retry는 없다. 최종 완료 확인은 기존 서버 계약을 따른다. 수정은 새 work로 등록한다.
 - 예약 틱의 종료·중지는 이미 배정된 work를 중단하지 않는다. 실제 work 취소는 Projectman에서 수행한다. 기존 shell 잡의 배치 중지는 별도 동작이다.

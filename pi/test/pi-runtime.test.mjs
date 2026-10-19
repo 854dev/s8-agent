@@ -21,16 +21,15 @@ async function fixture(t) {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await copyFile(new URL(`../../${file}`, import.meta.url), path.join(root, file));
   }
-  await writeFile(path.join(root, 's8-config.yml'), 'telegram: {}\nworker-entries:\n  worker-1:\n    agent: pi\n    host: local\n    launch: managed\n');
-  for (const file of ['bin/s8.mjs', 'bin/agent.mjs', 'lib/agent/launch.mjs', 'lib/agent/profile.mjs', 'lib/runtime/user-command.mjs', 'bin/telegram-status.mjs', 'bin/pi-runtime-worker.mjs', 'lib/runtime/restart.mjs', 'lib/runtime/full-restart.mjs', 'lib/runtime/runtime.mjs', 'lib/runtime/services.mjs', 'lib/runtime/tmux-windows.mjs', 'lib/runtime/managed-sessions.mjs', 'lib/telegram/status.mjs', 'lib/development/worker-pool.mjs', 'lib/development/worker-identity.mjs', 'lib/development/worker-communicator.mjs', 'lib/development/worker-store.mjs', 'lib/development/worker-auth.mjs', 'lib/development/worker-protocol.mjs', 'lib/runtime/process.mjs', 'lib/development/ssh-worker.mjs', 'lib/storage/json-file.mjs', 'lib/scheduler/control.mjs', 'lib/scheduler/store.mjs', 'lib/config/s8-config.mjs']) {
+  await writeFile(path.join(root, 's8-config.yml'), 'telegram: {}\n');
+  for (const file of ['bin/s8.mjs', 'bin/agent.mjs', 'lib/agent/launch.mjs', 'lib/agent/profile.mjs', 'lib/runtime/user-command.mjs', 'bin/telegram-status.mjs', 'bin/pi-runtime-worker.mjs', 'lib/runtime/restart.mjs', 'lib/runtime/full-restart.mjs', 'lib/runtime/runtime.mjs', 'lib/runtime/services.mjs', 'lib/runtime/tmux-windows.mjs', 'lib/runtime/managed-sessions.mjs', 'lib/telegram/status.mjs', 'lib/runtime/process.mjs', 'lib/storage/json-file.mjs', 'lib/scheduler/control.mjs', 'lib/scheduler/store.mjs', 'lib/config/s8-config.mjs']) {
     await mkdir(path.dirname(path.join(root, 'pi', file)), { recursive: true });
     await copyFile(new URL(`../${file}`, import.meta.url), path.join(root, 'pi', file));
   }
   await mkdir(path.join(root, 'apps/telegram-gateway'), { recursive: true });
   await copyFile(new URL('../../apps/telegram-gateway/gateway.mjs', import.meta.url), path.join(root, 'apps/telegram-gateway/gateway.mjs'));
   await symlink(new URL('../node_modules/yaml', import.meta.url).pathname, path.join(root, 'pi/node_modules/yaml'));
-  await writeFile(path.join(root, 'pi/bin/developer.mjs'), 'setInterval(() => {}, 1000);');
-  for (const service of ['scheduler', 'supervisor']) await writeFile(path.join(root, `pi/bin/${service}.mjs`), `import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(path.join(root, 'service-starts'))}, JSON.stringify({service:${JSON.stringify(service)},pid:process.pid})+'\\n'); setInterval(() => {}, 1000);`);
+  for (const service of ['scheduler']) await writeFile(path.join(root, `pi/bin/${service}.mjs`), `import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(path.join(root, 'service-starts'))}, JSON.stringify({service:${JSON.stringify(service)},pid:process.pid})+'\\n'); setInterval(() => {}, 1000);`);
   await writeFile(path.join(root, 'tools/tmux'), `#!/bin/sh\nexec ${quote(tmux)} -f /dev/null -L ${quote(socket)} "$@"\n`, { mode: 0o755 });
   await writeFile(path.join(root, 'pi/node_modules/.bin/pi'), `#!/usr/bin/env node
 import('node:fs').then(async fs => {
@@ -60,9 +59,8 @@ test('start-pi recreates all sessions and services and connects Telegram by defa
   const f = await fixture(t);
   const result = await f.launch(['--model', 'fixture model']);
   assert.match(result.stdout, /tmux 세션: s8-main/);
-  for (const step of ['기존 tmux 세션 모두 종료', '개발 워커 1개 등록', 'scheduler: 실행 확인', 'supervisor: 실행 확인', 'Pi 실행 확인']) assert.ok(result.stdout.includes(step), step);
-  for (const name of ['shell', 'pi', 'scheduler', 'supervisor']) assert.ok(result.stdout.includes(`s8-main:${name}`));
-  assert.ok((await f.run(['list-sessions', '-F', '#S'])).stdout.includes('s8-workers-'));
+  for (const step of ['기존 tmux 세션 모두 종료', 'scheduler: 실행 확인', 'Pi 실행 확인']) assert.ok(result.stdout.includes(step), step);
+  for (const name of ['shell', 'pi', 'scheduler']) assert.ok(result.stdout.includes(`s8-main:${name}`));
   assert.equal((await f.run(['list-clients'])).stdout.trim(), '');
   const record = JSON.parse((await readFile(path.join(f.root, 'starts'), 'utf8')).trim());
   assert.equal(record.session, 's8-main');
@@ -77,12 +75,12 @@ test('start-pi recreates all sessions and services and connects Telegram by defa
   assert.equal(records.length, 2);
   assert.ok(!records[1].args.includes('--continue'));
   assert.ok(!records[1].args.includes('--model'));
-  assert.deepEqual((await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n').filter(name => !name.startsWith('s8-workers-')), ['s8-main']);
+  assert.deepEqual((await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n'), ['s8-main']);
   const after = (await readFile(path.join(f.root, 'service-starts'), 'utf8')).trim().split('\n').map(JSON.parse);
-  assert.equal(after.length, 4);
-  assert.ok(after.slice(2).every(item => !before.some(previous => previous.pid === item.pid)));
+  assert.equal(after.length, 2);
+  assert.ok(after.slice(1).every(item => !before.some(previous => previous.pid === item.pid)));
   assert.equal((await readFile(path.join(f.root, 'telegram'), 'utf8')).trim().split('\n').length, 2);
-  assert.equal((await f.run(['list-windows', '-t', 's8-main', '-F', '#W'])).stdout.trim().split('\n').length, 4);
+  assert.equal((await f.run(['list-windows', '-t', 's8-main', '-F', '#W'])).stdout.trim().split('\n').length, 3);
   assert.match((await f.launch(['--sessions'])).stdout, /s8-main/);
   await f.launch(['--model', 'changed model']);
   const changed = (await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').map(JSON.parse).at(-1);
@@ -94,7 +92,7 @@ test('named runtime honors exclusions, validates arguments, and replaces existin
   await assert.rejects(f.launch(['--tools', 'bash']), /Unsupported/);
   await assert.rejects(f.launch(['--session', 'bad;name']), /잘못된 세션/);
   await assert.rejects(f.launch(['--session', 'bad\n']), /잘못된 세션/);
-  await f.launch(['--session', 'work', '--no-scheduler', '--no-supervisor']);
+  await f.launch(['--session', 'work', '--no-scheduler']);
   assert.deepEqual((await f.run(['list-windows', '-t', 's8-work', '-F', '#W'])).stdout.trim().split('\n').sort(), ['pi', 'shell']);
   await f.run(['new-session', '-d', '-s', 's8-main', 'sleep 60']);
   await f.launch([]);
@@ -115,14 +113,14 @@ test('each launch replaces the prior session and honors its Telegram option', as
   await f.launch([]);
   assert.deepEqual((await readFile(path.join(f.root, 'telegram'), 'utf8')).trim().split('\n'), ['s8-main', 's8-work', 's8-main']);
   const sessions = (await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n').sort();
-  assert.deepEqual(sessions.filter(name => !name.startsWith('s8-workers-')), ['s8-main']);
+  assert.deepEqual(sessions, ['s8-main']);
 });
 
 test('concurrent launchers serialize restarts without duplicate service processes', async t => {
   const f = await fixture(t);
   await Promise.all([f.launch([]), f.launch([])]);
   assert.equal((await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').length, 2);
-  assert.equal((await f.run(['list-windows', '-t', 's8-main', '-F', '#W'])).stdout.trim().split('\n').length, 4);
+  assert.equal((await f.run(['list-windows', '-t', 's8-main', '-F', '#W'])).stdout.trim().split('\n').length, 3);
 });
 
 test('failed services retain output until restart and exclusions omit services after reset', async t => {
@@ -133,7 +131,7 @@ test('failed services retain output until restart and exclusions omit services a
   await writeFile(path.join(f.root, 'pi/bin/scheduler.mjs'), 'setInterval(() => {}, 1000);');
   await f.launch([]);
   assert.equal((await f.run(['display-message', '-p', '-t', 's8-main:scheduler', '#{pane_dead}'])).stdout.trim(), '0');
-  await f.launch(['--no-scheduler', '--no-supervisor']);
+  await f.launch(['--no-scheduler']);
   assert.equal((await f.run(['list-windows', '-t', 's8-main', '-F', '#W'])).stdout.trim().split('\n').length, 2);
 });
 

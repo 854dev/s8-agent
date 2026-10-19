@@ -57,10 +57,10 @@ export async function windowTail(run, target, lines = 5) {
 }
 
 export async function windows(run, session) {
-  const { stdout } = await run(['list-windows', '-t', `=${session}`, '-F', '#{window_id}\t#{window_name}\t#{@s8-window-root}\t#{pane_dead}\t#{@s8-worker-id}']);
+  const { stdout } = await run(['list-windows', '-t', `=${session}`, '-F', '#{window_id}\t#{window_name}\t#{@s8-window-root}\t#{pane_dead}']);
   return stdout.trim().split('\n').filter(Boolean).map(line => {
-    const [id, name, root, dead, workerId] = line.split('\t');
-    return { id, name, root, dead: dead === '1', workerId: workerId || undefined };
+    const [id, name, root, dead] = line.split('\t');
+    return { id, name, root, dead: dead === '1' };
   });
 }
 

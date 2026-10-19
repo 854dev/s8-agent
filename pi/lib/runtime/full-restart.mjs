@@ -4,7 +4,6 @@ import { spawn } from 'node:child_process';
 import { realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { acquirePidLock, waitUntil } from './process.mjs';
-import { workersBusy } from '../development/worker-pool.mjs';
 import { startPiRuntime, savedRuntimeOptions } from './runtime.mjs';
 import { validSession } from './managed-sessions.mjs';
 import { runTmux, stopWindow, sessionOption } from './tmux-windows.mjs';
@@ -52,7 +51,6 @@ export async function runFullRestart(root, { session, directory }, { run = runTm
   // 현재 세션의 모드·작업 디렉터리·Telegram·Pi 인자를 그대로 이어서 다시 시작한다.
   const saved = await savedRuntimeOptions(session, { run });
   if (saved.mode === 'local') return runtime(root, saved);
-  if (await workersBusy(root)) throw new Error('개발 작업이 진행 중이거나 워커 상태를 확인할 수 없습니다. 작업·연결 상태를 확인한 뒤 전체 재시작하세요.');
 
   // 중복 실행 방지. 잠금 파일 둘째 줄에 실행 기록 디렉터리를 남긴다.
   const release = await acquirePidLock(path.join(root, '.s8-runtime/runtime-restarts/all.lock'), { extra: `${directory}\n` })
@@ -64,12 +62,12 @@ export async function runFullRestart(root, { session, directory }, { run = runTm
     await writeFile(path.join(directory, 'progress.json'), JSON.stringify({ stage, at: new Date().toISOString() }), { mode: 0o600 });
   };
   try {
-    // 이 체크아웃 소유의 스케줄러·슈퍼바이저 창을 세션과 관계없이 한 번씩 중지한다.
+    // 이 체크아웃 소유의 스케줄러 창을 세션과 관계없이 한 번씩 중지한다.
     await progress('stop-services');
     const { stdout } = await run(['list-windows', '-a', '-F', '#{session_name}\t#{window_name}\t#{@s8-window-root}']);
     const stopped = new Set();
     for (const [host, name, checkout] of stdout.trim().split('\n').map(line => line.split('\t'))) {
-      if (checkout !== root || !['scheduler', 'supervisor'].includes(name) || stopped.has(name)) continue;
+      if (checkout !== root || name !== 'scheduler' || stopped.has(name)) continue;
       await stopWindow(run, root, host, name);
       stopped.add(name);
     }

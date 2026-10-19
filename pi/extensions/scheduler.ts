@@ -63,7 +63,7 @@ export function registerScheduler(pi: ExtensionAPI, { projectmanOnly = false } =
   pi.registerTool({
     name: 'scheduler',
     label: 'Scheduler',
-    description: 'CRUD for shell jobs or Projectman workflow v2 jobs. Projectman jobs poll one project every 5 minutes and run due human-confirmed work through the development supervisor; idle polls are silent. Creating, changing, or deleting requires interactive user confirmation. Use list/create/update/delete.',
+    description: 'CRUD for shell jobs or Projectman workflow v2 jobs. Projectman jobs poll one project every 5 minutes and report human-confirmed ready work; the manager starts workers with run_worker. Idle polls are silent. Creating, changing, or deleting requires interactive user confirmation. Use list/create/update/delete.',
     parameters,
     async execute(_id, args, _signal, _onUpdate, ctx) {
       return withFileMutationQueue(jobsFile, async () => {
@@ -86,7 +86,7 @@ export function registerScheduler(pi: ExtensionAPI, { projectmanOnly = false } =
             id: args.id, time: args.time, intervalMinutes: args.intervalMinutes ?? (args.kind === 'projectman' ? 5 : undefined), timezone: args.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
             script: args.script, expiresAt: args.expiresAt, kind: args.kind, projectUid: args.projectUid,
           });
-          await confirm(ctx, '예약 작업 생성', `${job.id} · ${job.time ? `매일 ${job.time}` : `${job.intervalMinutes}분마다`} (${job.timezone}) · ${args.enabled ?? true ? '활성화' : '중지 상태'}\n현재 사용자 권한으로 실행됩니다. ${job.kind === 'projectman' ? `Projectman ${job.projectUid}: 사람이 계획을 확정한 실행 가능 작업을 개발 슈퍼바이저가 실행합니다. 빈 검사에는 알리지 않습니다.` : `아래 스크립트를 확인하세요.\n\n${job.script}`}`);
+          await confirm(ctx, '예약 작업 생성', `${job.id} · ${job.time ? `매일 ${job.time}` : `${job.intervalMinutes}분마다`} (${job.timezone}) · ${args.enabled ?? true ? '활성화' : '중지 상태'}\n현재 사용자 권한으로 실행됩니다. ${job.kind === 'projectman' ? `Projectman ${job.projectUid}: 사람이 계획을 확정한 실행 가능 작업이 있으면 알립니다(실행은 매니저의 run_worker). 빈 검사에는 알리지 않습니다.` : `아래 스크립트를 확인하세요.\n\n${job.script}`}`);
           if (job.kind === 'shell') {
             await mkdir(scripts, { recursive: true, mode: 0o700 });
             await writeFile(scriptPath, job.script, { flag: 'wx', mode: 0o700 });
@@ -117,7 +117,7 @@ export function registerScheduler(pi: ExtensionAPI, { projectmanOnly = false } =
           intervalMinutes: kind === 'projectman' ? args.intervalMinutes ?? 5 : args.time !== undefined ? undefined : args.intervalMinutes ?? current.intervalMinutes,
           timezone: args.timezone ?? current.timezone, script, expiresAt: args.expiresAt !== undefined ? args.expiresAt : current.expiresAt,
         });
-        await confirm(ctx, '예약 작업 수정', `${job.id} · ${job.time ? `매일 ${job.time}` : `${job.intervalMinutes}분마다`} (${job.timezone}) · ${args.enabled ?? current.enabled ? '활성화' : '중지'}\n${job.kind === 'projectman' ? `Projectman ${job.projectUid}: 사람이 계획을 확정한 실행 가능 작업을 개발 슈퍼바이저가 실행합니다. 빈 검사에는 알리지 않습니다.` : args.script ? `현재 사용자 권한으로 실행될 스크립트를 확인하세요.\n\n${job.script}` : '스크립트 내용은 변경되지 않습니다.'}`);
+        await confirm(ctx, '예약 작업 수정', `${job.id} · ${job.time ? `매일 ${job.time}` : `${job.intervalMinutes}분마다`} (${job.timezone}) · ${args.enabled ?? current.enabled ? '활성화' : '중지'}\n${job.kind === 'projectman' ? `Projectman ${job.projectUid}: 사람이 계획을 확정한 실행 가능 작업이 있으면 알립니다(실행은 매니저의 run_worker). 빈 검사에는 알리지 않습니다.` : args.script ? `현재 사용자 권한으로 실행될 스크립트를 확인하세요.\n\n${job.script}` : '스크립트 내용은 변경되지 않습니다.'}`);
         let oldScript;
         const tempScript = `${scriptPath}.${process.pid}.tmp`;
         if (job.kind === 'shell') {

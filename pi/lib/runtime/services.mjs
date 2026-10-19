@@ -1,16 +1,14 @@
-// 공유 서비스(scheduler, supervisor)와 개발 워커 풀 시작.
-// 서비스는 체크아웃당 하나만 실행되며, 각 서비스 프로세스가 PID 잠금 파일로 이를 보장한다.
+// 공유 서비스(scheduler) 시작.
+// 서비스는 체크아웃당 하나만 실행되며, 서비스 프로세스가 PID 잠금 파일로 이를 보장한다.
 // 비정상 종료로 남은 잠금은 서비스가 시작할 때 스스로 정리한다(acquirePidLock).
-import { mkdir, realpath } from 'node:fs/promises';
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
-import { acquirePidLock, lockOwner, processAlive, sleep, waitUntil } from './process.mjs';
+import { lockOwner, processAlive, sleep, waitUntil } from './process.mjs';
 import { ensureWindow, stopWindow, windows, windowTail, withTmuxLock, runTmux, quote, lockName } from './tmux-windows.mjs';
-import { ensureWorkerPool, workersBusy } from '../development/worker-pool.mjs';
 
 // 서비스별 PID 잠금 파일(저장소 루트 기준).
 const lockFiles = {
   scheduler: '.s8-runtime/scheduler/owner.lock',
-  supervisor: '.s8-runtime/services/supervisor.lock',
 };
 
 /** 서비스 창이 없는데 잠금 소유자가 살아 있으면 tmux 밖에서 실행 중인 것이므로 중복 실행을 거부한다. */
@@ -29,32 +27,18 @@ async function stopService(run, root, session, name) {
 }
 
 /**
- * 공유 서비스를 (재)시작하고 서비스별 결과 목록을 돌려준다. supervisor를 켜면 워커 풀 결과({ service: 'workers' })도 포함한다.
- * session은 startPiRuntime이 만들고 소유를 확인한 런타임 세션이다. 실행 중인 서비스는 새 프로세스로 교체한다. 단, 워커가 작업 중이거나 워커 설정 적용이 보류되면
- * 실행 중인 supervisor는 그대로 둔다({ kept: true }). log는 진행 단계를 한 줄씩 받는다.
+ * 공유 서비스를 (재)시작하고 서비스별 결과 목록을 돌려준다.
+ * session은 startPiRuntime이 만들고 소유를 확인한 런타임 세션이다. 실행 중인 서비스는 새 프로세스로 교체한다. log는 진행 단계를 한 줄씩 받는다.
  */
-export async function startPiServices(root, { session = 's8-main', scheduler = true, supervisor = true, run = runTmux, log = () => {} } = {}) {
+export async function startPiServices(root, { session = 's8-main', scheduler = true, run = runTmux, log = () => {} } = {}) {
   root = await realpath(root);
-  if (!scheduler && !supervisor) return [];
-
   const results = [];
-  let workerPool;
-  if (supervisor) {
-    log('개발 워커 풀 확인');
-    workerPool = await ensureWorkerPool(root, { run });
-    results.push({ service: 'workers', ...workerPool });
-    log(`개발 워커 ${workerPool.count}개 등록${workerPool.session ? ` (${workerPool.session})` : ''}${workerPool.deferred ? ' · 설정 적용 보류' : ''}`);
-  }
-  for (const [name, enabled] of Object.entries({ scheduler, supervisor })) {
+  for (const [name, enabled] of Object.entries({ scheduler })) {
     if (!enabled) continue;
     results.push(await withTmuxLock(run, lockName('s8-service-', root + name), async () => {
       const current = (await windows(run, session)).find(window => window.name === name);
       if (!current || current.dead) await assertNoOutsideOwner(root, name);
       else {
-        if (name === 'supervisor' && (workerPool.deferred || await workersBusy(root))) {
-          log(`${name}: 진행 중인 개발 작업이 있어 기존 프로세스 유지`);
-          return { service: name, session, window: name, kept: true };
-        }
         log(`${name}: 기존 프로세스 중지`);
         await stopService(run, root, session, name);
       }
@@ -70,10 +54,4 @@ export async function startPiServices(root, { session = 's8-main', scheduler = t
     }));
   }
   return results;
-}
-
-/** 별도로 실행한 슈퍼바이저와 통합 실행의 중복도 같은 PID 잠금으로 차단한다. 반환값은 잠금 해제 함수. */
-export async function supervisorOwner(root) {
-  await mkdir(path.join(root, '.s8-runtime/services'), { recursive: true, mode: 0o700 });
-  return acquirePidLock(path.join(root, lockFiles.supervisor));
 }

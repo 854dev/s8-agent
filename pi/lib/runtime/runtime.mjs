@@ -26,11 +26,11 @@ export async function savedRuntimeOptions(session, { run = runTmux } = {}) {
 }
 
 /**
- * Pi 런타임을 (재)시작하고 { session, windows, telegramStatus, workers }를 돌려준다.
+ * Pi 런타임을 (재)시작하고 { session, windows, telegramStatus }를 돌려준다.
  * telegram: true면 이 세션으로 Telegram을 가져오고, false면 끈다. 생략하면 project 모드만 켠다.
  * local 모드는 공유 서비스를 시작하지 않는다. log는 진행 단계를 한 줄씩 받는다.
  */
-export async function startPiRuntime(root, { session = 's8-main', mode = 'project', cwd, args = [], telegram, scheduler = true, supervisor = true, run = runTmux, log = () => {} } = {}) {
+export async function startPiRuntime(root, { session = 's8-main', mode = 'project', cwd, args = [], telegram, scheduler = true, run = runTmux, log = () => {} } = {}) {
   if (!validSession(session)) throw new Error('잘못된 세션 이름입니다.');
   if (!['project', 'local'].includes(mode)) throw new Error('Invalid mode');
   validatePiOptions(args);
@@ -43,7 +43,7 @@ export async function startPiRuntime(root, { session = 's8-main', mode = 'projec
   // 같은 체크아웃의 재시작과 Telegram 이전을 직렬화한다.
   return withTmuxLock(run, lockName('s8-runtime-root-', root), async () => {
     // 무엇이든 중지하기 전에 다시 띄울 창이 모두 이 저장소 소유인지 확인한다.
-    const managed = mode === 'project' ? ['pi', ...(scheduler ? ['scheduler'] : []), ...(supervisor ? ['supervisor'] : [])] : ['pi'];
+    const managed = mode === 'project' && scheduler ? ['pi', 'scheduler'] : ['pi'];
     for (const window of await windows(run, session)) {
       if (managed.includes(window.name) && window.root !== root) throw new Error(`${session}:${window.name}은 S8이 관리하는 창이 아닙니다.`);
     }
@@ -51,8 +51,7 @@ export async function startPiRuntime(root, { session = 's8-main', mode = 'projec
 
     log('기존 Pi 창 중지');
     await stopWindow(run, root, session, 'pi');
-    const services = mode === 'project' ? await startPiServices(root, { session, scheduler, supervisor, run, log }) : [];
-    const workers = services.find(service => service.service === 'workers');
+    if (mode === 'project') await startPiServices(root, { session, scheduler, run, log });
 
     const settings = { '@s8-telegram': telegram ? 'take' : 'off', '@s8-mode': mode, '@s8-cwd': cwd, '@s8-pi-args': JSON.stringify(args) };
     for (const [name, value] of Object.entries(settings)) await run(['set-option', '-t', session, name, value]);
@@ -81,6 +80,6 @@ export async function startPiRuntime(root, { session = 's8-main', mode = 'projec
     const telegramStatus = currentOwner === session
       ? `Telegram: ${previousOwner && previousOwner !== session ? previousOwner + ' → ' : ''}${session} 연결`
       : `Telegram: ${currentOwner ? currentOwner + ' 연결 유지' : '연결 없음'} (이 세션: ${telegram ? '연결 대기' : '꺼짐'})`;
-    return { session, windows: active.map(window => window.name), telegramStatus, workers };
+    return { session, windows: active.map(window => window.name), telegramStatus };
   });
 }

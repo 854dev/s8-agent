@@ -117,5 +117,5 @@
       ]
     }
   ],
-  "t3": "The real PH-CMS + persistent Pi workers + browser approval scenario is tested by bash pi/bin/test-projectman-worker-pool.sh."
+  "t3": "Worker claim, report and dispatch are covered by pi/test/worker-mode.test.mjs."
 }

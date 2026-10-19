@@ -7,7 +7,7 @@ import os from 'node:os';
 import { preflightFingerprint } from '../lib/projectman/preflight.mjs';
 import { createProjectmanConsole } from '../lib/projectman/console.mjs';
 
-async function fixture(t, { capabilities = async () => ({ workflowVersion: 2, safeResourceDelete: true, cascadeResourceDelete: true, actorType: 'human' }), reviewed = false, client = {} } = {}) {
+async function fixture(t, { capabilities = async () => ({ workflowVersion: 2, safeResourceDelete: true, cascadeResourceDelete: true, actorType: 'human' }), reviewed = false, client = {}, agent } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-console-'));
   const operations = [];
   const workflow = { revision: 2, specHash: 'scope', spec: { plan: 'Finalized plan', decisionRefs: ['conversation:final-plan'] } };
@@ -16,7 +16,7 @@ async function fixture(t, { capabilities = async () => ({ workflowVersion: 2, sa
   const server = createProjectmanConsole({ root, authFactory: () => ({ login: async () => ({ accessToken: 'fixture.user.token', refreshToken: 'fixture.refresh.token' }) }), clientFactory: token => {
     assert.equal(token, 'fixture.user.token');
     return { capabilities, get: async () => item, getWorkflow: async () => ({ state: 'todo', workflow }), list: async () => [], workflow: async (uid, input) => { operations.push({ uid, input }); if (input.expectedRevision === 0) throw new Error('PH-CMS request failed (HTTP 409)'); return { uid, state: 'ready' }; }, ...client };
-  } });
+  }, agentClientFactory: () => { if (!agent) throw Object.assign(new Error(), { status: 503, code: 'AGENT_KEY_MISSING' }); return agent; } });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(root, { recursive: true, force: true }); });
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -118,3 +118,42 @@ test('console completion accepts an optional review comment and keeps human comp
   const messages = []; await drainManagerInbox(root, event => messages.push(event));
   assert.equal(messages.length, 1); assert.equal(messages[0].uid, 'task-1');
 })
+
+
+test('console finishes a stopped run with the agent key after the human session confirms the current run', async t => {
+  // 워커 창 확인이 실제 tmux 서버를 건드리지 않도록 소켓 디렉터리를 격리한다.
+  const tmux = await mkdtemp(path.join(os.tmpdir(), 's8-console-tmux-')), previous = process.env.TMUX_TMPDIR;
+  process.env.TMUX_TMPDIR = tmux;
+  t.after(async () => { if (previous === undefined) delete process.env.TMUX_TMPDIR; else process.env.TMUX_TMPDIR = previous; await rm(tmux, { recursive: true, force: true }); });
+  const runId = '22222222-2222-4222-8222-222222222222', reports = [];
+  const doing = async () => ({ state: 'doing', title: 'Counter', workflow: { revision: 7, run: { id: runId, status: 'running' } } });
+  let agent = { getWorkflow: doing, workflow: async (uid, operation) => { reports.push({ uid, operation }); return { uid, state: 'blocked' }; } };
+  const { base, headers } = await fixture(t, { client: { getWorkflow: doing }, get agent() { return agent; } });
+  const send = input => fetch(`${base}/api/projectman/items/task-1/finish-stopped-run`, { method: 'POST', headers, body: JSON.stringify(input) });
+  assert.equal((await send({ runId })).status, 400);
+  assert.equal((await send({ runId, confirmStopped: true, report: {} })).status, 400);
+  const changed = await send({ runId: '33333333-3333-4333-8333-333333333333', confirmStopped: true });
+  assert.equal(changed.status, 409); assert.match((await changed.json()).error, /바뀌었습니다/);
+  assert.equal(reports.length, 0);
+  const finished = await send({ runId, confirmStopped: true });
+  assert.equal(finished.status, 200); assert.deepEqual(await finished.json(), { uid: 'task-1', runId, status: 'finished', state: 'blocked' });
+  assert.equal(reports.length, 1); assert.equal(reports[0].operation.action, 'report'); assert.equal(reports[0].operation.expectedRevision, 7); assert.equal(reports[0].operation.report.status, 'failed');
+  agent = { getWorkflow: doing, workflow: async () => { throw new Error('PH-CMS request failed (HTTP 409)'); } };
+  assert.equal((await send({ runId, confirmStopped: true })).status, 200, 'a delivered outbox is not sent again');
+});
+
+test('console finish fails closed with fixed messages when the agent key is missing or the server refuses', async t => {
+  const tmux = await mkdtemp(path.join(os.tmpdir(), 's8-console-tmux-')), previous = process.env.TMUX_TMPDIR;
+  process.env.TMUX_TMPDIR = tmux;
+  t.after(async () => { if (previous === undefined) delete process.env.TMUX_TMPDIR; else process.env.TMUX_TMPDIR = previous; await rm(tmux, { recursive: true, force: true }); });
+  const runId = '22222222-2222-4222-8222-222222222222';
+  const doing = async () => ({ state: 'doing', workflow: { revision: 7, run: { id: runId, status: 'running' } } });
+  const body = JSON.stringify({ runId, confirmStopped: true });
+  const missing = await fixture(t, { client: { getWorkflow: doing } });
+  const unavailable = await fetch(`${missing.base}/api/projectman/items/task-1/finish-stopped-run`, { method: 'POST', headers: missing.headers, body });
+  assert.equal(unavailable.status, 503); assert.equal((await unavailable.json()).code, 'AGENT_KEY_MISSING');
+  const refused = await fixture(t, { client: { getWorkflow: doing }, agent: { getWorkflow: doing, workflow: async () => { throw new Error('PH-CMS request failed (HTTP 409) secret body'); } } });
+  const response = await fetch(`${refused.base}/api/projectman/items/task-1/finish-stopped-run`, { method: 'POST', headers: refused.headers, body });
+  const result = await response.json();
+  assert.equal(response.status, 409); assert.equal(result.code, 'FINISH_REFUSED'); assert.match(result.error, /거부/); assert.doesNotMatch(JSON.stringify(result), /secret/);
+});

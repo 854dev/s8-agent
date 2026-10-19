@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node bin/agent.mjs",
     "s8": "node bin/s8.mjs",
-    "supervisor": "node bin/s8.mjs service supervisor",
+    "work": "node bin/s8.mjs work",
     "console": "node bin/projectman-console.mjs"
   },
   "engines": {
@@ -18,7 +18,6 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "1.3.0",
-    "@modelcontextprotocol/sdk": "1.32.1",
     "@ph-cms/client-sdk": "0.1.61",
     "typebox": "1.3.27",
     "yaml": "2.9.0"

@@ -369,3 +369,38 @@ test('completion submits the optional review comment and preserves it on a faile
   expect(attempts[1]).toEqual(attempts[0])
   expect(await screen.findByRole('status')).toHaveTextContent('작업을 완료했습니다.')
 })
+
+test('a stopped doing run can be finished as failed only after explicit confirmation, and refusals stay visible', async () => {
+  const f = fixture(), user = userEvent.setup()
+  f.detail.execution.state = 'doing'; delete f.detail.execution.workflow!.review
+  f.detail.execution.workflow!.run = { id: 'run-stuck', workerId: 's8-developer', status: 'running', startedAt: '2026-10-19' }
+  const attempts: unknown[] = []
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/finish-stopped-run')) {
+      attempts.push(JSON.parse(String(init?.body)))
+      if (attempts.length === 1) return Response.json({ code: 'FINISH_REFUSED', error: '워커 창이 아직 실행 중입니다.' }, { status: 409 })
+      f.detail.execution.state = 'blocked'; f.detail.execution.workflow!.run!.status = 'finished'
+      return Response.json({ status: 'finished', state: 'blocked' })
+    }
+    return f.fetcher(url, init)
+  }))
+  render(<ProjectmanPage />)
+  const finish = await screen.findByRole('button', { name: '실패로 마무리' })
+  expect(finish).toBeDisabled()
+  await user.click(screen.getByRole('checkbox', { name: '모든 장비에서 이 실행이 멈췄음을 확인했습니다.' }))
+  await user.click(finish)
+  expect(await screen.findByRole('alert')).toHaveTextContent('워커 창이 아직 실행 중입니다.')
+  await user.click(screen.getByRole('button', { name: '실패로 마무리' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('실행을 실패로 마무리했습니다.')
+  expect(attempts).toEqual([{ runId: 'run-stuck', confirmStopped: true }, { runId: 'run-stuck', confirmStopped: true }])
+  await waitFor(() => expect(screen.queryByRole('button', { name: '실패로 마무리' })).not.toBeInTheDocument())
+})
+
+test('finished or non-doing runs do not offer a manual finish', async () => {
+  const f = fixture()
+  f.detail.execution.state = 'done'; delete f.detail.execution.workflow!.review
+  f.detail.execution.workflow!.run = { id: 'run-done', status: 'finished', startedAt: '2026-10-19' }
+  render(<ProjectmanPage />)
+  await screen.findByText('finished · 워커 기록 없음')
+  expect(screen.queryByRole('button', { name: '실패로 마무리' })).not.toBeInTheDocument()
+})

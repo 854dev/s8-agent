@@ -25,23 +25,18 @@ const echoPi = dir => writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), `#!/u
 console.log(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), url: process.env.PHCMS_API_URL ?? null }));
 `, { mode: 0o755 });
 
-test('s8 service entrypoints preserve scheduler setup and supervisor arguments; start-pi --service stays compatible', async t => {
+test('s8 service runs the scheduler in the KB with the Pi environment and rejects other services', async t => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-service-entry-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const { agent, s8 } = await copyLauncher(dir);
+  const { s8 } = await copyLauncher(dir);
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  const stub = "console.log(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),kb:process.env.S8_KB_ROOT,config:process.env.S8_PI_CONFIG_ROOT}));";
-  for (const service of ['scheduler', 'supervisor']) await writeFile(path.join(dir, `pi/bin/${service}.mjs`), stub);
+  await writeFile(path.join(dir, 'pi/bin/scheduler.mjs'), "console.log(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),kb:process.env.S8_KB_ROOT,config:process.env.S8_PI_CONFIG_ROOT}));");
   const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: '.' }, cwd: dir };
   const scheduler = JSON.parse(execFileSync('bash', [s8, 'service', 'scheduler'], options));
   assert.equal(scheduler.cwd, dir);
   assert.equal(scheduler.kb, dir);
   assert.equal(scheduler.config, path.join(dir, 'pi'));
-  for (const flag of ['--help', '--check', '--once']) {
-    assert.deepEqual(JSON.parse(execFileSync('bash', [s8, 'service', 'supervisor', flag], options)).args, [flag]);
-  }
-  assert.deepEqual(JSON.parse(execFileSync('bash', [agent, '--service', 'supervisor', '--check'], options)).args, ['--check']);
-  for (const args of [['service', 'unknown'], ['service', 'scheduler', '--once']]) {
+  for (const args of [['service', 'supervisor'], ['service', 'scheduler', '--once'], ['work'], ['work', 'a', 'b']]) {
     assert.throws(() => execFileSync('bash', [s8, ...args], { ...options, stdio: 'pipe' }));
   }
 });

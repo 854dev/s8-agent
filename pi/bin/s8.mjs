@@ -1,5 +1,7 @@
-// s8.sh의 진입점: tmux 런타임과 공유 서비스 운영. 에이전트 실행 자체는 start-pi.sh(pi/bin/agent.mjs)가 맡는다.
-//   service 종류 [인자]   scheduler·supervisor·worker 서비스를 이 프로세스에서 실행(tmux 서비스 창, 원격 워커, 수동 진단)
+// s8.sh의 진입점: tmux 런타임·예약 데몬·작업 워커 실행. 에이전트 실행 자체는 start-pi.sh(pi/bin/agent.mjs)가 맡는다.
+//   work UID              승인된 작업의 워커를 s8-workers 세션 창에 실행(lib/agent/work.mjs)
+//   finish UID --run-id UUID --confirm-stopped   멈춘 실행을 실패로 보고해 마무리(lib/agent/finish.mjs)
+//   service scheduler     예약 데몬을 이 프로세스에서 실행(tmux 서비스 창, 수동 진단)
 //   그 밖                 런타임 시작: 옵션 해석·선택 메뉴·tmux 런타임 (재)시작(user-command.mjs)
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -7,30 +9,45 @@ import { loadEnv, kbRoot, preparePiEnvironment, usageError } from '../lib/agent/
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
-async function runService([service, ...args]) {
-  if (!['scheduler', 'supervisor', 'worker'].includes(service)) throw usageError('서비스는 scheduler, supervisor 또는 worker여야 합니다.');
-  if (service === 'scheduler' && args.length) throw usageError('스케줄러는 추가 인자를 받지 않습니다.');
-  if (!(service === 'supervisor' && args[0] === '--help')) {
-    loadEnv(root);
-    if (service === 'scheduler') {
-      // 예약 작업은 KB 저장소에서 Pi를 실행하므로 Pi 경로와 작업 디렉터리를 준비한다.
-      process.env.S8_KB_ROOT = await kbRoot(root);
-      await preparePiEnvironment(root);
-      process.chdir(process.env.S8_KB_ROOT);
-    }
-  }
-  const script = path.join(root, 'pi/bin', service === 'worker' ? 'developer.mjs' : `${service}.mjs`);
-  // 서비스 스크립트는 process.argv[2..]를 자기 인자로 읽는다. 그 형태로 바꾼 뒤 같은 프로세스에서 실행한다.
-  process.argv.splice(1, Infinity, script, ...args);
+async function runScheduler(args) {
+  if (args.length) throw usageError('스케줄러는 추가 인자를 받지 않습니다.');
+  // 예약 작업은 KB 저장소에서 Pi를 실행하므로 Pi 경로와 작업 디렉터리를 준비한다.
+  loadEnv(root);
+  process.env.S8_KB_ROOT = await kbRoot(root);
+  await preparePiEnvironment(root);
+  process.chdir(process.env.S8_KB_ROOT);
+  const script = path.join(root, 'pi/bin/scheduler.mjs');
+  process.argv.splice(1, Infinity, script);
   await import(pathToFileURL(script).href);
+}
+
+async function runWork([uid, ...rest]) {
+  if (!uid || rest.length) throw usageError('사용법: ./s8.sh work UID');
+  loadEnv(root);
+  const { startWork } = await import('../lib/agent/work.mjs');
+  const result = await startWork(root, uid);
+  console.log(result.running ? `이미 실행 중: ${result.target}` : `워커 ${result.resumed ? '재개' : '시작'}: ${result.target} (${result.worktree})`);
+  console.log(`접속: tmux attach-session -t ${result.target}`);
+}
+
+async function runFinish(args) {
+  const [uid, flag, runId, confirm] = args;
+  if (args.length !== 4 || flag !== '--run-id' || confirm !== '--confirm-stopped') throw usageError('사용법: ./s8.sh finish UID --run-id UUID --confirm-stopped');
+  loadEnv(root);
+  const [{ finishStoppedRun }, { projectmanFromEnv }] = await Promise.all([import('../lib/agent/finish.mjs'), import('../lib/projectman/client.ts')]);
+  const result = await finishStoppedRun({ root, client: projectmanFromEnv(), uid, runId, confirmed: true });
+  console.log(result.status === 'already-finished' ? `이미 끝난 실행입니다: ${uid} (${result.state})` : `실패로 마무리했습니다: ${uid} → ${result.state}`);
 }
 
 const [command, ...args] = process.argv.slice(2);
 try {
-  // --service는 이전 start-pi.sh --service 호환(원격 워커 체크아웃이 갱신되기 전까지).
-  if (command === 'service' || command === '--service') await runService(args);
-  else {
-    // 런타임 제어 모듈은 사용자 실행에서만 불러온다(서비스·원격 워커 시작을 가볍게 유지).
+  if (command === 'work') await runWork(args);
+  else if (command === 'finish') await runFinish(args);
+  else if (command === 'service') {
+    if (args[0] !== 'scheduler') throw usageError('서비스는 scheduler만 있습니다.');
+    await runScheduler(args.slice(1));
+  } else {
+    // 런타임 제어 모듈은 사용자 실행에서만 불러온다(서비스 시작을 가볍게 유지).
     const { runUserCommand } = await import('../lib/runtime/user-command.mjs');
     await runUserCommand(root, process.argv.slice(2));
   }

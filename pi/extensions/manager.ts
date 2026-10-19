@@ -9,12 +9,14 @@ import { managerKb } from '../lib/manager/kb.mjs';
 import { projectmanFromEnv } from '../lib/projectman/client.ts';
 import { hasReviewedPreflight } from '../lib/projectman/preflight.mjs';
 import { loadProfile } from '../lib/agent/profile.mjs';
+import { startWork } from '../lib/agent/work.mjs';
+import { flushDevelopmentOutbox } from '../lib/development/outbox.mjs';
 
 export const MANAGER_TOOLS: string[] = loadProfile('manager').tools;
-export const MANAGER_EXTENSION_TOOLS = ['projectman', 'kb', 'scheduler'];
+export const MANAGER_EXTENSION_TOOLS = ['projectman', 'kb', 'scheduler', 'run_worker'];
 export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
   const libraries = new Map<string, ReturnType<typeof managerKb>>();
-  // Development runs stay with the supervisor; general shell work uses bash.
+  // Development runs go to a worker (run_worker); general shell work uses bash.
   projectman(new Proxy(pi, { get(target, key) {
     if (key === 'registerTool') return tool => target.registerTool({ ...tool, async execute(id, args, ...rest) {
       if (args.action === 'intake_source' && args.sourcePath !== undefined) throw new Error('Manager cannot read source files; capture a user message instead');
@@ -43,6 +45,15 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
       return { content: [{ type: 'text', text: JSON.stringify(result) }], details: undefined };
     },
   });
+  pi.registerTool({
+    name: 'run_worker', label: 'Run worker',
+    description: 'Start a Projectman worker for one human-confirmed ready task or subtask UID, or resume a run this machine already claimed. Prepares an isolated git worktree and opens tmux window s8-workers:<UID> running start-pi.sh --mode worker. The worker claims, implements and reports by itself; its report arrives through the manager inbox.',
+    parameters: Type.Object({ uid: Type.String() }),
+    async execute(_id, args) {
+      const result = await startWork(fileURLToPath(new URL('../..', import.meta.url)), args.uid);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }], details: undefined };
+    },
+  });
   pi.on('session_start', () => pi.setActiveTools(MANAGER_TOOLS));
   pi.on('tool_call', event => MANAGER_TOOLS.includes(event.toolName) ? undefined : { block: true, reason: 'Manager role does not permit this tool' });
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -57,7 +68,11 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
       try {
         const root = fileURLToPath(new URL('../..', import.meta.url));
         const client = process.env.PHCMS_ACCESS_TOKEN ? projectmanFromEnv() : null;
-        if (client) await recoverCompletionReviews(root, client);
+        if (client) {
+          await recoverCompletionReviews(root, client);
+          // 워커 보고 중 전달에 실패한 것을 다시 보낸다(매니저 inbox·Telegram 포함).
+          await flushDevelopmentOutbox({ root, client });
+        }
         await drainManagerInbox(root, report => {
           pi.sendMessage(managerInboxMessage(report), { triggerTurn: true, deliverAs: 'followUp' });
         });
@@ -70,10 +85,11 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
           const needsPreflight = item.detail?.attributes.state === 'todo' && !hasReviewedPreflight(item, workflow);
           const needsReview = item.detail?.attributes.state === 'review' && !workflow.managerReview;
           const humanQuestion = workflow.review?.pending;
-          if (!seen.has(key) && (needsPreflight || humanQuestion || needsReview)) {
+          const readyToRun = item.detail?.attributes.state === 'ready' && workflow.grant && !workflow.run;
+          if (!seen.has(key) && (needsPreflight || humanQuestion || needsReview || readyToRun)) {
             seen.add(key);
             if (seen.size > 1000) seen.delete(seen.values().next().value!);
-            pi.sendMessage({ customType: 'projectman-update', content: `Projectman 작업 ${item.uid}에 새 계획·결과·장애가 있습니다. workflow_get으로 확인하세요. 실행 전 사람과 대화하고 최종 계획을 확정하세요. 확정 후 개발자의 구현 결정을 질문으로 돌리지 마세요. review 상태라면 결과와 검증 근거를 확인하고 review_result로 검토 의견을 기록하세요. 최종 complete는 사용자가 화면에서 처리합니다. 완료·실패 보고는 별도 inbox로도 전달됩니다. 수정이 필요하면 새로운 work를 생성하세요.`, display: true }, { triggerTurn: true, deliverAs: 'followUp' });
+            pi.sendMessage({ customType: 'projectman-update', content: `Projectman 작업 ${item.uid}에 새 계획·결과·장애가 있습니다. workflow_get으로 확인하세요. 실행 전 사람과 대화하고 최종 계획을 확정하세요. 확정 후 개발자의 구현 결정을 질문으로 돌리지 마세요. ready 상태(사람이 계획 확정)라면 run_worker로 워커를 실행하세요. review 상태라면 결과와 검증 근거를 확인하고 review_result로 검토 의견을 기록하세요. 최종 complete는 사용자가 화면에서 처리합니다. 완료·실패 보고는 별도 inbox로도 전달됩니다. 수정이 필요하면 새로운 work를 생성하세요.`, display: true }, { triggerTurn: true, deliverAs: 'followUp' });
             break;
           }
         }

@@ -23,11 +23,11 @@ async function fixture(t) {
   return { root, directory, events, deps, options };
 }
 
-test('full restart stops shared workers, starts infra, waits for readiness then replaces the current Pi', async t => {
+test('full restart stops the scheduler, starts infra, waits for readiness then replaces the current Pi', async t => {
   const f = await fixture(t);
   const result = await runFullRestart(`${f.root}/`, { session: 's8-work', directory: f.directory }, f.deps);
   assert.equal(result.session, 's8-work');
-  assert.deepEqual(f.events, ['stop:scheduler', 'stop:supervisor', 'infra', 'ready', 'pi']);
+  assert.deepEqual(f.events, ['stop:scheduler', 'infra', 'ready', 'pi']);
   assert.equal(JSON.parse(await readFile(path.join(f.directory, 'progress.json'))).stage, 'completed');
   await assert.rejects(access(path.join(f.root, '.s8-runtime/runtime-restarts/all.lock')), { code: 'ENOENT' });
 });

@@ -14,8 +14,9 @@ const HELP = `사용법: ./s8.sh [--mode project|local] [--cwd 경로] [Pi 옵�
   모드 생략 시 터미널에서 선택, 자동화에서는 명시 필수
   (인자 없음)      프로젝트 / 로컬 모드 선택
   --no-scheduler   스케줄러 자동 시작 제외
-  --no-supervisor  개발 슈퍼바이저 자동 시작 제외
-  service 종류     scheduler, supervisor 또는 worker <workerId> 전경 실행
+  work UID         승인된 작업의 워커를 s8-workers 세션에 실행 (start-pi.sh --mode worker)
+  finish UID --run-id UUID --confirm-stopped  멈춘 실행을 실패로 보고해 마무리
+  service scheduler  예약 데몬 전경 실행
   --telegram take  이 세션으로 Telegram 연결 이전 (단독 --telegram도 호환)
   --telegram off   이 세션의 Telegram 연결 비활성 (--no-telegram도 호환)
   --no-telegram    Telegram 없이 단독 실행
@@ -31,7 +32,7 @@ const HELP = `사용법: ./s8.sh [--mode project|local] [--cwd 경로] [Pi 옵�
 
 /** 런타임 옵션은 소비하고 나머지는 Pi 인자(args)로 넘긴다. 옵션 위치는 자유롭다. */
 function parseOptions(input) {
-  const options = { cwd: process.cwd(), scheduler: true, supervisor: true, args: [] };
+  const options = { cwd: process.cwd(), scheduler: true, args: [] };
   for (let i = 0; i < input.length; i++) {
     const arg = input[i];
     const value = () => {
@@ -51,7 +52,6 @@ function parseOptions(input) {
     }
     else if (arg === '--no-telegram') options.telegram = false;
     else if (arg === '--no-scheduler') options.scheduler = false;
-    else if (arg === '--no-supervisor') options.supervisor = false;
     else if (['--model', '--provider', '--thinking'].includes(arg)) options.args.push(arg, input[++i]);
     else options.args.push(arg);
   }
@@ -95,11 +95,6 @@ async function startRuntime(root, options) {
   const result = await restartPiRuntime(root, { ...options, resetTmux: true }, { onProgress: line => console.log(`  - ${line}`) });
   console.log(`tmux 세션: ${result.session}`);
   for (const window of result.windows) console.log(`  ${result.session}:${window}`);
-  const { workers } = result;
-  if (workers) {
-    console.log(`개발 워커: ${workers.count}개 등록${workers.session ? ` · ${workers.session}` : ''}${workers.deferred ? ' (워커 종료·연결 확인 후 설정 적용)' : ''}`);
-    for (const worker of workers.remoteWorkers ?? []) console.log(`  ${worker.workerId}: SSH ${worker.status}`);
-  }
   console.log(result.telegramStatus);
   console.log(`접속: tmux attach-session -t ${result.session}`);
 }

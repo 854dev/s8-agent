@@ -1,5 +1,5 @@
 // 개발 결과 보고와 전달. 보고는 outbox.json에 먼저 기록하고(요청 ID 고정) Projectman·매니저·Telegram에 차례로 전달한다.
-// 전달이 실패하면 다음 flush가 같은 요청 ID로 재시도하므로 보고가 중복 반영되지 않는다. 슈퍼바이저와 워커 모드가 함께 쓴다.
+// 전달이 실패하면 다음 flush가 같은 요청 ID로 재시도하므로 보고가 중복 반영되지 않는다. 워커 보고(worker-run.mjs)와 매니저 polling이 함께 쓴다.
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { enqueueManagerMessage } from '../manager/inbox.mjs';

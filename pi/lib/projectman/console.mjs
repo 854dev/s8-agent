@@ -6,6 +6,7 @@ import { hasReviewedPreflight } from './preflight.mjs';
 import { consoleSessions } from './session.mjs';
 import { submitCompletionReview } from './completion-review.mjs';
 import { readEventPage } from './events.mjs';
+import { finishStoppedRun } from '../agent/finish.mjs';
 
 const json = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(data)); };
 async function body(req) {
@@ -19,7 +20,13 @@ function sameOrigin(req) {
   try { const origin = new URL(req.headers.origin); return ['http:', 'https:'].includes(origin.protocol) && origin.host === req.headers.host; } catch { return false; }
 }
 
-export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_URL ?? 'http://127.0.0.1:8000/api/v2', fetchImpl = fetch, authFactory, clientFactory = token => new ProjectmanClient(baseUrl, token, fetchImpl) }) {
+// agentClientFactory: 멈춘 실행 마무리 보고용 에이전트 클라이언트. 서버는 run을 claim한 에이전트의 보고만 받으므로 사람 세션이 아닌 서비스 키를 쓴다.
+const agentFromEnv = (baseUrl, fetchImpl) => () => {
+  if (!process.env.PHCMS_ACCESS_TOKEN) throw Object.assign(new Error(), { status: 503, code: 'AGENT_KEY_MISSING' });
+  return new ProjectmanClient(baseUrl, process.env.PHCMS_ACCESS_TOKEN, fetchImpl);
+};
+
+export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_URL ?? 'http://127.0.0.1:8000/api/v2', fetchImpl = fetch, authFactory, clientFactory = token => new ProjectmanClient(baseUrl, token, fetchImpl), agentClientFactory = agentFromEnv(baseUrl, fetchImpl) }) {
   const sessions = consoleSessions({ baseUrl, clientFactory, authFactory });
   async function handle(req, res, renewed = false) {
     let authenticated = false;
@@ -80,6 +87,15 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
         if (!['authorize', 'draft', 'decide', 'complete', 'cancel', 'recover'].includes(input.action)) return json(res, 400, { error: '지원하지 않는 사용자 결정입니다.' });
         return json(res, 200, input.action === 'complete' ? await submitCompletionReview({ root, client, uid: action[1], input }) : await client.workflow(action[1], input));
       }
+      const finish = /^\/api\/projectman\/items\/([a-zA-Z0-9_-]+)\/finish-stopped-run$/.exec(url.pathname);
+      if (req.method === 'POST' && finish) {
+        const input = await body(req);
+        if (input.confirmStopped !== true || typeof input.runId !== 'string' || Object.keys(input).some(key => !['runId', 'confirmStopped'].includes(key))) return json(res, 400, { error: '모든 장비에서 실행이 멈췄는지 확인하고 실행 ID를 지정하세요.' });
+        // 사람 세션으로 작업 접근 권한과 현재 실행을 확인한 뒤, 보고는 claim한 에이전트 키로 보낸다.
+        if ((await client.getWorkflow(finish[1])).workflow?.run?.id !== input.runId) return json(res, 409, { error: '현재 실행이 바뀌었습니다. 새로고침 후 다시 확인하세요.' });
+        try { return json(res, 200, await finishStoppedRun({ root, client: agentClientFactory(), uid: finish[1], runId: input.runId, confirmed: true })); }
+        catch (error) { if (error.code === 'FINISH_REFUSED') return json(res, 409, { code: error.code, error: error.message }); throw error; }
+      }
       const events = /^\/api\/projectman\/runs\/([a-f0-9-]{36})\/events$/.exec(url.pathname);
       const patch = /^\/api\/projectman\/runs\/([a-f0-9-]{36})\/patch$/.exec(url.pathname);
       if (req.method === 'GET' && patch) {
@@ -131,6 +147,7 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
         LOG_CHANGED: '실행 기록이 교체되거나 줄었습니다. 처음부터 다시 조회하세요.',
         LOG_CORRUPT: '완료된 실행 기록 줄이 손상됐습니다. 기록 파일을 점검하세요.',
         LOG_LINE_TOO_LARGE: '단일 실행 기록이 2MB를 초과했습니다. 기록 생성 측에서 항목을 분할해야 합니다.',
+        AGENT_KEY_MISSING: '콘솔 서버에 에이전트 서비스 키(PHCMS_ACCESS_TOKEN)가 없습니다. .env를 설정하고 콘솔을 다시 시작하세요.',
         LOG_CURSOR_REQUIRED: '오래된 페이지 방식의 조회 범위를 초과했습니다. 화면을 새로고침해 커서 방식으로 조회하세요.',
       };
       const messages = { 400: '요청을 확인하세요.', 401: 'PH-CMS 사용자 로그인이 필요합니다.', 403: '이 작업을 확인하거나 결정할 권한이 없습니다.', 404: '대상을 찾지 못했습니다.', 409: '하위 리소스를 먼저 삭제하고 실행을 종료하세요. 작업 또는 결정이 변경된 경우 새로고침 후 다시 확인하세요.', 413: '요청 또는 기록이 너무 큽니다.' };
