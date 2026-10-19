@@ -72,10 +72,6 @@ export function developmentWorkspace(root) {
     return cursor;
   }
   return {
-    async validate(relative) {
-      const stat = await lstat(await resolve(relative, false));
-      if (!stat.isFile() || stat.size > 150_000) throw new Error('Read a regular, smaller file');
-    },
     async read(relative) {
       const file = await resolve(relative, false);
       const stat = await lstat(file);
@@ -101,17 +97,12 @@ export function developmentWorkspace(root) {
   };
 }
 
+/** 바뀐 파일 목록. 보호 경로(.env·secret·node_modules 등)는 changedFiles·패치에서 빼고 skippedFiles로 돌려준다. */
 export async function workspaceChanges(worktree) {
   const tracked = (await git(worktree, ['diff', '--name-only', 'HEAD', '-z'])).stdout.split('\0').filter(Boolean);
   const untracked = (await git(worktree, ['ls-files', '--others', '--exclude-standard', '-z'])).stdout.split('\0').filter(Boolean);
-  const changedFiles = [...new Set([...tracked, ...untracked])];
-  if (changedFiles.some(file => !safePath(file))) throw new Error('Changes contain protected paths');
-  const workspace = developmentWorkspace(worktree);
-  for (const file of changedFiles) {
-    try { await workspace.validate(file); }
-    catch (error) { if (error.code !== 'ENOENT') throw error; }
-  }
-  return { changedFiles };
+  const all = [...new Set([...tracked, ...untracked])];
+  return { changedFiles: all.filter(safePath), skippedFiles: all.filter(file => !safePath(file)) };
 }
 
 export async function workspacePatch(worktree, baseline = 'HEAD') {
@@ -120,8 +111,7 @@ export async function workspacePatch(worktree, baseline = 'HEAD') {
   if (!changedFiles.length) return '';
   let patch = (await git(worktree, ['diff', '--binary', baseline, '--', ...changedFiles])).stdout;
   const fresh = (await git(worktree, ['ls-files', '--others', '--exclude-standard', '-z'])).stdout.split('\0').filter(Boolean);
-  for (const file of fresh) {
-    if (!safePath(file)) throw new Error('Protected patch path');
+  for (const file of fresh.filter(safePath)) {
     try { patch += (await git(worktree, ['diff', '--no-index', '--binary', '--', '/dev/null', file])).stdout; }
     catch (error) { if (error.code !== 1) throw error; patch += error.stdout; }
   }

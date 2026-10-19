@@ -33,16 +33,10 @@ export function protectedPath(value: unknown, cwd: string): boolean {
   }
 }
 
-function protectedShellCommand(value: unknown): boolean {
-  if (typeof value !== "string") return false;
-  return /(^|[\s/'"=])(?:\.env(?!\.example(?:[\s/'";]|$))[^\s/'";]*|[^\s/'";]*secret[^\s/'";]*)(?=[\s/'";]|$)/i.test(value);
-}
-
 export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
-    const blocked = pathTools.has(event.toolName)
-      ? protectedPath('path' in event.input ? event.input.path : undefined, ctx.cwd)
-      : event.toolName === "bash" && protectedShellCommand(event.input.command);
+    // 파일 도구의 경로만 검사한다. bash 명령 문자열은 검사하지 않는다(비밀값 환경변수는 secret-free-bash가 뺀다).
+    const blocked = pathTools.has(event.toolName) && protectedPath('path' in event.input ? event.input.path : undefined, ctx.cwd);
 
     if (!blocked) return undefined;
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
@@ -142,6 +142,24 @@ test('run_worker prepares a worktree, hands its claim to a worker window and the
   assert.equal((await exec('git', ['status', '--porcelain'], { cwd: f.repo })).stdout, '');
 });
 
+test('large files and links are reported; protected paths are left out of the patch with a note', async t => {
+  const f = await workFixture(t);
+  const started = await f.start();
+  const { claim } = await claimWork({ root: f.root, client: f.client, uid: 'task1' });
+  await writeFile(path.join(started.worktree, 'package-lock.json'), 'x'.repeat(300_000));
+  await symlink('package-lock.json', path.join(started.worktree, 'lock-link'));
+  await mkdir(path.join(started.worktree, 'node_modules/pkg'), { recursive: true });
+  await writeFile(path.join(started.worktree, 'node_modules/pkg/index.js'), 'x');
+  const outcome = await reportWork({ root: f.root, client: f.client, claim, cwd: started.worktree, result: { status: 'completed', summary: 'done', verification: [], remainingItems: ['다음에 스타일 정리'] } });
+  assert.equal(outcome.status, 'completed', 'remaining follow-ups do not fail the work');
+  const { report } = JSON.parse(await readFile(path.join(f.root, '.s8-runtime/runs', claim.runId, 'outbox.json'), 'utf8'));
+  assert.deepEqual(report.changedFiles.sort(), ['lock-link', 'package-lock.json']);
+  assert.match(report.remainingItems.at(-1), /node_modules\/pkg\/index\.js/);
+  const patch = await readFile(path.join(f.root, '.s8-runtime/runs', claim.runId, 'task.patch'), 'utf8');
+  assert.match(patch, /package-lock\.json/);
+  assert.doesNotMatch(patch, /node_modules/);
+});
+
 test('run_worker resumes a claimed run in the same worktree and refuses unconfirmed or unready work', async t => {
   const f = await workFixture(t, { uids: ['task1', 'task2', 'task3'] });
   const first = await f.start('task1');
@@ -167,6 +185,12 @@ test('dependency results compose into the worktree of a later task', async t => 
   const second = await f.start('task2');
   assert.equal(await readFile(path.join(second.worktree, 'shared.txt'), 'utf8'), 'first\n');
   assert.equal((await exec('git', ['status', '--porcelain'], { cwd: f.repo })).stdout, '');
+});
+
+test('resolved problems in executionErrors keep a completed report completed', () => {
+  const report = reportForServer({ status: 'completed', summary: 'done', verification: [{ name: 'test', ok: true }], executionErrors: ['테스트 기대값을 바로잡았고 최종 검증은 통과했다.'] });
+  assert.equal(report.status, 'completed');
+  assert.deepEqual(report.executionErrors, ['테스트 기대값을 바로잡았고 최종 검증은 통과했다.']);
 });
 
 test('report truncation retains failures and never converts failed verification to completion', () => {

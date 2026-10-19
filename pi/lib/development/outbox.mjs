@@ -15,7 +15,8 @@ export function reportForServer(value) {
   const failedChecks = checks.filter(check => check?.ok !== true);
   const retained = [...failedChecks, ...checks.filter(check => check?.ok === true)].slice(0, 20);
   const report = { status: value?.status === 'completed' ? 'completed' : 'failed', summary: String(value?.summary ?? '').trim().slice(0, 8000) || 'No valid development summary was returned.', changedFiles: value?.changedFiles ?? [], verification: retained.map(item => ({ name: String(item?.name ?? 'unnamed check').slice(0, 100) || 'unnamed check', ok: item?.ok === true, summary: String(item?.summary ?? '').slice(0, 1000) })), remainingItems: strings(value?.remainingItems), decisions: strings(value?.decisions), executionErrors: strings(value?.executionErrors), checkpoint: String(value?.checkpoint ?? '').slice(0, 16000), ...(value?.baseCommit ? { baseCommit: value.baseCommit } : {}) };
-  if (report.remainingItems.length || report.executionErrors.length || failedChecks.length) report.status = 'failed';
+  // 실패한 검증이 있으면 completed로 두지 않는다. executionErrors는 워커가 판단한 상태를 바꾸지 않는다(해결한 문제를 적을 수 있다).
+  if (failedChecks.length) report.status = 'failed';
   if (report.status === 'failed' && !report.executionErrors.length) report.executionErrors = [failedChecks.length ? 'One or more verification checks failed' : report.summary.slice(0, 3000)];
   return report;
 }

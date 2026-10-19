@@ -45,7 +45,7 @@ test('only env and secret paths are blocked; new directories and .env.example re
     const shell = async command => Boolean(await handler({ toolName: 'bash', input: { command } }, { cwd, hasUI: false }));
     assert.equal(await shell('ls .pi'), false);
     assert.equal(await shell('printf .env.example'), false);
-    assert.equal(await shell('ls .env.local'), true);
-    assert.equal(await shell('ls secret-files'), true);
+    assert.equal(await shell('cp .env.example .env'), false); // bash 명령 문자열은 막지 않는다
+    assert.equal(await shell('grep -r SECRET_KEY src'), false);
   } finally { rmSync(base, { recursive: true, force: true }); }
 });

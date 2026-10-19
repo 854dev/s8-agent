@@ -79,10 +79,16 @@ export async function stillActive(client, claim) {
 export async function reportWork({ root, client, claim, result, cwd }) {
   const directory = path.join(root, '.s8-runtime/runs', claim.runId), outbox = path.join(directory, 'outbox.json');
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  // git 저장소가 아니면 변경 목록·패치 없이 보고한다. 보호 경로 변경 등 git 검사 실패는 보고를 막는다.
+  // git 저장소가 아니면 변경 목록·패치 없이 보고한다. 보호 경로 변경은 패치에서 빼고 남은 일로 알린다.
   let changedFiles = [];
   if (await git(cwd, ['rev-parse', '--is-inside-work-tree']).then(() => true, () => false)) {
-    changedFiles = (await workspaceChanges(cwd)).changedFiles;
+    const changes = await workspaceChanges(cwd);
+    changedFiles = changes.changedFiles;
+    if (changes.skippedFiles.length) {
+      const shown = changes.skippedFiles.slice(0, 10).join(', ');
+      const more = changes.skippedFiles.length > 10 ? ` 외 ${changes.skippedFiles.length - 10}개` : '';
+      result = { ...result, remainingItems: [...(result.remainingItems ?? []), `보호 경로 변경은 패치에서 뺐습니다: ${shown}${more}. .gitignore 처리나 수동 반영이 필요한지 확인하세요.`] };
+    }
     await writeFile(path.join(directory, 'task.patch'), await workspacePatch(cwd, claim.inputTree), { mode: 0o600 });
     await writeFile(path.join(directory, 'changes.patch'), await workspacePatch(cwd), { mode: 0o600 });
   }
