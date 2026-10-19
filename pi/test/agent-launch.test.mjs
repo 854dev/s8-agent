@@ -63,10 +63,10 @@ test('Pi loads every profile skill without diagnostics, and vendored skills keep
       for (const file of ['LICENSE', 'SOURCE.md']) assert.ok(existsSync(path.join(directory, '..', file)), `${directory}: ${file}`);
     }
   }
-  // 워커는 구현·검증 스킬, 매니저는 설계 스킬을 받는다. 커밋·서브에이전트를 지시하는 스킬은 넣지 않는다.
+  // 워커와 범용(즉석 개발)은 구현·검증 스킬, 매니저는 설계 스킬을 받는다. 커밋·서브에이전트를 지시하는 스킬은 넣지 않는다.
   assert.deepEqual(names.worker, ['ponytail', 'test-driven-development', 'systematic-debugging', 'verification-before-completion', 's8-self-review']);
+  assert.deepEqual(names.general, names.worker);
   assert.deepEqual(names.manager, ['s8-operations', 's8-requirements', 's8-task-plan', 's8-plan-review']);
-  assert.deepEqual(names.general, ['ponytail']);
 });
 
 test('every role replaces bash with one that hides secret environment values from the agent', async t => {
