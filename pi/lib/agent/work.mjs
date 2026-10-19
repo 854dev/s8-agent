@@ -1,6 +1,6 @@
 // 승인된 작업 하나를 워커로 실행한다(./s8.sh work UID, 매니저 run_worker 도구).
 // 작업별 git worktree를 준비하고 선행 작업 결과를 적용한 뒤, claim 요청을 남기고 s8-workers 세션의 UID 창에서
-// start-pi.sh 워커 모드를 띄운다. claim·작업·보고는 워커가 직접 한다. 이미 claim한 작업이면 같은 worktree에서 이어간다.
+// start-worker-agent.sh를 띄운다. claim·작업·보고는 워커가 직접 한다. 이미 claim한 작업이면 같은 worktree에서 이어간다.
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
@@ -53,7 +53,7 @@ export async function startWork(root, uid, { client = projectmanFromEnv(), run =
     await dispatchClaim(root, { uid, operation: { action: 'claim', expectedRevision: task.workflow.revision, requestId: randomUUID(), runId, workerId }, inputTree, baseCommit: workspace.baseCommit });
     worktree = workspace.worktree;
   }
-  const command = ['bash', path.join(root, 'start-pi.sh'), '--mode', 'worker', '--uid', uid, '--cwd', worktree].map(quote).join(' ');
+  const command = ['bash', path.join(root, 'start-worker-agent.sh'), '--uid', uid, '--cwd', worktree].map(quote).join(' ');
   await ensureWindow(run, root, WORK_SESSION, uid, `S8_WORKER_ID=${quote(workerId)} exec ${command}`);
   return { uid, target, worktree, resumed, running: false };
 }

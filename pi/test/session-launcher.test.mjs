@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MANAGER_TOOLS } from '../extensions/manager.ts';
 
-/** 실행 스크립트(start-pi.sh, s8.sh)와 Node 진입점·프로필을 임시 저장소에 복사한다. */
+/** 실행 스크립트(start-*-agent.sh, s8.sh)와 Node 진입점·프로필을 임시 저장소에 복사한다. */
 async function copyLauncher(dir) {
-  for (const file of ['start-pi.sh', 's8.sh', 'agents/general/profile.json', 'agents/manager/profile.json', 'agents/worker/profile.json']) {
+  for (const file of ['start-general-agent.sh', 'start-manager-agent.sh', 'start-worker-agent.sh', 's8.sh', 'agents/general/profile.json', 'agents/manager/profile.json', 'agents/worker/profile.json']) {
     await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
     await copyFile(new URL(`../../${file}`, import.meta.url), path.join(dir, file));
   }
@@ -17,7 +17,7 @@ async function copyLauncher(dir) {
     await copyFile(new URL(`../${file}`, import.meta.url), path.join(dir, 'pi', file));
   }
   await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
-  return { agent: path.join(dir, 'start-pi.sh'), s8: path.join(dir, 's8.sh') };
+  return { general: path.join(dir, 'start-general-agent.sh'), manager: path.join(dir, 'start-manager-agent.sh'), worker: path.join(dir, 'start-worker-agent.sh'), s8: path.join(dir, 's8.sh') };
 }
 
 /** 받은 인자와 연결 설정을 JSON으로 출력하는 가짜 Pi. */
@@ -44,11 +44,11 @@ test('s8 service runs the scheduler in the KB with the Pi environment and reject
 test('manager mode exposes Projectman tools, works in the KB and passes credentials without printing them', async t => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-manager-launcher-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const { agent } = await copyLauncher(dir);
+  const { manager: agent } = await copyLauncher(dir);
   await echoPi(dir);
   const key = 'phcms_sk_' + 'A'.repeat(43);
   const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: dir, PHCMS_ACCESS_TOKEN: key } };
-  const output = execFileSync('bash', [agent, '--mode', 'manager', '--control', '--session-dir', path.join(dir, '.pi-runtime/managed/s8-main')], options);
+  const output = execFileSync('bash', [agent, '--control', '--session-dir', path.join(dir, '.pi-runtime/managed/s8-main')], options);
   assert.equal(output.includes(key), false);
   const { args, cwd } = JSON.parse(output);
   assert.equal(cwd, dir);
@@ -56,15 +56,16 @@ test('manager mode exposes Projectman tools, works in the KB and passes credenti
   assert.ok(args.includes(path.join(dir, 'pi/extensions/manager.ts')));
   assert.ok(args.includes(path.join(dir, 'pi/extensions/managed-session.mjs')));
   assert.equal(args[args.indexOf('--session-dir') + 1], path.join(dir, '.pi-runtime/managed/s8-main'));
-  assert.throws(() => execFileSync('bash', [agent, '--mode', 'manager', '--tools', 'read'], { ...options, stdio: 'pipe' }), /Unsupported/);
-  assert.throws(() => execFileSync('bash', [agent, '--mode', 'manager', '--session-dir', '/tmp/elsewhere'], { ...options, stdio: 'pipe' }), /\.pi-runtime/);
-  assert.throws(() => execFileSync('bash', [agent, '--mode', 'rpc'], { ...options, stdio: 'pipe' }), /general, manager/);
+  assert.throws(() => execFileSync('bash', [agent, '--tools', 'read'], { ...options, stdio: 'pipe' }), /Unsupported/);
+  assert.throws(() => execFileSync('bash', [agent, '--session-dir', '/tmp/elsewhere'], { ...options, stdio: 'pipe' }), /\.pi-runtime/);
+  assert.throws(() => execFileSync('bash', [agent, '--mode', 'worker'], { ...options, stdio: 'pipe' }), /start-worker-agent\.sh/);
+  assert.throws(() => execFileSync('node', [path.join(dir, 'pi/bin/agent.mjs'), 'local'], { ...options, stdio: 'pipe' }), /start-general-agent\.sh/);
 });
 
-test('general mode is the default, runs in the invocation directory and passes package commands to Pi', async t => {
+test('general and worker launchers run in the invocation directory and package commands pass to Pi', async t => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-general-launcher-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const { agent, s8 } = await copyLauncher(dir);
+  const { general: agent, worker: workerAgent, s8 } = await copyLauncher(dir);
   await echoPi(dir);
   const work = path.join(dir, 'work');
   await mkdir(work);
@@ -75,9 +76,10 @@ test('general mode is the default, runs in the invocation directory and passes p
   assert.equal(general.args[general.args.indexOf('--tools') + 1], 'read,bash,edit,write,grep,find,ls');
   assert.ok(!general.args.some(arg => arg.endsWith('telegram.mjs') || arg.endsWith('managed-session.mjs')));
   assert.deepEqual(JSON.parse(execFileSync('bash', [agent, 'list'], options)).args, ['list']);
-  assert.match(execFileSync('bash', [agent, '--help'], options), /--mode general\|manager\|worker/);
+  assert.match(execFileSync('bash', [agent, '--help'], options), /start-general-agent\.sh \[--cwd/);
+  assert.match(execFileSync('bash', [workerAgent, '--help'], options), /--uid UID/);
   // 워커 모드는 실행 위치에서 작업하고, --uid가 있으면 작업 지시를 마지막 인자로 넣는다.
-  const worker = JSON.parse(execFileSync('bash', [agent, '--mode', 'worker', '--uid', 'task-1', '--print'], options));
+  const worker = JSON.parse(execFileSync('bash', [workerAgent, '--uid', 'task-1', '--print'], options));
   assert.equal(worker.cwd, work);
   assert.ok(worker.args.includes(path.join(dir, 'pi/extensions/worker.ts')));
   assert.equal(worker.args.at(-1), 'uid task-1 의 업무를 수행해라.');
@@ -93,7 +95,7 @@ test('general mode is the default, runs in the invocation directory and passes p
 test('agent restarts with --continue on request, loads .env with shell syntax and stops on SIGTERM', async t => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-foreground-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const { agent } = await copyLauncher(dir);
+  const { manager: agent } = await copyLauncher(dir);
   // 첫 실행은 /restart처럼 restart-<부모 PID> 파일을 남기고 종료하고, 다음 실행은 인자를 기록한다.
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), `#!/usr/bin/env node
 const fs = require('node:fs'), path = require('node:path');
@@ -105,13 +107,13 @@ else if (fs.readFileSync(runs, 'utf8').trim().split('\\n').length === 1) fs.writ
   // 셸 문법(변수 확장, export)을 그대로 지원해야 한다.
   await writeFile(path.join(dir, '.env'), 'BASE=http://127.0.0.1:8000\nexport PHCMS_API_URL="$BASE/api/v2"\n');
   const env = { ...process.env, S8_KB_ROOT: dir, PHCMS_API_URL: 'http://inherited.invalid' };
-  execFileSync('bash', [agent, '--mode', 'manager', '--print'], { encoding: 'utf8', env });
+  execFileSync('bash', [agent, '--print'], { encoding: 'utf8', env });
   const runs = (await readFile(path.join(dir, 'runs'), 'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(runs.length, 2);
   assert.ok(!runs[0].args.includes('--continue'));
   assert.ok(runs[1].args.includes('--continue'));
   assert.ok(runs.every(run => run.url === 'http://127.0.0.1:8000/api/v2'));
-  const child = spawn('bash', [agent, '--mode', 'manager', '--print', '--model', 'fixture-wait'], { env, stdio: 'ignore' });
+  const child = spawn('bash', [agent, '--print', '--model', 'fixture-wait'], { env, stdio: 'ignore' });
   t.after(() => child.kill('SIGKILL'));
   for (let i = 0; i < 100 && (await readFile(path.join(dir, 'runs'), 'utf8')).trim().split('\n').length < 3; i++) await new Promise(resolve => setTimeout(resolve, 50));
   child.kill('SIGTERM');

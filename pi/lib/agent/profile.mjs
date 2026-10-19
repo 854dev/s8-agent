@@ -7,15 +7,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const defaultRoot = fileURLToPath(new URL('../../..', import.meta.url));
+// 모드마다 실행 스크립트가 따로 있다: start-<모드>-agent.sh
 export const MODES = ['general', 'manager', 'worker'];
-// 이전 이름도 받는다(tmux 런타임 설정에 저장된 값 포함).
-const ALIASES = { local: 'general', project: 'manager' };
 
-/** 모드 이름을 정규화한다. 모르는 모드면 null. */
-export const resolveMode = (name = 'general') => {
-  const mode = ALIASES[name] ?? name;
-  return MODES.includes(mode) ? mode : null;
-};
+/** 알려진 모드면 그대로, 아니면 null. */
+export const resolveMode = name => MODES.includes(name) ? name : null;
 
 /** 모드 프로필을 읽어 절대 경로로 풀어 돌려준다. */
 export function loadProfile(mode, root = defaultRoot) {

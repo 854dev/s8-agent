@@ -24,7 +24,9 @@ dev_854/
     ├── pi/                   # Pi 버전, 공유 설정, extension, skill
     ├── .pi-runtime/          # Pi 인증정보, 세션, 캐시
     ├── .s8-runtime/          # 로그와 업로드 등 로컬 상태
-    ├── start-pi.sh
+    ├── start-general-agent.sh
+    ├── start-manager-agent.sh
+    ├── start-worker-agent.sh
     ├── s8.sh
     └── start-infra.sh
 ```
@@ -53,7 +55,7 @@ Tailscale 장치
 - Git에서 제외: `.pi-runtime/` 전체, 로그, PID, 업로드. 기존 `.pi/`도 계속 제외한다.
 - Pi 에이전트 디렉터리: `<s8-agent>/.pi-runtime`
 - Pi 작업 디렉터리: `${S8_KB_ROOT:-../854_md}`
-- `start-pi.sh`는 런타임에 `pi/settings.json` 심볼릭 링크를 만들고 extension, skill, 시스템 지침은 `pi/`에서 명시적으로 로드한다. 설정 변경과 패키지 선언은 공유 설정에 반영된다.
+- 에이전트 실행 스크립트(`start-*-agent.sh`)는 런타임에 `pi/settings.json` 심볼릭 링크를 만들고 extension, skill, 시스템 지침은 `pi/`에서 명시적으로 로드한다. 설정 변경과 패키지 선언은 공유 설정에 반영된다.
 - 보호 extension은 `.pi/`, `.pi-runtime/`와 비밀 경로에 대한 에이전트 도구 접근을 차단한다.
 
 ## 네트워크 정책
@@ -111,7 +113,7 @@ NGINX_BIND_IP=100.120.50.80 docker compose --env-file .env -f infra/nginx/docker
 ```bash
 test -f pi/settings.json
 test -f pi/package-lock.json
-bash -n start-pi.sh
+bash -n start-general-agent.sh start-manager-agent.sh start-worker-agent.sh
 bash -n s8.sh
 bash -n start-infra.sh
 NGINX_BIND_IP=127.0.0.1 docker compose --env-file /dev/null -f infra/nginx/docker-compose.yml config --quiet

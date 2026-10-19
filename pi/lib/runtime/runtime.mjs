@@ -59,7 +59,8 @@ export async function startPiRuntime(root, { session = 's8-main', mode = 'projec
     const sessionDir = mode === 'local'
       ? path.join(root, '.pi-runtime/local', session, createHash('sha256').update(cwd).digest('hex').slice(0, 16))
       : path.join(root, '.pi-runtime/managed', session);
-    const command = ['bash', path.join(root, 'start-pi.sh'), '--mode', mode, '--cwd', cwd, '--control', '--session-dir', sessionDir, ...args].map(quote).join(' ');
+    const script = mode === 'local' ? 'start-general-agent.sh' : 'start-manager-agent.sh';
+    const command = ['bash', path.join(root, script), '--cwd', cwd, '--control', '--session-dir', sessionDir, ...args].map(quote).join(' ');
     log(`Pi 시작 (${mode} 모드, ${cwd})`);
     await ensureWindow(run, root, session, 'pi', `exec ${command}`);
     await run(['select-window', '-t', `${session}:pi`]);

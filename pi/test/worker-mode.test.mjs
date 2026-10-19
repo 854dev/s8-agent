@@ -98,7 +98,7 @@ test('worker extension gates tools on claim and report and stays on one UID', as
   await assert.rejects(projectman.execute('4', { action: 'report', uid: 'task1', status: 'completed', summary: 'again' }, undefined, undefined, ctx), /이미 보고/);
 });
 
-/** git 저장소와 격리된 tmux 서버, 인자를 기록하는 가짜 start-pi.sh를 갖춘 실행기 픽스처. */
+/** git 저장소와 격리된 tmux 서버, 인자를 기록하는 가짜 start-worker-agent.sh를 갖춘 실행기 픽스처. */
 async function workFixture(t, options) {
   const f = await fixture(t, { ...options, repoPath: undefined });
   const repo = path.join(f.root, 'repo');
@@ -107,7 +107,7 @@ async function workFixture(t, options) {
   for (const args of [['init'], ['add', '.'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture']]) await exec('git', args, { cwd: repo });
   for (const row of f.rows.values()) row.workflow.spec.repoPath = repo;
   const launches = path.join(f.root, 'launches');
-  await writeFile(path.join(f.root, 'start-pi.sh'), `echo "$S8_WORKER_ID $*" >> '${launches}'\nexec sleep 60\n`);
+  await writeFile(path.join(f.root, 'start-worker-agent.sh'), `echo "$S8_WORKER_ID $*" >> '${launches}'\nexec sleep 60\n`);
   const socket = `s8-work-${randomUUID()}`;
   const run = args => exec('tmux', ['-f', '/dev/null', '-L', socket, ...args], { timeout: 5000 });
   t.after(() => run(['kill-server']).catch(() => {}));
@@ -116,7 +116,7 @@ async function workFixture(t, options) {
   return { ...f, repo, run, start, launched };
 }
 
-/** start-pi.sh 워커 모드가 하는 일: 넘겨받은 claim을 보내고, 파일을 쓰고, 보고한다. */
+/** start-worker-agent.sh가 하는 일: 넘겨받은 claim을 보내고, 파일을 쓰고, 보고한다. */
 async function workAs(f, uid, file, content) {
   const { claim } = await claimWork({ root: f.root, client: f.client, uid });
   const worktree = path.join(f.root, '.s8-runtime/worktrees', uid);
@@ -130,7 +130,7 @@ test('run_worker prepares a worktree, hands its claim to a worker window and the
   assert.equal(started.target, `${WORK_SESSION}:task1`);
   assert.equal(f.row.state, 'ready', 'the launcher does not claim');
   await until(async () => (await f.launched()).length === 1);
-  assert.equal((await f.launched())[0], `w1 --mode worker --uid task1 --cwd ${started.worktree}`);
+  assert.equal((await f.launched())[0], `w1 --uid task1 --cwd ${started.worktree}`);
   assert.equal((await f.start()).running, true, 'a live worker window is not started twice');
   const { claim } = await claimWork({ root: f.root, client: f.client, uid: 'task1' });
   assert.equal(claim.runId, (await readClaim(f.root, 'task1')).runId);

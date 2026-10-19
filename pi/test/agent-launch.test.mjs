@@ -3,10 +3,9 @@ import assert from 'node:assert/strict';
 import { loadProfile, resolveMode } from '../lib/agent/profile.mjs';
 import { piArgs, validatePiOptions } from '../lib/agent/launch.mjs';
 
-test('modes resolve with legacy aliases and unknown modes are rejected', () => {
-  assert.equal(resolveMode(), 'general');
-  assert.equal(resolveMode('local'), 'general');
-  assert.equal(resolveMode('project'), 'manager');
+test('only the three launcher modes resolve', () => {
+  assert.equal(resolveMode('general'), 'general');
+  assert.equal(resolveMode('local'), null);
   assert.equal(resolveMode('manager'), 'manager');
   assert.equal(resolveMode('worker'), 'worker');
   assert.equal(resolveMode('rpc'), null);

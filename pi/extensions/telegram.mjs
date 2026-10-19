@@ -11,7 +11,7 @@ import { validSession } from '../lib/runtime/managed-sessions.mjs';
 import { waitUntil } from '../lib/runtime/process.mjs';
 
 async function requestFullRestart(notification) {
-  if (!process.env.TMUX) throw new Error('전체 재시작은 start-pi 관리 세션에서 사용할 수 있습니다.');
+  if (!process.env.TMUX) throw new Error('전체 재시작은 s8.sh 관리 세션에서 사용할 수 있습니다.');
   const session = execFileSync('tmux', ['display-message', '-p', '#S'], { encoding: 'utf8' }).trim();
   if (!validSession(session)) throw new Error('잘못된 관리 세션입니다.');
   return queuePiRuntimeRestart(agentRoot, { all: true, session, notification });
@@ -221,5 +221,5 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
   return activate;
 }
 
-// 단독 실행(start-pi.sh --telegram): 실행기가 알려준 모드에 맞는 Telegram 메뉴를 쓴다.
+// 단독 실행(start-*-agent.sh --telegram): 실행기가 알려준 모드에 맞는 Telegram 메뉴를 쓴다.
 export default pi => attach(pi, { mode: process.env.S8_AGENT_MODE === 'general' ? 'local' : 'project' });

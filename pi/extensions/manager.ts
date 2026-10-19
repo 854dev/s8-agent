@@ -47,7 +47,7 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
   });
   pi.registerTool({
     name: 'run_worker', label: 'Run worker',
-    description: 'Start a Projectman worker for one human-confirmed ready task or subtask UID, or resume a run this machine already claimed. Prepares an isolated git worktree and opens tmux window s8-workers:<UID> running start-pi.sh --mode worker. The worker claims, implements and reports by itself; its report arrives through the manager inbox.',
+    description: 'Start a Projectman worker for one human-confirmed ready task or subtask UID, or resume a run this machine already claimed. Prepares an isolated git worktree and opens tmux window s8-workers:<UID> running start-worker-agent.sh. The worker claims, implements and reports by itself; its report arrives through the manager inbox.',
     parameters: Type.Object({ uid: Type.String() }),
     async execute(_id, args) {
       const result = await startWork(fileURLToPath(new URL('../..', import.meta.url)), args.uid);

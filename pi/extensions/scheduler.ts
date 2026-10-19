@@ -22,7 +22,7 @@ export default function (pi: ExtensionAPI) {
 }
 
 export function registerScheduler(pi: ExtensionAPI, { projectmanOnly = false } = {}) {
-  if (!process.env.S8_PI_CONFIG_ROOT) throw new Error('Run S8 through start-pi.sh to use the scheduler.');
+  if (!process.env.S8_PI_CONFIG_ROOT) throw new Error('Run S8 through an S8 agent launcher (start-*-agent.sh) to use the scheduler.');
   const agentRoot = path.resolve(process.env.S8_PI_CONFIG_ROOT, '..');
   const root = scheduleRoot(agentRoot);
   const scripts = path.join(root, 'scripts');

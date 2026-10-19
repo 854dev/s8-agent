@@ -5,6 +5,6 @@
 #   ./s8.sh work UID           승인된 작업의 워커를 s8-workers 세션 창에 실행
 #   ./s8.sh finish UID --run-id UUID --confirm-stopped   멈춘 실행을 실패로 마무리
 #   ./s8.sh service scheduler  예약 데몬 전경 실행
-# 에이전트 하나만 실행하려면 ./start-pi.sh를 사용한다.
+# 에이전트 하나만 실행하려면 ./start-general-agent.sh, ./start-manager-agent.sh, ./start-worker-agent.sh를 사용한다.
 set -euo pipefail
 exec node "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/pi/bin/s8.mjs" "$@"

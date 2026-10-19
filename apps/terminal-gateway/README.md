@@ -60,7 +60,7 @@ npm test --prefix apps/terminal-gateway
 node --test pi/test/managed-sessions.test.mjs pi/test/telegram-extension.test.mjs pi/test/telegram-ownership.test.mjs
 npm run test:run --prefix frontend
 npm run build --prefix frontend
-bash -n start-pi.sh
+bash -n start-general-agent.sh start-manager-agent.sh start-worker-agent.sh
 bash -n s8.sh
 NGINX_BIND_IP=127.0.0.1 docker compose --env-file /dev/null -f infra/nginx/docker-compose.yml config --quiet
 NGINX_BIND_IP=100.120.50.80 docker compose --env-file /dev/null -f infra/nginx/docker-compose.yml exec nginx nginx -t

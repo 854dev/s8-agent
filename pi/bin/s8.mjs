@@ -1,4 +1,4 @@
-// s8.sh의 진입점: tmux 런타임·예약 데몬·작업 워커 실행. 에이전트 실행 자체는 start-pi.sh(pi/bin/agent.mjs)가 맡는다.
+// s8.sh의 진입점: tmux 런타임·예약 데몬·작업 워커 실행. 에이전트 실행 자체는 start-*-agent.sh(pi/bin/agent.mjs)가 맡는다.
 //   work UID              승인된 작업의 워커를 s8-workers 세션 창에 실행(lib/agent/work.mjs)
 //   finish UID --run-id UUID --confirm-stopped   멈춘 실행을 실패로 보고해 마무리(lib/agent/finish.mjs)
 //   service scheduler     예약 데몬을 이 프로세스에서 실행(tmux 서비스 창, 수동 진단)

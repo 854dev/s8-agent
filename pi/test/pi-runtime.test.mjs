@@ -17,7 +17,7 @@ async function fixture(t) {
   const run = args => exec(tmux, ['-f', '/dev/null', '-L', socket, ...args], { timeout: 5000 });
   t.after(async () => { await run(['kill-server']).catch(() => {}); await rm(root, { recursive: true, force: true }); });
   for (const directory of ['pi/bin', 'pi/lib', 'pi/node_modules/.bin', 'tools']) await mkdir(path.join(root, directory), { recursive: true });
-  for (const file of ['start-pi.sh', 's8.sh', 'agents/general/profile.json', 'agents/manager/profile.json']) {
+  for (const file of ['start-general-agent.sh', 'start-manager-agent.sh', 's8.sh', 'agents/general/profile.json', 'agents/manager/profile.json']) {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await copyFile(new URL(`../../${file}`, import.meta.url), path.join(root, file));
   }
@@ -55,7 +55,7 @@ import('node:fs').then(async fs => {
   return { root, run, launch };
 }
 
-test('start-pi recreates all sessions and services and connects Telegram by default', async t => {
+test('s8 runtime recreates all sessions and services and connects Telegram by default', async t => {
   const f = await fixture(t);
   const result = await f.launch(['--model', 'fixture model']);
   assert.match(result.stdout, /tmux 세션: s8-main/);

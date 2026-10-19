@@ -2,7 +2,7 @@
 // - projectman get: claim(이미 claim했으면 이어감) 후 작업 내용 반환. 세션은 처음 claim한 UID에 고정된다.
 // - projectman report: 결과 보고. 보고 후에는 파일·명령 도구를 막는다.
 // - claim 전에는 projectman 외 도구를 막고, bash에는 비밀정보 환경변수를 넘기지 않는다.
-// S8_WORKER_UID가 있으면 그 UID만 다룬다(start-pi.sh --mode worker --uid).
+// S8_WORKER_UID가 있으면 그 UID만 다룬다(start-worker-agent.sh --uid).
 import { fileURLToPath } from 'node:url';
 import { Type } from 'typebox';
 import { createBashTool, type ExtensionAPI } from '@earendil-works/pi-coding-agent';

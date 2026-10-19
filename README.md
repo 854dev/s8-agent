@@ -8,22 +8,22 @@
 
 ## 실행 진입점
 
-`start-pi.sh`는 에이전트 하나를 이 터미널에서 실행하는 가벼운 실행기다. tmux·서비스는 다루지 않는다.
+에이전트 실행 스크립트는 역할마다 하나씩 있고, 에이전트 하나를 이 터미널에서 실행한다. tmux·서비스는 다루지 않는다.
 
 ```bash
-./start-pi.sh                              # 범용 에이전트(기본): 실행 위치에서 파일·셸·코드 수정
-./start-pi.sh --cwd /path/to/work
-./start-pi.sh --mode manager               # Projectman 매니저: KB 저장소에서 프로젝트·작업 생성·갱신
-./start-pi.sh --mode manager --telegram    # Telegram 연결
-./start-pi.sh --mode worker --uid <UID>   # Projectman 워커: 실행 위치 저장소에서 UID 작업 claim·수행·보고
-./start-pi.sh --print --model <모델>       # 비대화형 실행
+./start-general-agent.sh                       # 범용 에이전트: 실행 위치에서 파일·셸·코드 수정
+./start-general-agent.sh --cwd /path/to/work
+./start-manager-agent.sh                       # Projectman 매니저: KB 저장소에서 프로젝트·작업 생성·갱신
+./start-manager-agent.sh --telegram            # Telegram 연결
+./start-worker-agent.sh --uid <UID>            # Projectman 워커: 실행 위치 저장소에서 UID 작업 claim·수행·보고
+./start-general-agent.sh --print --model <모델> # 비대화형 실행
 ```
 
 모드별 도구·확장·시스템 지침은 `agents/<모드>/profile.json`에 있다. 범용 모드는 `.env`를 읽지 않고, 매니저 모드는 `.env`를 읽어 Projectman 연결 설정을 사용한다. `/restart`로 종료하면 최근 대화로 다시 시작한다.
 
 워커 모드는 task·subtask UID 하나를 직접 claim하고 결과를 보고한다. `--uid` 없이 실행하면 "uid xxx 의 업무를 수행해라"처럼 대화로 지시한다. claim·보고 요청은 `.s8-runtime/worker-claims/`와 `.s8-runtime/runs/<runId>/outbox.json`에 먼저 기록해 재시도해도 한 번만 반영된다. 보고는 Projectman에 저장되고 매니저 수신함과 Telegram으로 전달된다(실패분은 매니저가 15초마다 재전달). claim 전과 보고 후에는 파일·명령 도구를 막고, bash에는 토큰·비밀번호 환경변수를 넘기지 않는다. 승인(사람의 계획 확인)된 ready 작업만 claim한다.
 
-tmux 런타임(매니저 창·스케줄러·작업 워커 창)은 `s8.sh`가 담당한다. 터미널에서 실행하면 `project` / `local` 모드를 선택하고, 자동화와 비대화형 실행은 `--mode`를 명시한다. 각 Pi 창은 내부에서 `start-pi.sh`를 실행한다.
+tmux 런타임(매니저 창·스케줄러·작업 워커 창)은 `s8.sh`가 담당한다. 터미널에서 실행하면 `project` / `local` 모드를 선택하고, 자동화와 비대화형 실행은 `--mode`를 명시한다. Pi 창은 내부에서 `start-manager-agent.sh`(project) 또는 `start-general-agent.sh`(local)를 실행한다.
 
 ```bash
 ./s8.sh --mode project              # Projectman 관리·개발 위임
@@ -35,7 +35,7 @@ tmux 런타임(매니저 창·스케줄러·작업 워커 창)은 `s8.sh`가 담
 ./s8.sh service scheduler            # 예약 데몬 단독 실행
 ```
 
-로컬 모드는 기본 `s8-local` 세션을 사용하고, KB·Projectman 설정과 프로젝트 서비스 없이 실행한다. 첫 비대화형 실행의 Telegram 연결은 꺼져 있다. 터미널 실행에서는 현재 연결 세션을 보여주고 **현재 연결 유지 / 여기로 가져오기**를 선택한다. 기본 선택은 현재 연결 유지이며, 명시적인 `--telegram take/off`가 있으면 선택을 생략한다. 실행할 때마다 모든 tmux 세션을 종료하고, 프로젝트 모드는 `s8-main` 세션과 서비스를 새로 만든다. 인증은 공유하지만 로컬 대화 이력은 세션·작업 디렉터리별로 분리한다. `--manager`는 `--mode project`의 별칭이다. `--help`, `--sessions`, `work`, `service`는 모드 선택을 생략한다. 패키지 관리 명령·`--version`·`--print`는 `start-pi.sh`로 실행한다.
+로컬 모드는 기본 `s8-local` 세션을 사용하고, KB·Projectman 설정과 프로젝트 서비스 없이 실행한다. 첫 비대화형 실행의 Telegram 연결은 꺼져 있다. 터미널 실행에서는 현재 연결 세션을 보여주고 **현재 연결 유지 / 여기로 가져오기**를 선택한다. 기본 선택은 현재 연결 유지이며, 명시적인 `--telegram take/off`가 있으면 선택을 생략한다. 실행할 때마다 모든 tmux 세션을 종료하고, 프로젝트 모드는 `s8-main` 세션과 서비스를 새로 만든다. 인증은 공유하지만 로컬 대화 이력은 세션·작업 디렉터리별로 분리한다. `--manager`는 `--mode project`의 별칭이다. `--help`, `--sessions`, `work`, `service`는 모드 선택을 생략한다. 패키지 관리 명령·`--version`·`--print`는 `start-*-agent.sh`로 실행한다.
 
 아래 기존 운영 안내의 서비스·Telegram 기본 동작은 `project` 모드 기준이다.
 
@@ -46,7 +46,7 @@ tmux 런타임(매니저 창·스케줄러·작업 워커 창)은 `s8.sh`가 담
 - KB: Markdown 검색·조회와 정책 확인, 버전 충돌 검사를 거친 문서 쓰기·삭제. 변경은 대화형 확인이 필요하다.
 - Scheduler: Projectman 예약만 관리한다. 임의 셸 예약은 관리 도구에서 변경할 수 없다.
 - 착수 전: `todo`를 **일 시작 전**으로 표시한다. 매니저가 원문·코드·지침·요구 충돌·누락·허용 범위·검증 계획을 검토하고 작은 의문도 사용자에게 확인한다. 확정 내용을 `delegate`한 뒤 `preflight_review`로 work의 `s8Preflight`에 기록한다. S8 콘솔은 이 기록이 현재 작업·spec과 일치해야 승인·실행을 허용한다. 내용이나 spec이 변경되면 재검토한다. 기존 승인 작업도 검토 기록이 없으면 실행되지 않는다.
-- 개발: 사람이 계획을 확정한 ready 작업을 매니저가 `run_worker`로, 또는 사용자가 `./s8.sh work <UID>`로 실행한다. 실행기는 작업별 독립 git worktree(`.s8-runtime/worktrees/<UID>`)를 만들고 선행 작업 패치를 적용한 뒤, `s8-workers:<UID>` 창에서 `start-pi.sh --mode worker`를 띄운다. 워커가 claim·구현·검증·보고를 직접 한다. 동시 실행 수 제한은 없다. 이미 claim한 작업을 다시 실행하면 같은 worktree에서 이어간다.
+- 개발: 사람이 계획을 확정한 ready 작업을 매니저가 `run_worker`로, 또는 사용자가 `./s8.sh work <UID>`로 실행한다. 실행기는 작업별 독립 git worktree(`.s8-runtime/worktrees/<UID>`)를 만들고 선행 작업 패치를 적용한 뒤, `s8-workers:<UID>` 창에서 `start-worker-agent.sh`를 띄운다. 워커가 claim·구현·검증·보고를 직접 한다. 동시 실행 수 제한은 없다. 이미 claim한 작업을 다시 실행하면 같은 worktree에서 이어간다.
 - 개발 중 판단: 최종 승인된 작업의 구현 선택과 일반 테스트 실패는 워커가 스스로 해결한다. work당 토큰·시간·명령·실행 횟수 예산은 없다. 실제 실패·취소는 결과와 기록을 보존한다.
 - 완료: 워커가 결과를 보고하면 review로 저장하고 매니저에게 보고를 전달한다. 사용자는 Telegram으로 요약과 work 링크를 받는다. 매니저 검토 후 사용자가 화면에서 선택적으로 검토의견을 적고 완료를 제출한다. 원본은 done으로 확정되며 매니저가 의견을 보고 추가 조치 없음·새 work 작성·질문을 판단한다. 새 work는 별도 실행 승인을 받는다.
 - 기록: `.s8-runtime/runs/<run-id>/`의 전달 프롬프트·공개 응답·도구 이벤트·결과·검증·패치와 Projectman 작업 이력을 연결한다. 모델 내부 추론과 인증정보는 기록 대상이 아니다.
@@ -68,7 +68,7 @@ dev_854/
 
 - 재사용 Pi 설정과 npm 패키지: `pi/`
 - Pi 장비별 런타임: `.pi-runtime/`
-- 에이전트 실행 진입점: `start-pi.sh` (tmux 런타임: `s8.sh`)
+- 에이전트 실행 진입점: `start-general-agent.sh`, `start-manager-agent.sh`, `start-worker-agent.sh` (tmux 런타임: `s8.sh`)
 - 작업 워커 실행: `s8.sh work <UID>`, 매니저 `run_worker`
 - 역할 지침·프로필: `agents/general/`, `agents/manager/`, `agents/worker/`
 - 비공개 로컬 상태: `.s8-runtime/`
@@ -108,8 +108,8 @@ pi/
 
 | 찾으려는 기능 | 구현 위치 | 실행·연결 진입점 |
 | --- | --- | --- |
-| 에이전트 모드·실행 인자·재시작 | [agent/launch.mjs](pi/lib/agent/launch.mjs), [agent/profile.mjs](pi/lib/agent/profile.mjs) | `start-pi.sh` → `pi/bin/agent.mjs` |
-| 워커 claim·보고·도구 차단 | [agent/worker-run.mjs](pi/lib/agent/worker-run.mjs), [worker 확장](pi/extensions/worker.ts) | `start-pi.sh --mode worker` |
+| 에이전트 모드·실행 인자·재시작 | [agent/launch.mjs](pi/lib/agent/launch.mjs), [agent/profile.mjs](pi/lib/agent/profile.mjs) | `start-*-agent.sh` → `pi/bin/agent.mjs` |
+| 워커 claim·보고·도구 차단 | [agent/worker-run.mjs](pi/lib/agent/worker-run.mjs), [worker 확장](pi/extensions/worker.ts) | `start-worker-agent.sh` |
 | 작업 실행(worktree·선행 패치·워커 창) | [agent/work.mjs](pi/lib/agent/work.mjs), [development/workspace.mjs](pi/lib/development/workspace.mjs) | `s8.sh work <UID>`, 매니저 `run_worker` |
 | 보고 전달(Projectman·매니저·Telegram) | [development/outbox.mjs](pi/lib/development/outbox.mjs) | 워커 보고, 매니저 polling |
 | 완료보고·사용자 검토의견 수신 | [manager/inbox.mjs](pi/lib/manager/inbox.mjs), [manager 확장](pi/extensions/manager.ts) | 매니저 시작·기존 polling |
@@ -304,10 +304,10 @@ npm ci --ignore-scripts --prefix pi
 기존 선택 패키지의 설치 명령이다. 매니저는 확장·스킬 자동 발견을 끄므로, 패키지를 설치해도 도구가 자동으로 늘어나지 않는다. 기본 매니저에는 Projectman·KB·Scheduler와 일반 파일·Bash 도구를 제공한다.
 
 ```bash
-./start-pi.sh install npm:@calesennett/pi-codex-usage@0.1.14
-./start-pi.sh install npm:@dietrichgebert/ponytail@4.10.0
-./start-pi.sh install npm:pi-web-access@0.33.0
-./start-pi.sh install npm:pi-mcp-extension@1.5.0
+./start-general-agent.sh install npm:@calesennett/pi-codex-usage@0.1.14
+./start-general-agent.sh install npm:@dietrichgebert/ponytail@4.10.0
+./start-general-agent.sh install npm:pi-web-access@0.33.0
+./start-general-agent.sh install npm:pi-mcp-extension@1.5.0
 ```
 
 - `@calesennett/pi-codex-usage`: Codex 사용량 footer 표시
@@ -400,7 +400,7 @@ node --test pi/test/*.test.mjs apps/telegram-gateway/gateway.test.mjs
 npm run test:run --prefix frontend
 npm run lint --prefix frontend
 npm run build --prefix frontend
-bash -n start-pi.sh
+bash -n start-general-agent.sh start-manager-agent.sh start-worker-agent.sh
 bash -n s8.sh
 git diff --check
 ```

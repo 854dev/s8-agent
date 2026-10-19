@@ -1,19 +1,28 @@
-// start-pi.sh의 진입점: 단일 에이전트를 이 터미널에서 실행한다.
+// start-{general,manager,worker}-agent.sh의 진입점: 첫 인자로 받은 모드의 에이전트 하나를 이 터미널에서 실행한다.
 import { fileURLToPath } from 'node:url';
 import { runAgent, usageError } from '../lib/agent/launch.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
-const HELP = `사용법: ./start-pi.sh [--mode general|manager|worker] [--cwd 경로] [--uid UID] [--telegram] [Pi 옵션]
-  --mode general   범용 에이전트: 파일·셸·코드 수정 (기본값, 실행 위치에서 작업)
-  --mode manager   Projectman 매니저: 프로젝트·작업 생성·갱신, 워커 보고 수신 (KB 저장소에서 작업)
-  --mode worker    Projectman 워커: UID 작업을 직접 claim·수행·보고 (실행 위치 저장소에서 작업)
-  --cwd 경로       작업 디렉터리 (general·worker 모드, 기본: 실행 위치)
-  --uid UID        worker 모드에서 수행할 task·subtask UID. 지정하면 바로 작업을 시작한다
-  --telegram       Telegram 연결 (TELEGRAM_BOT_TOKEN, s8-config.yml 필요)
+const COMMON = `  --telegram       Telegram 연결 (TELEGRAM_BOT_TOKEN, s8-config.yml 필요)
   --help, -h       이 도움말 표시
   Pi 옵션: --continue, --print, --no-session, --version, --model, --provider, --thinking
-  Pi 패키지 명령: install, remove, uninstall, update, list, config
-  tmux 런타임·서비스는 ./s8.sh를 사용한다.`;
+  Pi 패키지 명령: install, remove, uninstall, update, list, config (모든 에이전트가 공유)
+  다른 에이전트: start-general-agent.sh, start-manager-agent.sh, start-worker-agent.sh · tmux 런타임: ./s8.sh`;
+const HELP = {
+  general: `사용법: ./start-general-agent.sh [--cwd 경로] [옵션]
+범용 에이전트: Projectman 없이 실행 위치에서 파일·셸·코드를 수정한다.
+  --cwd 경로       작업 디렉터리 (기본: 실행 위치)
+${COMMON}`,
+  manager: `사용법: ./start-manager-agent.sh [옵션]
+Projectman 매니저: KB 저장소에서 프로젝트·작업을 만들고 갱신하며 워커 보고를 받는다.
+${COMMON}`,
+  worker: `사용법: ./start-worker-agent.sh [--uid UID] [--cwd 경로] [옵션]
+Projectman 워커: 실행 위치 저장소에서 UID 작업을 직접 claim·수행·보고한다.
+worktree 준비·선행 작업 적용까지 맡기려면 ./s8.sh work UID를 사용한다.
+  --uid UID        수행할 task·subtask UID. 지정하면 바로 작업을 시작한다
+  --cwd 경로       작업 디렉터리 (기본: 실행 위치)
+${COMMON}`,
+};
 
 /** 실행기 옵션은 소비하고 나머지는 Pi 옵션으로 넘긴다. --control·--session-dir은 s8 런타임이 쓰는 내부 옵션이다. */
 function parseOptions(input) {
@@ -24,7 +33,7 @@ function parseOptions(input) {
       if (!input[i + 1]) throw usageError(`${arg} 값이 필요합니다.`);
       return input[++i];
     };
-    if (arg === '--mode') options.mode = value();
+    if (arg === '--mode') throw usageError('모드는 실행 스크립트로 고릅니다: start-general-agent.sh, start-manager-agent.sh, start-worker-agent.sh');
     else if (arg === '--cwd') options.cwd = value();
     else if (arg === '--uid') options.uid = value();
     else if (arg === '--session-dir') options.sessionDir = value();
@@ -38,9 +47,11 @@ function parseOptions(input) {
 }
 
 try {
-  const options = parseOptions(process.argv.slice(2));
-  if (options.help) console.log(HELP);
-  else process.exitCode = await runAgent(root, options);
+  const [mode, ...input] = process.argv.slice(2);
+  if (!HELP[mode]) throw usageError('start-general-agent.sh, start-manager-agent.sh, start-worker-agent.sh로 실행하세요.');
+  const options = parseOptions(input);
+  if (options.help) console.log(HELP[mode]);
+  else process.exitCode = await runAgent(root, { ...options, mode });
 } catch (error) {
   console.error(`[S8] ${error.message}`);
   process.exitCode = error.exitCode ?? 1;

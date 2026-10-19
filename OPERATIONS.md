@@ -1,6 +1,6 @@
 # s8 운영 절차
 
-인프라 기준은 [`INFRASTRUCTURE.md`](INFRASTRUCTURE.md)를 따른다. 에이전트 단독 실행은 `start-pi.sh`, tmux 런타임·서비스는 `s8.sh`, 통합 인프라 실행은 `start-infra.sh`를 사용하고, 그 밖에는 tmux, npm, Docker Compose, curl의 표준 명령을 사용한다.
+인프라 기준은 [`INFRASTRUCTURE.md`](INFRASTRUCTURE.md)를 따른다. 에이전트 단독 실행은 `start-general-agent.sh`·`start-manager-agent.sh`·`start-worker-agent.sh`, tmux 런타임·서비스는 `s8.sh`, 통합 인프라 실행은 `start-infra.sh`를 사용하고, 그 밖에는 tmux, npm, Docker Compose, curl의 표준 명령을 사용한다.
 
 ## Telegram 전체 재시작
 
@@ -180,7 +180,7 @@ docker compose --env-file .env -f infra/nginx/docker-compose.yml down
 ## 상태 점검
 
 ```bash
-./start-pi.sh --version
+./start-general-agent.sh --version
 tmux has-session -t s8-main
 curl -fsS http://127.0.0.1:4178/s8/
 docker compose --env-file .env -f infra/nginx/docker-compose.yml ps
@@ -246,9 +246,9 @@ API health만 실패:
 ## 검증 명령
 
 ```bash
-bash -n start-pi.sh
+bash -n start-general-agent.sh start-manager-agent.sh start-worker-agent.sh
 bash -n s8.sh
-./start-pi.sh --version
+./start-general-agent.sh --version
 NGINX_BIND_IP=127.0.0.1 docker compose --env-file /dev/null -f infra/nginx/docker-compose.yml config --quiet
 npm test --prefix apps/terminal-gateway
 npm test --prefix apps/kb-browser
