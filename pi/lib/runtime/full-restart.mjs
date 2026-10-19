@@ -45,9 +45,8 @@ export async function waitForInfrastructure({ fetchImpl = fetch, timeoutMs = 180
  * 전체 재시작을 수행한다. local 모드 세션은 인프라 없이 Pi만 다시 시작한다.
  * 의존성(run, infra, ready, runtime)은 테스트에서 교체할 수 있다.
  */
-export async function runFullRestart(root, options, directory, { run = runTmux, infra = runInfrastructure, ready = waitForInfrastructure, runtime = startPiRuntime } = {}) {
+export async function runFullRestart(root, { session, directory }, { run = runTmux, infra = runInfrastructure, ready = waitForInfrastructure, runtime = startPiRuntime } = {}) {
   root = await realpath(root);
-  const session = options.session;
   if (!validSession(session)) throw new Error('Invalid restart session');
   if (await sessionOption(run, session, '@s8-runtime-root') !== root) throw new Error('Restart session belongs to another checkout');
   // 현재 세션의 모드·작업 디렉터리·Telegram·Pi 인자를 그대로 이어서 다시 시작한다.

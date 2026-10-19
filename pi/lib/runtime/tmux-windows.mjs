@@ -26,6 +26,21 @@ export async function sessionOption(run, session, name) {
   return (await run(['show-option', '-qv', '-t', session, name])).stdout.trim();
 }
 
+export const hasSession = (run, session) => run(['has-session', '-t', `=${session}`]).then(() => true, () => false);
+
+/**
+ * 세션이 없으면 이 저장소 소유의 관리 세션(@s8-runtime-root, @s8-managed)으로 만들고, 소유 저장소를 확인한다.
+ * options는 새로 만들 때 함께 설정할 세션 옵션. 동시에 다른 실행이 먼저 만들었다면 그 세션을 사용한다.
+ */
+export async function ensureSession(run, root, session, options = {}) {
+  if (!await hasSession(run, session)) {
+    const settings = Object.entries({ '@s8-runtime-root': root, '@s8-managed': '1', ...options });
+    try { await run(['new-session', '-d', '-s', session, '-n', 'shell', '-c', root, ...settings.flatMap(([name, value]) => [';', 'set-option', '-t', session, name, value])]); }
+    catch (error) { if (!await hasSession(run, session)) throw error; }
+  }
+  if (await sessionOption(run, session, '@s8-runtime-root') !== root) throw new Error(`${session}은 이 저장소의 세션이 아닙니다. 다른 --session 이름을 사용하세요.`);
+}
+
 /** 관리 창으로 표시하는 tmux 명령 조각. 종료 후에도 창을 남겨 오류 출력을 확인할 수 있게 한다. */
 const managedWindowOptions = (target, root) => [
   ';', 'set-option', '-w', '-t', target, '@s8-window-root', root,

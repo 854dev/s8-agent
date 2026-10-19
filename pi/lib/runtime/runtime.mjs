@@ -9,19 +9,7 @@ import { managerArgs } from '../manager/launch.mjs';
 import { moveTelegram, validSession } from './managed-sessions.mjs';
 import { startPiServices } from './services.mjs';
 import { sleep } from './process.mjs';
-import { runTmux, withTmuxLock, ensureWindow, stopWindow, windows, quote, lockName, sessionOption } from './tmux-windows.mjs';
-
-/** 세션이 없으면 이 저장소 소유로 만든다. 동시에 다른 실행이 먼저 만들었다면 그 세션을 사용한다. */
-async function ensureSession(run, root, session) {
-  try { await run(['has-session', '-t', `=${session}`]); return; } catch {}
-  try {
-    await run(['new-session', '-d', '-s', session, '-n', 'shell', '-c', root,
-      ';', 'set-option', '-t', session, '@s8-runtime-root', root,
-      ';', 'set-option', '-t', session, '@s8-managed', '1']);
-  } catch (error) {
-    try { await run(['has-session', '-t', `=${session}`]); } catch { throw error; }
-  }
-}
+import { runTmux, withTmuxLock, ensureSession, ensureWindow, stopWindow, windows, quote, lockName, sessionOption } from './tmux-windows.mjs';
 
 /** 실행 중인 세션에 기록된 설정을 읽어, 같은 대화를 이어가는(--continue) startPiRuntime 옵션으로 돌려준다. 인자 검증은 startPiRuntime이 한다. */
 export async function savedRuntimeOptions(session, { run = runTmux } = {}) {
@@ -52,7 +40,6 @@ export async function startPiRuntime(root, { session = 's8-main', mode = 'projec
 
   // 같은 체크아웃의 재시작과 Telegram 이전을 직렬화한다.
   return withTmuxLock(run, lockName('s8-runtime-root-', root), async () => {
-    if (await sessionOption(run, session, '@s8-runtime-root') !== root) throw new Error(`${session}은 이 저장소의 런타임 세션이 아닙니다. 다른 --session 이름을 사용하세요.`);
     // 무엇이든 중지하기 전에 다시 띄울 창이 모두 이 저장소 소유인지 확인한다.
     const managed = mode === 'project' ? ['pi', ...(scheduler ? ['scheduler'] : []), ...(supervisor ? ['supervisor'] : [])] : ['pi'];
     for (const window of await windows(run, session)) {

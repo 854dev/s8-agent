@@ -25,7 +25,7 @@ async function restart() {
       if (!/no server running|no sessions|No such file or directory/i.test(error.stderr ?? '')) throw error;
     }
   }
-  return options.all ? runFullRestart(root, options, directory) : startPiRuntime(root, options);
+  return options.all ? runFullRestart(root, { session: options.session, directory }) : startPiRuntime(root, options);
 }
 
 try {

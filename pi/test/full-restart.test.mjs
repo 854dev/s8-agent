@@ -25,7 +25,7 @@ async function fixture(t) {
 
 test('full restart stops shared workers, starts infra, waits for readiness then replaces the current Pi', async t => {
   const f = await fixture(t);
-  const result = await runFullRestart(`${f.root}/`, { session: 's8-work' }, f.directory, f.deps);
+  const result = await runFullRestart(`${f.root}/`, { session: 's8-work', directory: f.directory }, f.deps);
   assert.equal(result.session, 's8-work');
   assert.deepEqual(f.events, ['stop:scheduler', 'stop:supervisor', 'infra', 'ready', 'pi']);
   assert.equal(JSON.parse(await readFile(path.join(f.directory, 'progress.json'))).stage, 'completed');
@@ -34,16 +34,16 @@ test('full restart stops shared workers, starts infra, waits for readiness then 
 
 test('infra failure preserves the Telegram Pi, reports the failed stage and allows retry', async t => {
   const f = await fixture(t);
-  await assert.rejects(runFullRestart(f.root, { session: 's8-work' }, f.directory, { ...f.deps, infra: async () => { throw new Error('private infrastructure output'); } }), error => /infra/.test(error.message) && !/private/.test(error.message));
+  await assert.rejects(runFullRestart(f.root, { session: 's8-work', directory: f.directory }, { ...f.deps, infra: async () => { throw new Error('private infrastructure output'); } }), error => /infra/.test(error.message) && !/private/.test(error.message));
   assert.ok(!f.events.includes('pi'));
   assert.equal(JSON.parse(await readFile(path.join(f.directory, 'progress.json'))).stage, 'infra');
-  assert.equal((await runFullRestart(f.root, { session: 's8-work' }, f.directory, f.deps)).session, 's8-work');
+  assert.equal((await runFullRestart(f.root, { session: 's8-work', directory: f.directory }, f.deps)).session, 's8-work');
 });
 
 test('duplicate full restarts are rejected before they can touch infra', async t => {
   const f = await fixture(t);
   await writeFile(path.join(f.root, '.s8-runtime/runtime-restarts/all.lock'), JSON.stringify({ pid: process.pid }));
-  await assert.rejects(runFullRestart(f.root, { session: 's8-work' }, f.directory, f.deps), /already running/);
+  await assert.rejects(runFullRestart(f.root, { session: 's8-work', directory: f.directory }, f.deps), /already running/);
   assert.deepEqual(f.events, []);
 });
 
@@ -69,7 +69,7 @@ test('infrastructure runner uses a fixed script and completion notifications pre
 test('local full restart leaves project infrastructure and services untouched', async t => {
   const f = await fixture(t);
   f.options['@s8-mode'] = 'local';
-  await runFullRestart(f.root, { session: 's8-work' }, f.directory, { ...f.deps, runtime: async (_root, options) => {
+  await runFullRestart(f.root, { session: 's8-work', directory: f.directory }, { ...f.deps, runtime: async (_root, options) => {
     assert.equal(options.mode, 'local');
     assert.equal(options.cwd, f.root);
     f.events.push('local-pi');

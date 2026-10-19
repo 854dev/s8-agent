@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, realpath } from 'node:fs/promises';
-import { ensureWindow, windows, withTmuxLock, runTmux, quote } from '../runtime/tmux-windows.mjs';
+import { ensureSession, ensureWindow, hasSession, windows, withTmuxLock, runTmux, quote } from '../runtime/tmux-windows.mjs';
 import { loadS8Config } from '../config/s8-config.mjs';
 import { validWorkerId } from './worker-identity.mjs';
 import { enqueueWorkerMessage, getWorkerState, waitForWorkerMessage, withdrawWorkerAssignment, workerDirectory } from './worker-store.mjs';
@@ -69,15 +69,8 @@ export async function ensureWorkerPool(root, { run = runTmux, ssh, entries = loa
   }
   const session = `s8-workers-${createHash('sha256').update(root).digest('hex').slice(0, 8)}`;
   return withTmuxLock(run, `${session}-lock`, async () => {
-    let exists = false;
-    try { await run(['has-session', '-t', `=${session}`]); exists = true; } catch {}
-    if (!exists && !workerIds.length) return { session: null, count: Object.keys(entries).length, localCount: 0, workerIds, remoteWorkers, deferred: remoteDeferred };
-    if (!exists) await run(['new-session', '-d', '-s', session, '-n', 'shell', '-c', root,
-      ';', 'set-option', '-t', session, '@s8-runtime-root', root,
-      ';', 'set-option', '-t', session, '@s8-managed', '1',
-      ';', 'set-option', '-t', session, '@s8-role', 'workers']);
-    const owner = (await run(['show-option', '-qv', '-t', session, '@s8-runtime-root'])).stdout.trim();
-    if (owner !== root) throw new Error('Worker session belongs to another checkout');
+    if (!workerIds.length && !await hasSession(run, session)) return { session: null, count: Object.keys(entries).length, localCount: 0, workerIds, remoteWorkers, deferred: remoteDeferred };
+    await ensureSession(run, root, session, { '@s8-role': 'workers' });
     const current = (await windows(run, session)).filter(item => item.workerId || workerIds.includes(item.name) || /^worker-[1-9]\d*$/.test(item.name));
     for (const item of current) if (item.root !== root) throw new Error('Worker window belongs to another checkout');
     const currentIds = current.map(item => item.name).sort();

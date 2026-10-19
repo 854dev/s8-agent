@@ -4,9 +4,8 @@
 import { mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { acquirePidLock, lockOwner, processAlive, sleep, waitUntil } from './process.mjs';
-import { ensureWindow, stopWindow, windows, withTmuxLock, runTmux, quote, lockName, sessionOption } from './tmux-windows.mjs';
+import { ensureWindow, stopWindow, windows, withTmuxLock, runTmux, quote, lockName } from './tmux-windows.mjs';
 import { ensureWorkerPool, workersBusy } from '../development/worker-pool.mjs';
-import { validSession } from './managed-sessions.mjs';
 
 // 서비스별 PID 잠금 파일(저장소 루트 기준).
 const lockFiles = {
@@ -31,14 +30,12 @@ async function stopService(run, root, session, name) {
 
 /**
  * 공유 서비스를 (재)시작하고 서비스별 결과 목록을 돌려준다. supervisor를 켜면 워커 풀 결과({ service: 'workers' })도 포함한다.
- * 실행 중인 서비스는 새 프로세스로 교체한다. 단, 워커가 작업 중이거나 워커 설정 적용이 보류되면
+ * session은 startPiRuntime이 만들고 소유를 확인한 런타임 세션이다. 실행 중인 서비스는 새 프로세스로 교체한다. 단, 워커가 작업 중이거나 워커 설정 적용이 보류되면
  * 실행 중인 supervisor는 그대로 둔다({ kept: true }).
  */
 export async function startPiServices(root, { session = 's8-main', scheduler = true, supervisor = true, run = runTmux } = {}) {
   root = await realpath(root);
   if (!scheduler && !supervisor) return [];
-  if (!validSession(session)) throw new Error('잘못된 세션 이름입니다.');
-  if (await sessionOption(run, session, '@s8-runtime-root') !== root) throw new Error(`${session}은 이 저장소의 런타임 세션이 아닙니다.`);
 
   const results = [];
   let workerPool;
