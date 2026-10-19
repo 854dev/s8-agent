@@ -17,9 +17,12 @@ async function fixture(t) {
   const run = args => exec(tmux, ['-f', '/dev/null', '-L', socket, ...args], { timeout: 5000 });
   t.after(async () => { await run(['kill-server']).catch(() => {}); await rm(root, { recursive: true, force: true }); });
   for (const directory of ['pi/bin', 'pi/lib', 'pi/node_modules/.bin', 'tools']) await mkdir(path.join(root, directory), { recursive: true });
-  await copyFile(new URL('../../start-pi.sh', import.meta.url), path.join(root, 'start-pi.sh'));
+  for (const file of ['start-pi.sh', 's8.sh', 'agents/general/profile.json', 'agents/manager/profile.json']) {
+    await mkdir(path.dirname(path.join(root, file)), { recursive: true });
+    await copyFile(new URL(`../../${file}`, import.meta.url), path.join(root, file));
+  }
   await writeFile(path.join(root, 's8-config.yml'), 'telegram: {}\nworker-entries:\n  worker-1:\n    agent: pi\n    host: local\n    launch: managed\n');
-  for (const file of ['bin/start.mjs', 'lib/runtime/user-command.mjs', 'lib/runtime/foreground.mjs', 'bin/telegram-status.mjs', 'bin/pi-runtime-worker.mjs', 'lib/runtime/restart.mjs', 'lib/runtime/full-restart.mjs', 'lib/runtime/runtime.mjs', 'lib/runtime/services.mjs', 'lib/runtime/tmux-windows.mjs', 'lib/runtime/managed-sessions.mjs', 'lib/manager/launch.mjs', 'lib/telegram/status.mjs', 'lib/development/worker-pool.mjs', 'lib/development/worker-identity.mjs', 'lib/development/worker-communicator.mjs', 'lib/development/worker-store.mjs', 'lib/development/worker-auth.mjs', 'lib/development/worker-protocol.mjs', 'lib/runtime/process.mjs', 'lib/development/ssh-worker.mjs', 'lib/storage/json-file.mjs', 'lib/scheduler/control.mjs', 'lib/scheduler/store.mjs', 'lib/config/s8-config.mjs']) {
+  for (const file of ['bin/s8.mjs', 'bin/agent.mjs', 'lib/agent/launch.mjs', 'lib/agent/profile.mjs', 'lib/runtime/user-command.mjs', 'bin/telegram-status.mjs', 'bin/pi-runtime-worker.mjs', 'lib/runtime/restart.mjs', 'lib/runtime/full-restart.mjs', 'lib/runtime/runtime.mjs', 'lib/runtime/services.mjs', 'lib/runtime/tmux-windows.mjs', 'lib/runtime/managed-sessions.mjs', 'lib/telegram/status.mjs', 'lib/development/worker-pool.mjs', 'lib/development/worker-identity.mjs', 'lib/development/worker-communicator.mjs', 'lib/development/worker-store.mjs', 'lib/development/worker-auth.mjs', 'lib/development/worker-protocol.mjs', 'lib/runtime/process.mjs', 'lib/development/ssh-worker.mjs', 'lib/storage/json-file.mjs', 'lib/scheduler/control.mjs', 'lib/scheduler/store.mjs', 'lib/config/s8-config.mjs']) {
     await mkdir(path.dirname(path.join(root, 'pi', file)), { recursive: true });
     await copyFile(new URL(`../${file}`, import.meta.url), path.join(root, 'pi', file));
   }
@@ -40,14 +43,14 @@ import('node:fs').then(async fs => {
   if (fs.existsSync(socket)) fs.unlinkSync(socket);
   net.createServer(client => client.once('data', data => {
     if (data.toString() === 'self-restart') {
-      spawn('bash', [${JSON.stringify(path.join(root, 'start-pi.sh'))}, '--mode', 'project', '--no-telegram'], {stdio:'ignore'});
+      spawn('bash', [${JSON.stringify(path.join(root, 's8.sh'))}, '--mode', 'project', '--no-telegram'], {stdio:'ignore'});
       client.end('ok'); return;
     }
     fs.appendFileSync(${JSON.stringify(path.join(root, 'telegram'))}, session+'\\n'); client.end('ok');
   })).listen(socket);
 });
 `, { mode: 0o755 });
-  const launch = args => exec('bash', [path.join(root, 'start-pi.sh'), '--mode', 'project', ...args], {
+  const launch = args => exec('bash', [path.join(root, 's8.sh'), '--mode', 'project', ...args], {
     env: { ...process.env, PATH: `${root}/tools:${process.env.PATH}`, S8_KB_ROOT: root, TMUX: '' }, timeout: 12000,
   });
   return { root, run, launch };
@@ -170,7 +173,7 @@ test('local mode works without KB or project config and does not start services'
   assert.match(result.stdout, /s8-local/);
   await assert.rejects(readFile(path.join(f.root, 'service-starts')), { code: 'ENOENT' });
   const first = JSON.parse((await readFile(path.join(f.root, 'starts'), 'utf8')).trim());
-  assert.ok(first.args.includes(path.join(f.root, 'pi/extensions/local.mjs')));
+  assert.ok(first.args.includes(path.join(f.root, 'pi/extensions/general.mjs')));
   assert.ok(first.args.includes(path.join(f.root, 'pi/extensions/managed-session.mjs')));
   assert.equal(first.args[first.args.indexOf('--tools') + 1], 'read,bash,edit,write,grep,find,ls');
   await f.launch(['--mode', 'local', '--cwd', f.root]);
@@ -191,7 +194,7 @@ test('local mode works without KB or project config and does not start services'
 
 test('noninteractive mode selection fails early; help and invalid modes are explicit', async t => {
   const f = await fixture(t);
-  await assert.rejects(exec('bash', [path.join(f.root, 'start-pi.sh')]), /--mode project/);
+  await assert.rejects(exec('bash', [path.join(f.root, 's8.sh')]), /--mode project/);
   await assert.rejects(f.launch(['--mode', 'invalid']), /모드는 project 또는 local/);
   assert.match((await f.launch(['--help'])).stdout, /--mode project\|local/);
 });
@@ -234,7 +237,7 @@ os.close(master)
 sys.stdout.buffer.write(output)
 sys.exit(p.wait())
 `;
-  const { stdout } = await exec('python3', ['-c', script, path.join(f.root, 'start-pi.sh')], {
+  const { stdout } = await exec('python3', ['-c', script, path.join(f.root, 's8.sh')], {
     cwd: f.root, env: { ...process.env, PATH: `${f.root}/tools:${process.env.PATH}`, S8_KB_ROOT: f.root, TMUX: '' }, timeout: 25000,
   });
   assert.match(stdout, /실행 모드/);

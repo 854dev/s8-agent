@@ -8,8 +8,9 @@
     "pi-package"
   ],
   "scripts": {
-    "start": "node bin/start.mjs",
-    "supervisor": "node bin/start.mjs --service supervisor",
+    "start": "node bin/agent.mjs",
+    "s8": "node bin/s8.mjs",
+    "supervisor": "node bin/s8.mjs service supervisor",
     "console": "node bin/projectman-console.mjs"
   },
   "engines": {

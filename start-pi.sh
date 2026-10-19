@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# S8 실행 진입점. Linux·macOS 전용이며 실제 처리는 pi/bin/start.mjs가 맡는다.
-#   ./start-pi.sh                         모드·Telegram 선택 후 tmux 런타임 시작
-#   ./start-pi.sh --mode project|local    모드 지정 (--help로 전체 옵션 확인)
-#   ./start-pi.sh --service 종류          scheduler, supervisor 또는 worker <workerId> 전경 실행
-# tmux 서비스 창·원격 워커(ssh-worker.mjs)·문서가 이 경로를 사용하므로 위치와 이름을 유지한다.
+# S8 에이전트 실행기: 에이전트 하나를 이 터미널에서 실행한다. Linux·macOS 전용, 실제 처리는 pi/bin/agent.mjs.
+#   ./start-pi.sh                      범용 에이전트 (실행 위치에서 파일·셸·코드 작업)
+#   ./start-pi.sh --mode manager       Projectman 매니저
+#   ./start-pi.sh --help               전체 옵션
+# tmux 런타임·서비스는 ./s8.sh가 담당한다.
 set -euo pipefail
-exec node "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/pi/bin/start.mjs" "$@"
+here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# 이전 start-pi.sh --service 호출(원격 워커 체크아웃 등)은 운영 진입점으로 넘긴다.
+if [[ "${1:-}" == --service ]]; then exec node "$here/pi/bin/s8.mjs" "$@"; fi
+exec node "$here/pi/bin/agent.mjs" "$@"

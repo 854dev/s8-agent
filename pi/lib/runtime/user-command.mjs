@@ -1,14 +1,13 @@
-// start-pi.sh 사용자 실행 처리(pi/bin/start.mjs가 호출). 옵션을 해석하고, 필요하면 모드·Telegram을 터미널에서 선택받은 뒤
-// tmux 런타임을 (재)시작하고 창 목록을 출력한다. 패키지 명령·--version·--print는 런타임 없이 이 터미널에서 실행한다.
+// s8.sh 런타임 시작(pi/bin/s8.mjs가 호출). 옵션을 해석하고, 필요하면 모드·Telegram을 터미널에서 선택받은 뒤
+// tmux 런타임을 (재)시작하고 창 목록을 출력한다. 에이전트 단독 실행(--print 등)은 start-pi.sh가 맡는다.
 import { realpath } from 'node:fs/promises';
 import readline from 'node:readline';
 import { restartPiRuntime } from './restart.mjs';
-import { managerArgs } from '../manager/launch.mjs';
 import { validSession, listSessions } from './managed-sessions.mjs';
 import { telegramOwner } from '../telegram/status.mjs';
-import { isPackageCommand, runPi, usageError } from './foreground.mjs';
+import { isPackageCommand, validatePiOptions, usageError } from '../agent/launch.mjs';
 
-const HELP = `사용법: ./start-pi.sh [--mode project|local] [--cwd 경로] [Pi 옵션]
+const HELP = `사용법: ./s8.sh [--mode project|local] [--cwd 경로] [Pi 옵션]
   --mode project  Projectman 관리·개발 위임 (기존 실행)
   --mode local    로컬 범용 에이전트 (프로젝트 서비스 없음)
   --cwd 경로      로컬 작업 디렉터리 (기본: 실행 위치)
@@ -16,7 +15,7 @@ const HELP = `사용법: ./start-pi.sh [--mode project|local] [--cwd 경로] [Pi
   (인자 없음)      프로젝트 / 로컬 모드 선택
   --no-scheduler   스케줄러 자동 시작 제외
   --no-supervisor  개발 슈퍼바이저 자동 시작 제외
-  --service 종류   scheduler, supervisor 또는 worker <workerId> 전경 실행
+  service 종류     scheduler, supervisor 또는 worker <workerId> 전경 실행
   --telegram take  이 세션으로 Telegram 연결 이전 (단독 --telegram도 호환)
   --telegram off   이 세션의 Telegram 연결 비활성 (--no-telegram도 호환)
   --no-telegram    Telegram 없이 단독 실행
@@ -24,7 +23,8 @@ const HELP = `사용법: ./start-pi.sh [--mode project|local] [--cwd 경로] [Pi
   --sessions       실행 중인 S8 tmux 세션 목록
   --session 이름   모든 tmux 세션 종료 후 s8-이름 생성 (자동 접속 없음)
   --help, -h       이 도움말 표시
-  관리 역할 옵션: --continue, --print, --no-session, --version, --model, --provider, --thinking
+  Pi 옵션: --continue, --no-session, --model, --provider, --thinking
+  에이전트 하나만 이 터미널에서 실행하려면 ./start-pi.sh를 사용한다.
   Telegram 인증: TELEGRAM_BOT_TOKEN (환경변수)
   Telegram ID·알림 대상: s8-config.yml (파일이 없으면 기존 ID 환경변수)
   작업 디렉터리: S8_KB_ROOT (기본값: ../854_md)`;
@@ -90,7 +90,7 @@ async function startRuntime(root, options) {
   options.session ??= options.mode === 'local' ? 's8-local' : 's8-main';
   // tmux 서버를 종료하기 전에 검증해야 잘못된 입력으로 기존 세션을 잃지 않는다.
   if (!validSession(options.session)) throw new Error('잘못된 세션 이름입니다.');
-  managerArgs(root, options.args);
+  validatePiOptions(options.args);
   console.log(`S8 런타임 시작: ${options.session} (${options.mode} 모드)`);
   const result = await restartPiRuntime(root, { ...options, resetTmux: true }, { onProgress: line => console.log(`  - ${line}`) });
   console.log(`tmux 세션: ${result.session}`);
@@ -104,27 +104,27 @@ async function startRuntime(root, options) {
   console.log(`접속: tmux attach-session -t ${result.session}`);
 }
 
-/** start-pi.sh 사용자 실행. input은 사용자가 준 인자 그대로다. */
+/** s8.sh 런타임 시작. input은 사용자가 준 인자 그대로다. */
 export async function runUserCommand(root, input) {
   const options = parseOptions(input);
   const [first] = options.args;
   if (options.args.includes('--help') || options.args.includes('-h')) return console.log(HELP);
   if (first === '--sessions') return console.log((await listSessions()).join('\n') || '실행 중인 S8 세션이 없습니다.');
 
-  const foreground = isPackageCommand(first) || options.args.includes('--version') || options.args.includes('--print');
+  // 이 터미널에서 끝나는 명령은 tmux 런타임이 아니라 에이전트 실행기의 몫이다.
+  if (isPackageCommand(first) || options.args.includes('--version') || options.args.includes('--print')) {
+    throw usageError('패키지 명령·--version·--print는 ./start-pi.sh로 실행하세요.');
+  }
   const prompt = process.stdin.isTTY ? createPrompt() : null;
   try {
-    // 모드 미지정: 패키지 명령·버전 조회는 local, 그 외에는 터미널에서 선택받는다.
+    // 모드 미지정이면 터미널에서 선택받는다.
     if (!options.mode) {
-      if (isPackageCommand(first) || first === '--version') options.mode = 'local';
-      else if (!prompt) throw usageError('--mode project 또는 --mode local을 지정하세요.');
-      else options.mode = await chooseMode(prompt);
+      if (!prompt) throw usageError('--mode project 또는 --mode local을 지정하세요.');
+      options.mode = await chooseMode(prompt);
     }
     if (!['project', 'local'].includes(options.mode)) throw usageError('모드는 project 또는 local이어야 합니다.');
-    if (options.telegram === undefined && prompt && !foreground) options.telegram = await chooseTelegram(prompt);
+    if (options.telegram === undefined && prompt) options.telegram = await chooseTelegram(prompt);
   } finally { prompt?.close(); }
   options.cwd = await realpath(options.cwd);
-
-  if (foreground) process.exitCode = await runPi(root, { ...options, telegram: options.telegram ?? options.mode === 'project' });
-  else await startRuntime(root, options);
+  await startRuntime(root, options);
 }

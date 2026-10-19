@@ -1,97 +1,104 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { copyFile, mkdir, mkdtemp, realpath, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { MANAGER_TOOLS } from '../lib/manager/launch.mjs';
+import { MANAGER_TOOLS } from '../extensions/manager.ts';
 
-/** start-pi.sh와 Node 진입점(서비스·전경 실행에 필요한 모듈)을 임시 저장소에 복사한다. */
+/** 실행 스크립트(start-pi.sh, s8.sh)와 Node 진입점·프로필을 임시 저장소에 복사한다. */
 async function copyLauncher(dir) {
-  await copyFile(new URL('../../start-pi.sh', import.meta.url), path.join(dir, 'start-pi.sh'));
-  for (const file of ['bin/start.mjs', 'lib/runtime/foreground.mjs', 'lib/runtime/managed-sessions.mjs', 'lib/runtime/process.mjs', 'lib/manager/launch.mjs']) {
+  for (const file of ['start-pi.sh', 's8.sh', 'agents/general/profile.json', 'agents/manager/profile.json', 'agents/worker/profile.json']) {
+    await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
+    await copyFile(new URL(`../../${file}`, import.meta.url), path.join(dir, file));
+  }
+  for (const file of ['bin/agent.mjs', 'bin/s8.mjs', 'lib/agent/launch.mjs', 'lib/agent/profile.mjs']) {
     await mkdir(path.dirname(path.join(dir, 'pi', file)), { recursive: true });
     await copyFile(new URL(`../${file}`, import.meta.url), path.join(dir, 'pi', file));
   }
-  return path.join(dir, 'start-pi.sh');
+  await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
+  return { agent: path.join(dir, 'start-pi.sh'), s8: path.join(dir, 's8.sh') };
 }
 
-test('unified foreground service entrypoints preserve scheduler setup and supervisor diagnostic arguments', async t => {
+/** 받은 인자와 연결 설정을 JSON으로 출력하는 가짜 Pi. */
+const echoPi = dir => writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), `#!/usr/bin/env node
+console.log(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), url: process.env.PHCMS_API_URL ?? null }));
+`, { mode: 0o755 });
+
+test('s8 service entrypoints preserve scheduler setup and supervisor arguments; start-pi --service stays compatible', async t => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-service-entry-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const script = await copyLauncher(dir);
-  await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
+  const { agent, s8 } = await copyLauncher(dir);
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   const stub = "console.log(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),kb:process.env.S8_KB_ROOT,config:process.env.S8_PI_CONFIG_ROOT}));";
   for (const service of ['scheduler', 'supervisor']) await writeFile(path.join(dir, `pi/bin/${service}.mjs`), stub);
   const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: '.' }, cwd: dir };
-  const scheduler = JSON.parse(execFileSync('bash', [script, '--service', 'scheduler'], options));
+  const scheduler = JSON.parse(execFileSync('bash', [s8, 'service', 'scheduler'], options));
   assert.equal(scheduler.cwd, dir);
   assert.equal(scheduler.kb, dir);
   assert.equal(scheduler.config, path.join(dir, 'pi'));
   for (const flag of ['--help', '--check', '--once']) {
-    const result = JSON.parse(execFileSync('bash', [script, '--service', 'supervisor', flag], options));
-    assert.deepEqual(result.args, [flag]);
+    assert.deepEqual(JSON.parse(execFileSync('bash', [s8, 'service', 'supervisor', flag], options)).args, [flag]);
   }
-  for (const args of [['--service', 'unknown'], ['--service', 'scheduler', '--once']]) {
-    assert.throws(() => execFileSync('bash', [script, ...args], { ...options, stdio: 'pipe' }));
+  assert.deepEqual(JSON.parse(execFileSync('bash', [agent, '--service', 'supervisor', '--check'], options)).args, ['--check']);
+  for (const args of [['service', 'unknown'], ['service', 'scheduler', '--once']]) {
+    assert.throws(() => execFileSync('bash', [s8, ...args], { ...options, stdio: 'pipe' }));
   }
 });
 
-test('launcher exposes general and Projectman tools and passes inherited credentials without printing them', async t => {
-  const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-tool-launcher-')));
+test('manager mode exposes Projectman tools, works in the KB and passes credentials without printing them', async t => {
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-manager-launcher-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const script = await copyLauncher(dir);
-  await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
+  const { agent } = await copyLauncher(dir);
+  await echoPi(dir);
   const key = 'phcms_sk_' + 'A'.repeat(43);
-  await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), `#!/usr/bin/env node
-if (process.env.PHCMS_ACCESS_TOKEN !== ${JSON.stringify(key)} || process.env.PHCMS_API_URL !== 'http://127.0.0.1:8000/api/v2') process.exit(7);
-console.log(JSON.stringify(process.argv.slice(2)));
-`, { mode: 0o755 });
-  const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: dir, PHCMS_API_URL: 'http://127.0.0.1:8000/api/v2', PHCMS_ACCESS_TOKEN: key } };
-  await writeFile(path.join(dir, 'tmux'), '#!/bin/sh\nprintf s8-fixture\n', { mode: 0o755 });
-  options.env.PATH = `${dir}:${process.env.PATH}`;
-  const managed = (...args) => execFileSync('bash', [script, '--managed', '--mode', 'project', '--cwd', dir, ...args], options);
-  const output = managed('--telegram');
+  const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: dir, PHCMS_ACCESS_TOKEN: key } };
+  const output = execFileSync('bash', [agent, '--mode', 'manager', '--control', '--session-dir', path.join(dir, '.pi-runtime/managed/s8-main')], options);
   assert.equal(output.includes(key), false);
-  const args = JSON.parse(output);
-  const tools = args[args.indexOf('--tools') + 1].split(',');
-  assert.ok(tools.includes('projectman'));
-  assert.ok(tools.includes('scheduler'));
+  const { args, cwd } = JSON.parse(output);
+  assert.equal(cwd, dir);
+  assert.deepEqual(args[args.indexOf('--tools') + 1].split(','), MANAGER_TOOLS);
   assert.ok(args.includes(path.join(dir, 'pi/extensions/manager.ts')));
-  assert.deepEqual(tools, MANAGER_TOOLS);
-  assert.ok(args.includes('--no-extensions'));
-  assert.ok(args.includes('--no-context-files'));
   assert.ok(args.includes(path.join(dir, 'pi/extensions/managed-session.mjs')));
-  const standalone = JSON.parse(managed('--no-telegram'));
-  assert.ok(standalone.includes(path.join(dir, 'pi/extensions/managed-session.mjs')));
-  assert.throws(() => execFileSync('bash', [script, '--managed', '--mode', 'project', '--cwd', dir, '--no-telegram', '--tools', 'read'], { ...options, stdio: 'pipe' }));
-  assert.throws(() => execFileSync('bash', [script, '--managed', '--mode', 'project'], { ...options, stdio: 'pipe' }), /내부 실행 인자/);
+  assert.equal(args[args.indexOf('--session-dir') + 1], path.join(dir, '.pi-runtime/managed/s8-main'));
+  assert.throws(() => execFileSync('bash', [agent, '--mode', 'manager', '--tools', 'read'], { ...options, stdio: 'pipe' }), /Unsupported/);
+  assert.throws(() => execFileSync('bash', [agent, '--mode', 'manager', '--session-dir', '/tmp/elsewhere'], { ...options, stdio: 'pipe' }), /\.pi-runtime/);
+  assert.throws(() => execFileSync('bash', [agent, '--mode', 'rpc'], { ...options, stdio: 'pipe' }), /general, manager/);
 });
 
-test('launcher forwards user commands to the runtime controller and runs foreground commands directly', async t => {
-  const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-combined-launcher-')));
+test('general mode is the default, runs in the invocation directory and passes package commands to Pi', async t => {
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-general-launcher-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const script = await copyLauncher(dir);
-  await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
+  const { agent, s8 } = await copyLauncher(dir);
+  await echoPi(dir);
+  const work = path.join(dir, 'work');
+  await mkdir(work);
+  const options = { encoding: 'utf8', cwd: work, env: { ...process.env } };
+  const general = JSON.parse(execFileSync('bash', [agent, '--print'], options));
+  assert.equal(general.cwd, work);
+  assert.ok(general.args.includes(path.join(dir, 'pi/extensions/general.mjs')));
+  assert.equal(general.args[general.args.indexOf('--tools') + 1], 'read,bash,edit,write,grep,find,ls');
+  assert.ok(!general.args.some(arg => arg.endsWith('telegram.mjs') || arg.endsWith('managed-session.mjs')));
+  assert.deepEqual(JSON.parse(execFileSync('bash', [agent, 'list'], options)).args, ['list']);
+  assert.match(execFileSync('bash', [agent, '--help'], options), /--mode general\|manager\|worker/);
+  // 워커 모드는 실행 위치에서 작업하고, --uid가 있으면 작업 지시를 마지막 인자로 넣는다.
+  const worker = JSON.parse(execFileSync('bash', [agent, '--mode', 'worker', '--uid', 'task-1', '--print'], options));
+  assert.equal(worker.cwd, work);
+  assert.ok(worker.args.includes(path.join(dir, 'pi/extensions/worker.ts')));
+  assert.equal(worker.args.at(-1), 'uid task-1 의 업무를 수행해라.');
+  assert.throws(() => execFileSync('bash', [agent, '--uid', 'task-1'], { ...options, stdio: 'pipe' }), /worker 모드/);
+  // tmux 런타임 명령은 s8.sh로 넘어간다.
+  await mkdir(path.join(dir, 'pi/lib/runtime'), { recursive: true });
   await writeFile(path.join(dir, 'pi/lib/runtime/user-command.mjs'), 'export async function runUserCommand(_root, input) { console.log(JSON.stringify({ runtime: input })); }');
-  await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), '#!/usr/bin/env node\nconsole.log(JSON.stringify({pi:process.argv.slice(2)}));\n', { mode: 0o755 });
-  const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: dir } };
-  for (const input of [[], ['--mode', 'project', '--telegram', 'off', '--session', 'work'], ['--help']]) {
-    assert.deepEqual(JSON.parse(execFileSync('bash', [script, ...input], options)).runtime, input);
+  for (const input of [[], ['--mode', 'project', '--telegram', 'off', '--session', 'work']]) {
+    assert.deepEqual(JSON.parse(execFileSync('bash', [s8, ...input], options)).runtime, input);
   }
-  const foreground = args => JSON.parse(execFileSync('bash', [script, '--foreground', '--mode', 'local', '--cwd', dir, '--no-telegram', ...args], options));
-  assert.deepEqual(foreground(['list']).pi, ['list']);
-  const version = foreground(['--version']).pi;
-  assert.ok(version.includes('--version'));
-  assert.ok(!version.includes(path.join(dir, 'pi/extensions/managed-session.mjs')));
 });
 
-test('foreground Pi restarts with --continue on request, loads .env over inherited values and stops on SIGTERM', async t => {
+test('agent restarts with --continue on request, loads .env with shell syntax and stops on SIGTERM', async t => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-foreground-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const script = await copyLauncher(dir);
-  await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
+  const { agent } = await copyLauncher(dir);
   // 첫 실행은 /restart처럼 restart-<부모 PID> 파일을 남기고 종료하고, 다음 실행은 인자를 기록한다.
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), `#!/usr/bin/env node
 const fs = require('node:fs'), path = require('node:path');
@@ -103,14 +110,13 @@ else if (fs.readFileSync(runs, 'utf8').trim().split('\\n').length === 1) fs.writ
   // 셸 문법(변수 확장, export)을 그대로 지원해야 한다.
   await writeFile(path.join(dir, '.env'), 'BASE=http://127.0.0.1:8000\nexport PHCMS_API_URL="$BASE/api/v2"\n');
   const env = { ...process.env, S8_KB_ROOT: dir, PHCMS_API_URL: 'http://inherited.invalid' };
-  execFileSync('bash', [script, '--foreground', '--mode', 'local', '--cwd', dir, '--telegram', '--print'], { encoding: 'utf8', env });
+  execFileSync('bash', [agent, '--mode', 'manager', '--print'], { encoding: 'utf8', env });
   const runs = (await readFile(path.join(dir, 'runs'), 'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(runs.length, 2);
   assert.ok(!runs[0].args.includes('--continue'));
   assert.ok(runs[1].args.includes('--continue'));
   assert.ok(runs.every(run => run.url === 'http://127.0.0.1:8000/api/v2'));
-  const { spawn } = await import('node:child_process');
-  const child = spawn('bash', [script, '--foreground', '--mode', 'local', '--cwd', dir, '--no-telegram', '--print', '--model', 'fixture-wait'], { env, stdio: 'ignore' });
+  const child = spawn('bash', [agent, '--mode', 'manager', '--print', '--model', 'fixture-wait'], { env, stdio: 'ignore' });
   t.after(() => child.kill('SIGKILL'));
   for (let i = 0; i < 100 && (await readFile(path.join(dir, 'runs'), 'utf8')).trim().split('\n').length < 3; i++) await new Promise(resolve => setTimeout(resolve, 50));
   child.kill('SIGTERM');

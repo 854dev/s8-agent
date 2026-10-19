@@ -89,7 +89,7 @@ export async function ensureWorkerPool(root, { run = runTmux, ssh, entries = loa
     await mkdir(workerDirectory(root), { recursive: true, mode: 0o700 });
     for (const item of current.filter(item => !workerIds.includes(item.name))) await run(['kill-window', '-t', item.id]);
     for (const id of workerIds) {
-      const command = `exec bash ${quote(path.join(root, 'start-pi.sh'))} --service worker ${quote(id)}`;
+      const command = `exec bash ${quote(path.join(root, 's8.sh'))} service worker ${quote(id)}`;
       const window = await ensureWindow(run, root, session, id, command);
       await run(['set-option', '-w', '-t', window.id, '@s8-worker-id', id]);
     }

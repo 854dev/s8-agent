@@ -25,6 +25,7 @@ dev_854/
     ├── .pi-runtime/          # Pi 인증정보, 세션, 캐시
     ├── .s8-runtime/          # 로그와 업로드 등 로컬 상태
     ├── start-pi.sh
+    ├── s8.sh
     └── start-infra.sh
 ```
 
@@ -88,7 +89,7 @@ NGINX_BIND_IP=100.120.50.80 docker compose --env-file .env -f infra/nginx/docker
 
 - Pi 버전과 프로젝트 동작: `pi/`
 - Pi 장비별 런타임: `.pi-runtime/`
-- Pi 실행: `start-pi.sh`
+- Pi 실행: `s8.sh`
 - 통합 인프라 실행: `start-infra.sh`
 - tmux: 표준 `tmux` 명령
 - Compose: `infra/nginx/docker-compose.yml`
@@ -111,6 +112,7 @@ NGINX_BIND_IP=100.120.50.80 docker compose --env-file .env -f infra/nginx/docker
 test -f pi/settings.json
 test -f pi/package-lock.json
 bash -n start-pi.sh
+bash -n s8.sh
 bash -n start-infra.sh
 NGINX_BIND_IP=127.0.0.1 docker compose --env-file /dev/null -f infra/nginx/docker-compose.yml config --quiet
 ```

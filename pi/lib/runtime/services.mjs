@@ -59,7 +59,7 @@ export async function startPiServices(root, { session = 's8-main', scheduler = t
         await stopService(run, root, session, name);
       }
       log(`${name}: 시작`);
-      const result = await ensureWindow(run, root, session, name, `exec bash ${quote(path.join(root, 'start-pi.sh'))} --service ${name}`);
+      const result = await ensureWindow(run, root, session, name, `exec bash ${quote(path.join(root, 's8.sh'))} service ${name}`);
       // 잘못된 설정 등으로 즉시 종료되는 경우를 잡는다. 창은 남아 있어 오류 출력을 확인할 수 있다.
       await sleep(200);
       if ((await windows(run, session)).find(window => window.id === result.id)?.dead !== false) {

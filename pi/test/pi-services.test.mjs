@@ -16,7 +16,7 @@ async function fixture(t) {
   t.after(async () => { await run(['kill-server']).catch(() => {}); await rm(root, { recursive: true, force: true }); });
   // Each actual tmux service executes a harmless isolated stub, never real work.
   await writeFile(path.join(root, 's8-config.yml'), 'telegram: {}\nworker-entries:\n  worker-1:\n    agent: pi\n    host: local\n    launch: managed\n  worker-2:\n    agent: pi\n    host: local\n    launch: managed\n');
-  await writeFile(path.join(root, 'start-pi.sh'), `#!/bin/sh\ntest "$1" = --service || exit 2\nprintf '%s\\n' "$2" >> ${quote(path.join(root, 'starts'))}\nexec sleep 60\n`);
+  await writeFile(path.join(root, 's8.sh'), `#!/bin/sh\ntest "$1" = service || exit 2\nprintf '%s\\n' "$2" >> ${quote(path.join(root, 'starts'))}\nexec sleep 60\n`);
   await run(['new-session', '-d', '-s', 's8-main', '-n', 'shell', 'sleep 60']);
   await run(['set-option', '-t', 's8-main', '@s8-runtime-root', root]);
   return { root, run };

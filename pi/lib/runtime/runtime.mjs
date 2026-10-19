@@ -1,11 +1,12 @@
 // 매니저 런타임 시작: tmux 세션 <session>에 pi 창(매니저 Pi)과 공유 서비스 창을 띄운다.
-// 실행 설정은 세션 옵션에 기록해 /restart all(savedRuntimeOptions)과 Pi 창 내부(start-pi.sh --managed)가 읽는다.
+// 실행 설정은 세션 옵션에 기록해 /restart all(savedRuntimeOptions)과 세션 제어 확장(managed-session.mjs)이 읽는다.
 //   @s8-runtime-root 소유 저장소  @s8-managed 관리 세션 표시  @s8-mode project|local
 //   @s8-cwd 작업 디렉터리  @s8-telegram take|off  @s8-pi-args Pi 실행 인자(JSON)
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { telegramOwner } from '../telegram/status.mjs';
-import { managerArgs } from '../manager/launch.mjs';
+import { createHash } from 'node:crypto';
+import { validatePiOptions } from '../agent/launch.mjs';
 import { moveTelegram, validSession } from './managed-sessions.mjs';
 import { startPiServices } from './services.mjs';
 import { sleep } from './process.mjs';
@@ -32,7 +33,7 @@ export async function savedRuntimeOptions(session, { run = runTmux } = {}) {
 export async function startPiRuntime(root, { session = 's8-main', mode = 'project', cwd, args = [], telegram, scheduler = true, supervisor = true, run = runTmux, log = () => {} } = {}) {
   if (!validSession(session)) throw new Error('잘못된 세션 이름입니다.');
   if (!['project', 'local'].includes(mode)) throw new Error('Invalid mode');
-  managerArgs(root, args);
+  validatePiOptions(args);
   root = await realpath(root);
   cwd = await realpath(cwd ?? root);
   telegram ??= mode === 'project';
@@ -55,7 +56,11 @@ export async function startPiRuntime(root, { session = 's8-main', mode = 'projec
 
     const settings = { '@s8-telegram': telegram ? 'take' : 'off', '@s8-mode': mode, '@s8-cwd': cwd, '@s8-pi-args': JSON.stringify(args) };
     for (const [name, value] of Object.entries(settings)) await run(['set-option', '-t', session, name, value]);
-    const command = ['bash', path.join(root, 'start-pi.sh'), '--managed', '--mode', mode, '--cwd', cwd, telegram ? '--telegram' : '--no-telegram', ...args].map(quote).join(' ');
+    // 대화는 세션별(local 모드는 작업 디렉터리별)로 보관한다. Telegram은 세션 제어 확장(--control)이 @s8-telegram을 보고 맡는다.
+    const sessionDir = mode === 'local'
+      ? path.join(root, '.pi-runtime/local', session, createHash('sha256').update(cwd).digest('hex').slice(0, 16))
+      : path.join(root, '.pi-runtime/managed', session);
+    const command = ['bash', path.join(root, 'start-pi.sh'), '--mode', mode, '--cwd', cwd, '--control', '--session-dir', sessionDir, ...args].map(quote).join(' ');
     log(`Pi 시작 (${mode} 모드, ${cwd})`);
     await ensureWindow(run, root, session, 'pi', `exec ${command}`);
     await run(['select-window', '-t', `${session}:pi`]);

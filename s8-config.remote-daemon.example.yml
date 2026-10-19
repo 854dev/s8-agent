@@ -28,5 +28,5 @@ publicUrl: null
 
 # 중앙과 동일한 토큰을 이 checkout의 .s8-runtime/worker-auth/remote-claude-1.token에
 # 권한 600으로 배치한다. 토큰 값은 YAML이나 명령 인자에 넣지 않는다.
-# 수동 확인: bash start-pi.sh --service worker remote-claude-1
+# 수동 확인: bash s8.sh service worker remote-claude-1
 # 중앙이 이미 같은 daemon을 기동했다면 중복 실행하지 않는다.

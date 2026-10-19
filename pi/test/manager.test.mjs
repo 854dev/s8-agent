@@ -3,17 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, symlink, link, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { managerArgs } from '../lib/manager/launch.mjs';
 import { managerKb } from '../lib/manager/kb.mjs';
 import manager, { MANAGER_TOOLS, MANAGER_EXTENSION_TOOLS } from '../extensions/manager.ts';
 import { openManagerSession } from './helpers/manager-session.mjs';
-
-test('manager launch disables discovery and rejects permission/session/file injection', () => {
-  const args = managerArgs('/s8', ['--model', 'fixture', '--continue']);
-  for (const flag of ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-context-files']) assert.ok(args.includes(flag));
-  assert.deepEqual(args[args.indexOf('--tools') + 1].split(','), MANAGER_TOOLS);
-  for (const input of [['--tools', 'bash'], ['-e', 'evil.ts'], ['--session', 'old.jsonl'], ['@/tmp/file'], ['--model', '--extension'], ['--', 'prompt']]) assert.throws(() => managerArgs('/s8', input), /Unsupported/);
-});
 
 test('KB only reads Markdown inside root and rejects hidden, symlink, hardlink and traversal paths', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'manager-kb-'));

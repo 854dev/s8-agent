@@ -13,9 +13,9 @@
 ## 실행
 
 ```bash
-./start-pi.sh --session main
-./start-pi.sh --sessions
-./start-pi.sh --session main --telegram
+./s8.sh --session main
+./s8.sh --sessions
+./s8.sh --session main --telegram
 npm ci --prefix apps/terminal-gateway
 npm start --prefix apps/terminal-gateway
 npm ci --ignore-scripts --prefix frontend
@@ -27,7 +27,7 @@ NGINX_BIND_IP=100.120.50.80 docker compose --env-file .env -f infra/nginx/docker
 - 실행 명령은 `s8-agent` 루트 기준이다. Nginx IP는 실제 장비의 Tailscale IPv4로 바꾼다.
 - 브라우저 접속: `http://<Tailscale-IP>/s8/terminal`
 - Host 검증 때문에 현재는 Tailscale IP 또는 localhost URL을 사용한다. MagicDNS 이름은 지원하지 않는다.
-- `start-pi.sh --session 이름`은 해당 Pi와 공유 스케줄러·개발 감독을 재시작하고 창 목록만 출력한다. 기본은 `s8-main`이며 `pi`·`scheduler`·`supervisor`·`shell` 창을 가진다. 웹 터미널에서 이 세션을 선택하고 Ctrl+B, W로 창을 전환한다. `--sessions`는 이 관리 Pi 세션만 표시하며, 웹 터미널의 전체 호스트 세션 목록과 별개다.
+- `s8.sh --session 이름`은 해당 Pi와 공유 스케줄러·개발 감독을 재시작하고 창 목록만 출력한다. 기본은 `s8-main`이며 `pi`·`scheduler`·`supervisor`·`shell` 창을 가진다. 웹 터미널에서 이 세션을 선택하고 Ctrl+B, W로 창을 전환한다. `--sessions`는 이 관리 Pi 세션만 표시하며, 웹 터미널의 전체 호스트 세션 목록과 별개다.
 - 관리 세션별 대화 기록은 `.pi-runtime/managed/s8-이름/`으로 분리한다. 기존 기록은 자동 이관하지 않는다.
 - 기본 실행은 Telegram을 연결하고 마지막 실행 세션이 연결을 가져온다. `--telegram`은 기본 동작의 별칭이며 `--no-telegram`은 Telegram 확장 없이 단독 실행한다. 연결 확인은 로컬 제어 소켓을 사용한다. 토큰과 허용 채팅 설정이 기존대로 필요하다.
 - `목록 새로고침`으로 현재 실행 중인 호스트 tmux 세션을 조회한다. 웹 연결은 목록에 존재하는 정확한 세션 이름으로 접속한다. tmux 밖의 프로세스와 다른 사용자·별도 tmux 소켓의 세션은 이 목록에 표시하지 않는다.
@@ -61,6 +61,7 @@ node --test pi/test/managed-sessions.test.mjs pi/test/telegram-extension.test.mj
 npm run test:run --prefix frontend
 npm run build --prefix frontend
 bash -n start-pi.sh
+bash -n s8.sh
 NGINX_BIND_IP=127.0.0.1 docker compose --env-file /dev/null -f infra/nginx/docker-compose.yml config --quiet
 NGINX_BIND_IP=100.120.50.80 docker compose --env-file /dev/null -f infra/nginx/docker-compose.yml exec nginx nginx -t
 curl -fsS http://100.120.50.80/api/terminal/health

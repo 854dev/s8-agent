@@ -8,9 +8,9 @@ import { registerScheduler } from './scheduler.ts';
 import { managerKb } from '../lib/manager/kb.mjs';
 import { projectmanFromEnv } from '../lib/projectman/client.ts';
 import { hasReviewedPreflight } from '../lib/projectman/preflight.mjs';
-import { MANAGER_TOOLS } from '../lib/manager/launch.mjs';
+import { loadProfile } from '../lib/agent/profile.mjs';
 
-export { MANAGER_TOOLS };
+export const MANAGER_TOOLS: string[] = loadProfile('manager').tools;
 export const MANAGER_EXTENSION_TOOLS = ['projectman', 'kb', 'scheduler'];
 export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
   const libraries = new Map<string, ReturnType<typeof managerKb>>();

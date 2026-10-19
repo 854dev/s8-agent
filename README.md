@@ -6,30 +6,46 @@
 
 [크게 보기](docs/images/s8-runtime.png) · [SVG 원본](docs/images/s8-runtime.svg)
 
-## 관리·개발 역할 분리
+## 실행 진입점
 
-`./start-pi.sh`를 터미널에서 실행하면 `project` / `local` 모드를 선택한다. 자동화와 비대화형 실행은 `--mode`를 명시한다.
+`start-pi.sh`는 에이전트 하나를 이 터미널에서 실행하는 가벼운 실행기다. tmux·서비스·워커 풀은 다루지 않는다.
 
 ```bash
-./start-pi.sh --mode project              # 기존 Projectman 관리·개발 위임
-./start-pi.sh --mode local                # 현재 디렉터리에서 범용 작업·직접 개발
-./start-pi.sh --mode local --cwd /path/to/work
-./start-pi.sh --mode local --telegram take # 이 세션으로 Telegram 연결 이전
-./start-pi.sh --mode local --telegram off  # 이 세션 연결 비활성
+./start-pi.sh                              # 범용 에이전트(기본): 실행 위치에서 파일·셸·코드 수정
+./start-pi.sh --cwd /path/to/work
+./start-pi.sh --mode manager               # Projectman 매니저: KB 저장소에서 프로젝트·작업 생성·갱신
+./start-pi.sh --mode manager --telegram    # Telegram 연결
+./start-pi.sh --mode worker --uid <UID>   # Projectman 워커: 실행 위치 저장소에서 UID 작업 claim·수행·보고
+./start-pi.sh --print --model <모델>       # 비대화형 실행
 ```
 
-로컬 모드는 기본 `s8-local` 세션을 사용하고, KB·Projectman 설정과 프로젝트 서비스 없이 실행한다. 첫 비대화형 실행의 Telegram 연결은 꺼져 있다. 터미널 실행에서는 현재 연결 세션을 보여주고 **현재 연결 유지 / 여기로 가져오기**를 선택한다. 기본 선택은 현재 연결 유지이며, 명시적인 `--telegram take/off`가 있으면 선택을 생략한다. 실행할 때마다 모든 tmux 세션을 종료하고, 프로젝트 모드는 `s8-main` 세션과 서비스를 새로 만든다. 인증은 공유하지만 로컬 대화 이력은 세션·작업 디렉터리별로 분리한다. 로컬 실행도 기존 tmux 세션을 모두 종료하며, 프로젝트 서비스를 새로 시작하지 않는다. `--manager`는 `--mode project`의 별칭이다. `--help`, `--sessions`, `--service`와 패키지 관리 명령은 모드 선택을 생략한다.
+모드별 도구·확장·시스템 지침은 `agents/<모드>/profile.json`에 있다. 범용 모드는 `.env`를 읽지 않고, 매니저 모드는 `.env`를 읽어 Projectman 연결 설정을 사용한다. `/restart`로 종료하면 최근 대화로 다시 시작한다.
 
-아래 기존 운영 안내의 서비스·Telegram 기본 동작은 `project` 모드 기준이다. 모드를 직접 지정하려면 실행 예시에 `--mode project`를 추가한다.
+워커 모드는 task·subtask UID 하나를 직접 claim하고 결과를 보고한다. `--uid` 없이 실행하면 "uid xxx 의 업무를 수행해라"처럼 대화로 지시한다. claim·보고 요청은 `.s8-runtime/worker-claims/`와 `.s8-runtime/runs/<runId>/outbox.json`에 먼저 기록해 재시도해도 한 번만 반영되며, 보고 전달(매니저·Telegram)은 슈퍼바이저와 같은 outbox 경로를 쓴다. claim 전과 보고 후에는 파일·명령 도구를 막고, bash에는 토큰·비밀번호 환경변수를 넘기지 않는다. 승인(사람의 계획 확인)된 ready 작업만 claim한다.
 
-`./start-pi.sh --mode project`는 범용 매니저와 스케줄러·개발 슈퍼바이저를 함께 시작한다. 매니저는 일반 대화·파일·Bash 작업을 직접 처리하고, 개발 요청은 Projectman을 통해 별도 감독 프로세스와 상시 개발 워커에 위임한다.
+tmux 런타임(매니저 창·스케줄러·개발 슈퍼바이저·워커 세션)은 `s8.sh`가 담당한다. 터미널에서 실행하면 `project` / `local` 모드를 선택하고, 자동화와 비대화형 실행은 `--mode`를 명시한다. 각 Pi 창은 내부에서 `start-pi.sh`를 실행한다.
+
+```bash
+./s8.sh --mode project              # Projectman 관리·개발 위임
+./s8.sh --mode local                # 현재 디렉터리에서 범용 작업·직접 개발
+./s8.sh --mode local --cwd /path/to/work
+./s8.sh --mode local --telegram take # 이 세션으로 Telegram 연결 이전
+./s8.sh --mode local --telegram off  # 이 세션 연결 비활성
+./s8.sh service scheduler            # 서비스 단독 실행(scheduler·supervisor·worker <workerId>)
+```
+
+로컬 모드는 기본 `s8-local` 세션을 사용하고, KB·Projectman 설정과 프로젝트 서비스 없이 실행한다. 첫 비대화형 실행의 Telegram 연결은 꺼져 있다. 터미널 실행에서는 현재 연결 세션을 보여주고 **현재 연결 유지 / 여기로 가져오기**를 선택한다. 기본 선택은 현재 연결 유지이며, 명시적인 `--telegram take/off`가 있으면 선택을 생략한다. 실행할 때마다 모든 tmux 세션을 종료하고, 프로젝트 모드는 `s8-main` 세션과 서비스를 새로 만든다. 인증은 공유하지만 로컬 대화 이력은 세션·작업 디렉터리별로 분리한다. `--manager`는 `--mode project`의 별칭이다. `--help`, `--sessions`, `service`는 모드 선택을 생략한다. 패키지 관리 명령·`--version`·`--print`는 `start-pi.sh`로 실행한다. 이전 `start-pi.sh --service` 호출은 원격 워커 호환을 위해 계속 동작한다.
+
+아래 기존 운영 안내의 서비스·Telegram 기본 동작은 `project` 모드 기준이다.
+
+`./s8.sh --mode project`는 범용 매니저와 스케줄러·개발 슈퍼바이저를 함께 시작한다. 매니저는 일반 대화·파일·Bash 작업을 직접 처리하고, 개발 요청은 Projectman을 통해 별도 감독 프로세스와 상시 개발 워커에 위임한다.
 
 - 매니저: 일반 대화·질문·글쓰기·문서 편집·파일 검색·로그 조회·일반 Bash 작업과 개발 위임·결과 검토. 요청 목적에 따라 처리 경로를 선택하므로 별도 모드 전환은 필요 없다.
 - 매니저 도구: `projectman`, `kb`, `scheduler`, `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`. TUI와 Telegram 매니저 세션에 동일하게 적용한다. 개발 목적의 코드 조사·수정·빌드·테스트는 Projectman에 위임한다. 범용 Bash 권한을 제공하므로 이 구분은 시스템 지침에 따른 동작 규칙이며 실행 격리 경계가 아니다.
 - KB: Markdown 검색·조회와 정책 확인, 버전 충돌 검사를 거친 문서 쓰기·삭제. 변경은 대화형 확인이 필요하다.
 - Scheduler: Projectman 예약만 관리한다. 임의 셸 예약은 관리 도구에서 변경할 수 없다.
 - 착수 전: `todo`를 **일 시작 전**으로 표시한다. 매니저가 원문·코드·지침·요구 충돌·누락·허용 범위·검증 계획을 검토하고 작은 의문도 사용자에게 확인한다. 확정 내용을 `delegate`한 뒤 `preflight_review`로 work의 `s8Preflight`에 기록한다. S8 콘솔과 슈퍼바이저는 이 기록이 현재 작업·spec과 일치해야 승인·실행을 허용한다. 내용이나 spec이 변경되면 재검토한다. 기존 승인 작업도 검토 기록이 없으면 실행되지 않는다.
-- 개발: `start-pi`가 `s8-config.yml`의 `worker-entries` 중 로컬 관리 워커(Pi·Claude Code)를 전용 tmux 세션에 준비한다. 각 항목의 키가 worker ID이며 등록 항목 수가 슬롯 수다. s8 화면에서 승인된 ready work를 UID로 배정하고 작업별 독립 git worktree에서 실행한다.
+- 개발: `s8.sh`가 `s8-config.yml`의 `worker-entries` 중 로컬 관리 워커(Pi·Claude Code)를 전용 tmux 세션에 준비한다. 각 항목의 키가 worker ID이며 등록 항목 수가 슬롯 수다. s8 화면에서 승인된 ready work를 UID로 배정하고 작업별 독립 git worktree에서 실행한다.
 - 개발 중 판단: 최종 승인된 작업의 구현 선택과 일반 테스트 실패는 워커가 스스로 해결한다. work당 토큰·시간·명령·실행 횟수 예산은 없다. 실제 실패·취소는 결과와 기록을 보존한다.
 - 완료: 워커가 결과를 보고하면 review로 저장하고 매니저에게 보고를 전달한다. 사용자는 Telegram으로 요약과 work 링크를 받는다. 매니저 검토 후 사용자가 화면에서 선택적으로 검토의견을 적고 완료를 제출한다. 원본은 done으로 확정되며 매니저가 의견을 보고 추가 조치 없음·새 work 작성·질문을 판단한다. 새 work는 별도 실행 승인을 받는다.
 - 기록: `.s8-runtime/runs/<run-id>/`의 전달 프롬프트·공개 응답·도구 이벤트·결과·검증·패치와 Projectman 작업 이력을 연결한다. 모델 내부 추론과 인증정보는 기록 대상이 아니다.
@@ -53,15 +69,15 @@ dev_854/
 
 - 재사용 Pi 설정과 npm 패키지: `pi/`
 - Pi 장비별 런타임: `.pi-runtime/`
-- 관리 에이전트 실행 진입점: `start-pi.sh`
-- 개발 감독 실행 진입점: `start-pi.sh --service supervisor`
+- 관리 에이전트 실행 진입점: `s8.sh`
+- 개발 감독 실행 진입점: `s8.sh service supervisor`
 - 역할 지침·워커 설정: `agents/manager/`, `agents/developer/`
 - 비공개 로컬 상태: `.s8-runtime/`
 - 비인증 Telegram ID·알림 대상 설정: `s8-config.yml` (예시: `s8-config.example.yml`)
 - 웹 콘솔·업로드·xterm.js 터미널: `frontend/`
 - 호스트 PTY·tmux 웹 터미널 게이트웨이: `apps/terminal-gateway/`
 - Telegram 명령·알림: `apps/telegram-gateway/`
-- 예약 작업 실행 진입점: `start-pi.sh --service scheduler`
+- 예약 작업 실행 진입점: `s8.sh service scheduler`
 - 예약 CRUD·실행·배치 제어: `pi/extensions/scheduler.ts`, `pi/lib/scheduler/`
 - 지식베이스·업로드 API: `apps/kb-browser/`
 - MCP 허브: `apps/mcp-hub/`
@@ -94,16 +110,16 @@ pi/
 
 | 찾으려는 기능 | 구현 위치 | 실행·연결 진입점 |
 | --- | --- | --- |
-| 승인된 UID 조회·claim·보고 outbox·복구 | [development/supervisor.mjs](pi/lib/development/supervisor.mjs) | `start-pi.sh --service supervisor` → `pi/bin/supervisor.mjs` |
+| 승인된 UID 조회·claim·보고 outbox·복구 | [development/supervisor.mjs](pi/lib/development/supervisor.mjs) | `s8.sh service supervisor` → `pi/bin/supervisor.mjs` |
 | 워커 항목·tmux 창·로컬 소켓 통신 | [development/worker-pool.mjs](pi/lib/development/worker-pool.mjs) | 런타임 서비스 기동·supervisor |
-| 상시 워커의 배정·상태·반환 | [development/worker-daemon.mjs](pi/lib/development/worker-daemon.mjs) | `start-pi.sh --service worker <workerId>` → `pi/bin/developer.mjs` |
+| 상시 워커의 배정·상태·반환 | [development/worker-daemon.mjs](pi/lib/development/worker-daemon.mjs) | `s8.sh service worker <workerId>` → `pi/bin/developer.mjs` |
 | UID별 새 Pi 대화·get/report 도구 | [development/worker-session.mjs](pi/lib/development/worker-session.mjs) | worker-daemon |
 | worktree·변경 파일·패치·선행 결과 반영 | [development/workspace.mjs](pi/lib/development/workspace.mjs) | supervisor |
 | 완료보고·사용자 검토의견 수신 | [manager/inbox.mjs](pi/lib/manager/inbox.mjs), [manager 확장](pi/extensions/manager.ts) | 매니저 시작·기존 polling |
 | Projectman API·콘솔 | [projectman/client.ts](pi/lib/projectman/client.ts), [projectman/console.mjs](pi/lib/projectman/console.mjs) | `pi/extensions/projectman.ts`, `pi/bin/projectman-console.mjs` |
-| Pi 세션·서비스 시작·재시작 | [runtime/](pi/lib/runtime/) | `start-pi.sh` → `pi/bin/start.mjs` |
+| Pi 세션·서비스 시작·재시작 | [runtime/](pi/lib/runtime/) | `s8.sh` → `pi/bin/s8.mjs` |
 | 설정·알림 | [config/s8-config.mjs](pi/lib/config/s8-config.mjs), [telegram/notify.mjs](pi/lib/telegram/notify.mjs) | `pi/bin/s8-config.mjs`, 보고 outbox |
-| 예약 실행 | [scheduler/](pi/lib/scheduler/) | `start-pi.sh --service scheduler`, `pi/extensions/scheduler.ts` |
+| 예약 실행 | [scheduler/](pi/lib/scheduler/) | `s8.sh service scheduler`, `pi/extensions/scheduler.ts` |
 
 개발 흐름을 따라 읽을 때는 `supervisor → worker-pool → worker-daemon → worker-session` 순서로 본다. 결과는 supervisor의 outbox에서 Projectman API, manager/inbox, telegram/notify로 전달된다. 워커 반환과 사람의 최종 완료는 별도 단계다.
 
@@ -140,22 +156,22 @@ bash pi/bin/test-projectman-worker-pool.sh ../ph-cms
 ```bash
 cd /path/to/s8-agent
 npm ci --ignore-scripts --prefix pi
-./start-pi.sh
+./s8.sh
 tmux attach-session -t s8-main
 ```
 
-`start-pi.sh`는 백그라운드 실행 후 세션과 창 목록만 출력한다. Pi 창이 열리면 `/login`으로 이 장비의 모델 인증을 설정한다. 인증정보와 세션은 `.pi-runtime/`에 저장되며 Git과 에이전트 도구의 접근 대상에서 제외한다. 공유 설정의 원본은 `pi/settings.json`이며 런타임에서 이 파일을 링크로 참조한다. 관리 세션의 provider/model은 `pi/settings.json`을 기준으로 하며 Pi에서 변경할 수 있다. 개발 CLI는 현재 기존 홈 Pi 인증(`~/.pi/agent/auth.json`)을 사용한다. 관리 세션과 개발 인증 경로는 다르므로 개발 실행 전 두 환경의 인증을 확인한다. 인증 파일을 자동 복사하거나 링크하지 않는다.
+`s8.sh`는 백그라운드 실행 후 세션과 창 목록만 출력한다. Pi 창이 열리면 `/login`으로 이 장비의 모델 인증을 설정한다. 인증정보와 세션은 `.pi-runtime/`에 저장되며 Git과 에이전트 도구의 접근 대상에서 제외한다. 공유 설정의 원본은 `pi/settings.json`이며 런타임에서 이 파일을 링크로 참조한다. 관리 세션의 provider/model은 `pi/settings.json`을 기준으로 하며 Pi에서 변경할 수 있다. 개발 CLI는 현재 기존 홈 Pi 인증(`~/.pi/agent/auth.json`)을 사용한다. 관리 세션과 개발 인증 경로는 다르므로 개발 실행 전 두 환경의 인증을 확인한다. 인증 파일을 자동 복사하거나 링크하지 않는다.
 
 이후 실행:
 
 ```bash
-./start-pi.sh
-./start-pi.sh --continue
-./start-pi.sh --no-telegram           # Telegram 없이 단독 실행
-./start-pi.sh --session work          # 모든 세션 종료 후 work 세션 시작
-./start-pi.sh --no-scheduler           # 스케줄러 자동 시작 제외
-./start-pi.sh --no-supervisor          # 개발 슈퍼바이저 자동 시작 제외
-./start-pi.sh --no-scheduler --no-supervisor  # 매니저만 실행
+./s8.sh
+./s8.sh --continue
+./s8.sh --no-telegram           # Telegram 없이 단독 실행
+./s8.sh --session work          # 모든 세션 종료 후 work 세션 시작
+./s8.sh --no-scheduler           # 스케줄러 자동 시작 제외
+./s8.sh --no-supervisor          # 개발 슈퍼바이저 자동 시작 제외
+./s8.sh --no-scheduler --no-supervisor  # 매니저만 실행
 ```
 
 Pi와 서비스는 기본 `s8-main` 세션의 `pi`·`scheduler`·`supervisor` 창에 유지된다. `shell` 창에서 호스트 명령을 실행한다. 스크립트는 자동 접속하지 않으며 웹 터미널에서 세션을 선택하거나 `tmux attach-session -t s8-main`으로 접속한다. PH-CMS는 별도로 실행한다.
@@ -180,17 +196,17 @@ PHCMS_API_URL=http://127.0.0.1:8000/api/v2
 
 | 스크립트 | 역할 | 실행 예 |
 | --- | --- | --- |
-| `start-pi.sh` | 모든 tmux 세션 종료 후 선택한 모드로 시작 | `./start-pi.sh --session manager` |
+| `s8.sh` | 모든 tmux 세션 종료 후 선택한 모드로 시작 | `./s8.sh --session manager` |
 | `start-infra.sh` | 기존 `s8-infra` 창과 Nginx·KB Browser 컨테이너를 교체하고 frontend·콘솔 API·터미널 게이트웨이를 재시작 (PHCMS 명령은 선택 설정) | `./start-infra.sh` |
-| `start-pi.sh --service supervisor` | 통합 실행에서 사용하는 개발 감독 진입점. 단독 실행·진단도 지원 | `./start-pi.sh --service supervisor` |
-| `start-pi.sh --service scheduler` | 통합 실행에서 사용하는 예약 데몬 진입점. 단독 실행도 지원 | `./start-pi.sh --service scheduler` |
+| `s8.sh service supervisor` | 통합 실행에서 사용하는 개발 감독 진입점. 단독 실행·진단도 지원 | `./s8.sh service supervisor` |
+| `s8.sh service scheduler` | 통합 실행에서 사용하는 예약 데몬 진입점. 단독 실행도 지원 | `./s8.sh service scheduler` |
 
-- `start-pi.sh`로 런타임을 시작하면 현재 tmux 서버의 모든 세션을 `kill-server`로 종료한 뒤 선택한 세션을 새로 만든다. 다른 S8 세션, 워커, 인프라, 개인 tmux 세션도 종료된다. 기존 tmux 안에서 호출해도 분리된 제어 프로세스가 재시작을 완료한다. `--session 이름`으로 새 세션을 선택하며 자동 접속 없이 창 목록을 출력한다. 기존 창에 저장된 실행 옵션은 초기화되므로 필요한 옵션을 다시 지정한다. 대화 파일은 디스크에 남으며 `--continue`로 이어갈 수 있다. `--sessions`는 조회만 한다. `--service`, 도움말, 버전 조회, 패키지 관리 명령은 전체 세션 종료를 수행하지 않는다.
+- `s8.sh`로 런타임을 시작하면 현재 tmux 서버의 모든 세션을 `kill-server`로 종료한 뒤 선택한 세션을 새로 만든다. 다른 S8 세션, 워커, 인프라, 개인 tmux 세션도 종료된다. 기존 tmux 안에서 호출해도 분리된 제어 프로세스가 재시작을 완료한다. `--session 이름`으로 새 세션을 선택하며 자동 접속 없이 창 목록을 출력한다. 기존 창에 저장된 실행 옵션은 초기화되므로 필요한 옵션을 다시 지정한다. 대화 파일은 디스크에 남으며 `--continue`로 이어갈 수 있다. `--sessions`는 조회만 한다. `--service`, 도움말, 버전 조회, 패키지 관리 명령은 전체 세션 종료를 수행하지 않는다.
 - 감독 `--check`는 연결·API 기능을 확인한다. `--once`는 승인된 작업을 **실제 실행할 수 있는** 1회 감독 주기다. 인자 없이 실행하면 계속 대기한다.
 - 기본 실행은 `s8-main` 세션에 `shell`·`pi`·`scheduler`·`supervisor` 창을 준비한다. `--session manager`를 지정하면 `s8-manager`를 사용한다. tmux 밖에서 살아 있는 서비스는 중복 실행하지 않는다. 재시작 시 종료된 PID의 남은 서비스 잠금만 정리하며 살아 있는 프로세스의 잠금은 보존한다. 인프라 세션이 필요하면 `./start-infra.sh`로 다시 시작한다.
 - `--no-scheduler`, `--no-supervisor`는 해당 호출의 자동 시작만 제외한다. 이미 실행 중인 공유 서비스를 종료하지 않는다. 옵션은 `--session manager`와 함께 사용할 수 있다. 제외한 공유 서비스는 재시작하지 않는다.
 - 도움말·버전·세션 목록·패키지 관리 명령과 일회성 `--print` 실행은 서비스를 시작하지 않는다. 서비스 시작에 실패하면 오류를 표시하며, 해당 제외 옵션으로 매니저를 따로 실행할 수 있다.
-- 재시작 제어는 터미널과 분리된 프로세스에서 끝까지 수행한다. 현재 Pi에서 start-pi를 호출해 호출자가 종료되어도 새 Pi와 Telegram 연결을 올린다. 실행 결과는 `.s8-runtime/runtime-restarts/`에 저장한다.
+- 재시작 제어는 터미널과 분리된 프로세스에서 끝까지 수행한다. 현재 Pi에서 s8.sh를 호출해 호출자가 종료되어도 새 Pi와 Telegram 연결을 올린다. 실행 결과는 `.s8-runtime/runtime-restarts/`에 저장한다.
 - 이전 방식의 Pi 세션이 같은 이름을 사용 중이면 다른 `--session 이름`으로 시작한다. 기존 Pi를 자동 종료하거나 대화 기록을 이관하지 않는다.
 - 자동 시작한 서비스를 종료하려면 `tmux attach -t s8-main`으로 접속하고 `Ctrl+B`, `W`로 `scheduler` 또는 `supervisor` 창을 선택한 뒤 `Ctrl+C`를 누른다. 종료된 창은 로그 확인을 위해 남으며 다음 시작 시 재사용한다. 강제 종료 후 잠금이 남으면 실제 프로세스 종료를 확인한 뒤 정리한다.
 - 개발 에이전트를 직접 상시 띄우지 않는다. 감독이 작업마다 CLI를 실행하고 종료한다. 기본 전체·저장소별 병렬 한도는 각각 2다.
@@ -202,10 +218,10 @@ PH-CMS 서버와 DB를 먼저 실행한다. 신규 채널은 PH-CMS 루트에서
 
 ```bash
 # S8 루트: 연결 확인
-./start-pi.sh --service supervisor --check
+./s8.sh service supervisor --check
 
 # 매니저와 두 서비스 통합 시작
-./start-pi.sh --session manager
+./s8.sh --session manager
 
 # start-infra.sh를 사용하지 않는 경우 콘솔 API를 별도 터미널에서 유지
 node pi/bin/projectman-console.mjs
@@ -234,8 +250,8 @@ npm --prefix frontend run preview -- --host 127.0.0.1 --port 4178 --strictPort
 
 - `/s8/terminal`은 기본으로 호스트 셸에 접속한다. 세션 선택에서 같은 호스트 사용자·tmux 서버의 PHCMS, S8 스케줄러·개발 감독, Pi 등 모든 실행 세션을 제어한다. Pi 관리 표시가 없어도 접속할 수 있으며, tmux 밖의 서비스는 호스트 셸에서 운영 명령으로 제어한다.
 - `./start-infra.sh`는 저장소 루트 `.env`를 Compose에 명시 전달하고, 실행할 때마다 기존 `s8-infra` 창 전체(PHCMS 포함)와 Nginx·KB Browser 컨테이너를 교체한 뒤 frontend·Projectman 콘솔 API·터미널 게이트웨이를 재시작한다. 사전에 `pi`, `frontend`, `apps/terminal-gateway`의 npm 의존성을 설치한다. PHCMS 실행은 선택 사항이며 `.env`의 `PHCMS_START_COMMAND`에 명령을 지정하면 새 `phcms` 창에서 실행한다. 기본값은 미설정으로, PHCMS 창은 비워 둔다. 실행 중인 창의 프로세스는 종료되므로 필요한 작업은 먼저 저장한다. 웹 터미널 세션 목록에서 `s8-infra`를 선택해 접속한다. `NGINX_BIND_IP`가 셸 환경변수나 `.env`에 없으면 localhost(`127.0.0.1`)에만 바인딩한다.
-- `./start-pi.sh --sessions`로 목록, `./start-pi.sh --session main`으로 생성·재시작한 뒤 창 목록을 출력한다. 접속은 웹 터미널이나 `tmux attach -t s8-main`을 사용한다.
-- `./start-pi.sh --mode project --session main --telegram take`는 모든 tmux 세션을 종료한 뒤 Pi와 공유 서비스를 새로 시작하고 Telegram을 연결한다. `--telegram`은 `--telegram take`, `--no-telegram`은 `--telegram off`의 호환 별칭이다. 연결을 끈 세션에서도 TUI의 `/telegram`으로 나중에 연결할 수 있다.
+- `./s8.sh --sessions`로 목록, `./s8.sh --session main`으로 생성·재시작한 뒤 창 목록을 출력한다. 접속은 웹 터미널이나 `tmux attach -t s8-main`을 사용한다.
+- `./s8.sh --mode project --session main --telegram take`는 모든 tmux 세션을 종료한 뒤 Pi와 공유 서비스를 새로 시작하고 Telegram을 연결한다. `--telegram`은 `--telegram take`, `--no-telegram`은 `--telegram off`의 호환 별칭이다. 연결을 끈 세션에서도 TUI의 `/telegram`으로 나중에 연결할 수 있다.
 - backend 설치·실행, Tailscale 전용 노출 및 복구는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.
 - 별도 웹 인증은 없으므로 Tailscale IP와 ACL을 접근 권한 경계로 유지한다. 셸은 호스트 사용자 권한으로 실행되며 Pi의 파일 보호 확장은 직접 터미널 입력을 제한하지 않는다.
 - 글자 크기·전체화면·모바일 붙여넣기를 지원한다. Nerd Font 아이콘은 웹폰트로 제공하고 한글·다른 언어는 클라이언트의 시스템 폰트로 대체한다.
@@ -266,14 +282,14 @@ telegram:
 ```bash
 cd /path/to/s8-agent
 chmod 600 .env
-./start-pi.sh --mode project --telegram take
+./s8.sh --mode project --telegram take
 ```
 
-`./start-pi.sh --help`로 실행 방법을 확인할 수 있다. 터미널 실행 시 현재 Telegram 연결 세션을 표시하고 **현재 연결 유지 / 여기로 가져오기**를 선택한다. `--telegram take`는 이 세션으로 연결을 이전하고, `--telegram off`는 이 세션의 연결을 비활성화한다. 기존 `--telegram`과 `--no-telegram`도 각각의 별칭으로 지원한다. 비대화형 실행에서 연결 옵션을 생략하면 project는 연결 활성, local은 비활성이다. 모든 세션 종료 시 다른 세션의 Telegram 연결도 종료된다. 토큰과 허용 채팅 설정이 필요하다.
+`./s8.sh --help`로 실행 방법을 확인할 수 있다. 터미널 실행 시 현재 Telegram 연결 세션을 표시하고 **현재 연결 유지 / 여기로 가져오기**를 선택한다. `--telegram take`는 이 세션으로 연결을 이전하고, `--telegram off`는 이 세션의 연결을 비활성화한다. 기존 `--telegram`과 `--no-telegram`도 각각의 별칭으로 지원한다. 비대화형 실행에서 연결 옵션을 생략하면 project는 연결 활성, local은 비활성이다. 모든 세션 종료 시 다른 세션의 Telegram 연결도 종료된다. 토큰과 허용 채팅 설정이 필요하다.
 
 TUI에서 `/telegram`은 연결 상태와 선택 메뉴를 표시하며, `/telegram take`로 가져오고 `/telegram off`로 해제한다. 연결을 가져오는 순서는 프로세스 실행 시각이 아니라 명시적인 take 실행 시점을 따른다. off는 해당 세션만 비활성화하고, 대기 중인 다른 세션이 있으면 그 세션으로 연결이 돌아간다. 결과에 실제 연결 세션을 표시하며 설정은 Pi 재시작과 전체 재시작에도 유지한다. 연결이 꺼진 세션은 polling 소유권 경쟁에 참여하지 않는다.
 
-첫 번째로 메시지를 보낸 허용 채팅에만 해당 터미널을 연결하며, 다른 채팅은 응답하지 않는다. 터미널과 연결된 Telegram 채팅은 같은 대화와 도구 진행을 공유한다. 텔레그램 키보드에서 상태, 중단, 배치, 새 대화, 모델 선택, 재시작, 도움말을 사용할 수 있으며 `/help`, `/status`, `/abort`, `/new`, `/model`, `/restart`, `/restart all`, `/jobs` 명령도 지원한다. `/jobs`는 모델 호출 없이 예약 목록·정지·재개·실행 중인 배치 중단을 처리한다. `/status`는 현재 세션의 입력·출력·캐시 토큰 누계를 표시한다. Telegram `/restart`는 동일한 실행 옵션으로 Pi만 다시 열고 현재 대화와 Telegram 연결을 이어간다. `/restart all` 또는 키보드의 `전체 재시작`은 모델 호출 없이 별도 제어 프로세스를 시작해 공유 작업 실행기를 정상 종료하고, `start-infra.sh` 실행과 인프라 준비 확인 후 요청한 세션의 Pi·스케줄러·슈퍼바이저를 재시작한다. 저장된 Telegram 연결 설정으로 복구하고 성공·실패 결과를 요청한 채팅·토픽으로 보낸다. local 모드의 전체 재시작은 프로젝트 인프라를 건드리지 않는다. 모델 작업 중에는 먼저 `/abort`로 중단한다. 중복 전체 재시작은 차단하고, 실패 단계와 실행 결과는 `.s8-runtime/runtime-restarts/`에 보관한다. `start-pi.sh` 재실행은 모든 tmux 세션을 종료하고 선택한 모드의 런타임을 새로 시작한다. 기존 독립 Telegram 세션은 자동 이관하지 않는다. 오프라인 중 전송된 메시지는 재연결 시 재실행하지 않고 건너뛴다. 다른 장비에서 같은 봇 토큰으로 polling하지 않는다. Telegram 요청 중 Pi 확인 대화상자가 열리면 중단을 요청한다. 터미널에서 추가 확인이 필요한 작업은 직접 처리한다. 민감한 결과를 다루는 작업은 Telegram으로 요청하지 않는다. 정규식 기반 redaction은 완전한 유출 방지책이 아니다.
+첫 번째로 메시지를 보낸 허용 채팅에만 해당 터미널을 연결하며, 다른 채팅은 응답하지 않는다. 터미널과 연결된 Telegram 채팅은 같은 대화와 도구 진행을 공유한다. 텔레그램 키보드에서 상태, 중단, 배치, 새 대화, 모델 선택, 재시작, 도움말을 사용할 수 있으며 `/help`, `/status`, `/abort`, `/new`, `/model`, `/restart`, `/restart all`, `/jobs` 명령도 지원한다. `/jobs`는 모델 호출 없이 예약 목록·정지·재개·실행 중인 배치 중단을 처리한다. `/status`는 현재 세션의 입력·출력·캐시 토큰 누계를 표시한다. Telegram `/restart`는 동일한 실행 옵션으로 Pi만 다시 열고 현재 대화와 Telegram 연결을 이어간다. `/restart all` 또는 키보드의 `전체 재시작`은 모델 호출 없이 별도 제어 프로세스를 시작해 공유 작업 실행기를 정상 종료하고, `start-infra.sh` 실행과 인프라 준비 확인 후 요청한 세션의 Pi·스케줄러·슈퍼바이저를 재시작한다. 저장된 Telegram 연결 설정으로 복구하고 성공·실패 결과를 요청한 채팅·토픽으로 보낸다. local 모드의 전체 재시작은 프로젝트 인프라를 건드리지 않는다. 모델 작업 중에는 먼저 `/abort`로 중단한다. 중복 전체 재시작은 차단하고, 실패 단계와 실행 결과는 `.s8-runtime/runtime-restarts/`에 보관한다. `s8.sh` 재실행은 모든 tmux 세션을 종료하고 선택한 모드의 런타임을 새로 시작한다. 기존 독립 Telegram 세션은 자동 이관하지 않는다. 오프라인 중 전송된 메시지는 재연결 시 재실행하지 않고 건너뛴다. 다른 장비에서 같은 봇 토큰으로 polling하지 않는다. Telegram 요청 중 Pi 확인 대화상자가 열리면 중단을 요청한다. 터미널에서 추가 확인이 필요한 작업은 직접 처리한다. 민감한 결과를 다루는 작업은 Telegram으로 요청하지 않는다. 정규식 기반 redaction은 완전한 유출 방지책이 아니다.
 
 검증: `node --test apps/telegram-gateway/gateway.test.mjs`
 
@@ -284,7 +300,7 @@ git clone <knowledge-base-url> 854_md
 git clone <s8-agent-url> s8-agent
 cd s8-agent
 npm ci --ignore-scripts --prefix pi
-./start-pi.sh
+./s8.sh
 ```
 
 - Pi `1.3.0`을 사용하며, `pi/package-lock.json`으로 동일한 Pi 버전과 npm 의존성을 설치한다. Node.js `22.19.0` 이상이 필요하다.
@@ -323,10 +339,10 @@ Pi 1.3.0에도 내장 MCP가 있지만 `pi-mcp-extension@1.5.0`의 설치와 패
 
 관리 대화의 `scheduler` 도구는 Projectman 예약을 관리하고 별도 Node 데몬이 실행한다. 기존 셸 잡의 실행 기능은 보존하지만 관리 에이전트가 셸 잡을 생성·수정·삭제하지는 못한다.
 
-기본 `./start-pi.sh` 실행에 포함된다. 매니저 없이 예약 데몬만 운영할 때는 다음을 사용한다.
+기본 `./s8.sh` 실행에 포함된다. 매니저 없이 예약 데몬만 운영할 때는 다음을 사용한다.
 
 ```bash
-./start-pi.sh --service scheduler
+./s8.sh service scheduler
 ```
 
 - 매일 `HH:mm` 또는 1~60분 중 60을 나누는 주기를 지원한다. 30분 예약은 매시 :00·:30에 검사한다.
@@ -343,8 +359,8 @@ Pi 1.3.0에도 내장 MCP가 있지만 `pi-mcp-extension@1.5.0`의 설치와 패
 - S8이 비관리자 agent 서비스 키를 `PHCMS_ACCESS_TOKEN`에 보관한다. 변수 이름은 기존 호환성을 유지하지만 MCP 호출에는 JWT가 아닌 서비스 키가 필요하다.
 - Projectman 도구는 `PHCMS_API_URL`의 API를 직접 사용하며, 카운트 테스트 실행기는 MCP 요청에 `Authorization: Bearer <서비스 키>`를 보낸다.
 - MCP는 요청의 인증 헤더를 PH-CMS API에 전달하며 S8 환경 파일을 읽지 않는다. Pi는 직접 API를 사용한다. Claude 실행기는 upstream MCP에 접속하고, run별 JSON 설정에는 배정 UID 조회 전용 로컬 MCP 주소와 임시 인증만 기록한다.
-- `start-pi.sh`가 시작 시 로드한 환경을 도구에 전달한다. 기본 허용 목록에 `projectman`·`scheduler`를 포함하므로 데이터·예약 조회는 이 도구로 요청한다. 도구가 인증에 환경변수를 사용하며 에이전트는 키 원문이나 환경 파일을 조회하지 않는다.
-- 실행 중인 Pi에는 실행 인자 변경이 즉시 반영되지 않는다. 종료 후 `./start-pi.sh --continue`로 재개하거나 Telegram `/restart`로 재시작한다. 관리 진입점에서는 `--tools`, 임의 확장·세션 파일·파일 첨부 옵션으로 허용 목록을 바꿀 수 없다.
+- `s8.sh`가 시작 시 로드한 환경을 도구에 전달한다. 기본 허용 목록에 `projectman`·`scheduler`를 포함하므로 데이터·예약 조회는 이 도구로 요청한다. 도구가 인증에 환경변수를 사용하며 에이전트는 키 원문이나 환경 파일을 조회하지 않는다.
+- 실행 중인 Pi에는 실행 인자 변경이 즉시 반영되지 않는다. 종료 후 `./s8.sh --continue`로 재개하거나 Telegram `/restart`로 재시작한다. 관리 진입점에서는 `--tools`, 임의 확장·세션 파일·파일 첨부 옵션으로 허용 목록을 바꿀 수 없다.
 - PH-CMS 루트에서 `pnpm dev -- --server --mcp`로 API·MCP를 실행한다. 서버·관리자 UI·MCP의 API prefix를 같은 값으로 맞춘다. 현재 카운트 테스트 CLI의 MCP URL은 장비별 소스 설정이므로 다른 장비에서는 변경해야 한다.
 - Nginx의 `/api/v2/`는 PH-CMS API·관리자 UI로 프록시하며, MCP는 별도의 `/mcp` 엔드포인트를 사용한다.
 - 인증정보는 읽어 자동 이관하거나 로그·Git에 기록하지 않는다. 설정·재시작 안내는 [`OPERATIONS.md`](OPERATIONS.md)의 PH-CMS MCP 절을 참고한다.
@@ -369,8 +385,8 @@ S8에 원문을 사용자 메시지로 전달하고 “이 요청문을 Projectm
 ## Pi와 tmux
 
 ```bash
-./start-pi.sh
-./start-pi.sh --continue
+./s8.sh
+./s8.sh --continue
 
 tmux attach-session -t s8-main
 tmux list-windows -t s8-main
@@ -395,6 +411,7 @@ npm run test:run --prefix frontend
 npm run lint --prefix frontend
 npm run build --prefix frontend
 bash -n start-pi.sh
+bash -n s8.sh
 git diff --check
 ```
 

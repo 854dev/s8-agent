@@ -1,12 +1,11 @@
-// Pi 전경 실행 준비와 실행. start-pi.sh(→ pi/bin/start.mjs)의 --managed·--foreground·--service가 사용한다.
+// 단일 에이전트 실행기. 모드 프로필로 Pi 실행 인자를 만들고 이 터미널에서 Pi를 실행한다.
+// tmux·서비스·워커 풀은 다루지 않는다(pi/bin/s8.mjs 담당).
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import os from 'node:os';
 import { existsSync } from 'node:fs';
 import { access, chmod, constants, lstat, mkdir, readlink, realpath, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
-import { managerArgs } from '../manager/launch.mjs';
-import { validSession } from './managed-sessions.mjs';
+import { MODES, loadProfile, resolveMode } from './profile.mjs';
 
 /** 사용법 오류. 진입점이 종료 코드 2로 끝낸다. */
 export const usageError = message => Object.assign(new Error(message), { exitCode: 2 });
@@ -65,25 +64,37 @@ async function linkSharedSettings(agentDir, configRoot) {
   if (await readlink(link) !== target) throw new Error('런타임 설정 링크가 공유 설정을 가리키지 않습니다.');
 }
 
-const tmux = (...args) => execFileSync('tmux', args, { encoding: 'utf8' }).trim();
+/**
+ * 사용자가 넘긴 Pi 옵션을 검사한다. 임의 도구·확장·세션 파일·@파일 첨부·프롬프트 인자로
+ * 역할 경계를 바꾸지 못하도록 허용 목록만 통과시킨다.
+ */
+export function validatePiOptions(input) {
+  const flags = new Set(['--continue', '--print', '--no-session', '--version']);
+  const values = new Set(['--model', '--provider', '--thinking']);
+  for (let i = 0; i < input.length; i++) {
+    const arg = input[i];
+    if (flags.has(arg)) continue;
+    if (values.has(arg) && input[i + 1] && !/^[-@]/.test(input[i + 1])) { i++; continue; }
+    throw new Error(`Unsupported agent argument: ${arg}. Use the interactive prompt for requests.`);
+  }
+  return input;
+}
 
-/** 모드·관리 세션·Telegram 여부에 맞는 Pi 실행 인자. 자동 발견을 끄고 검토된 확장만 로드한다. */
-function piArgs(root, { managed, mode, cwd, telegram }) {
-  const configRoot = path.join(root, 'pi'), agentDir = path.join(root, '.pi-runtime');
-  const args = ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-context-files',
-    '--extension', path.join(configRoot, 'extensions', mode === 'project' ? 'manager.ts' : 'local.mjs')];
-  if (managed) {
-    // 관리 세션은 세션별(local 모드는 작업 디렉터리별) 대화 디렉터리와 세션 제어 확장을 쓴다.
-    const session = tmux('display-message', '-p', '#S');
-    if (!validSession(session)) throw new Error('관리 세션에서만 실행할 수 있습니다.');
-    const sessionDir = mode === 'local'
-      ? path.join(agentDir, 'local', session, createHash('sha256').update(cwd).digest('hex').slice(0, 16))
-      : path.join(agentDir, 'managed', session);
-    args.push('--session-dir', sessionDir, '--extension', path.join(configRoot, 'extensions/managed-session.mjs'));
-  } else if (telegram) args.push('--extension', path.join(configRoot, 'extensions/telegram.mjs'));
-  if (mode === 'project') args.push('--system-prompt', path.join(root, 'agents/manager/SYSTEM.md'), '--tools', 'projectman,kb,scheduler,read,bash,edit,write,grep,find,ls');
-  else args.push('--system-prompt', path.join(root, 'agents/local/SYSTEM.md'), '--tools', 'read,bash,edit,write,grep,find,ls');
-  return args;
+/**
+ * 프로필과 실행 옵션으로 Pi 실행 인자를 만든다. 자동 발견을 끄고 프로필의 확장만 로드한다.
+ * control: tmux 런타임 창에서 실행(세션 제어 확장이 Telegram을 맡는다). telegram: 단독 실행에서 Telegram 연결.
+ */
+export function piArgs(root, profile, { sessionDir, telegram = false, control = false } = {}) {
+  const extensions = [...profile.extensions];
+  if (control) extensions.push(path.join(root, 'pi/extensions/managed-session.mjs'));
+  else if (telegram) extensions.push(path.join(root, 'pi/extensions/telegram.mjs'));
+  return [
+    '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-context-files',
+    ...extensions.flatMap(file => ['--extension', file]),
+    '--system-prompt', profile.systemPrompt,
+    '--tools', profile.tools.join(','),
+    ...(sessionDir ? ['--session-dir', sessionDir] : []),
+  ];
 }
 
 /** 터미널을 물려받은 자식 프로세스를 실행한다. exited는 종료 코드(신호 종료는 셸처럼 128+번호)로 끝난다. */
@@ -97,30 +108,36 @@ function startChild(command, args) {
 }
 
 /**
- * Pi를 이 터미널에서 실행하고 종료 코드를 돌려준다.
- * managed: 런타임 tmux 창 안에서 실행. 매 실행마다 세션 옵션의 Telegram 설정을 다시 읽는다.
+ * 에이전트를 이 터미널에서 실행하고 종료 코드를 돌려준다.
  * Pi가 .pi-runtime/restart-<이 프로세스 PID> 파일을 남기고 종료하면(/restart) 최근 대화로 다시 시작한다.
  */
-export async function runPi(root, { managed = false, mode, cwd, telegram, args = [] }) {
-  if (mode === 'project' || telegram || managed) loadEnv(root);
-  const workDir = mode === 'project' ? await kbRoot(root) : await realpath(cwd);
+export async function runAgent(root, { mode, cwd = process.cwd(), telegram = false, control = false, sessionDir, uid, args = [] }) {
+  const resolved = resolveMode(mode);
+  if (!resolved) throw usageError(`모드는 ${MODES.join(', ')} 중 하나여야 합니다: ${mode}`);
+  if (uid !== undefined && resolved !== 'worker') throw usageError('--uid는 worker 모드에서만 사용합니다.');
+  if (uid !== undefined && !/^[\w-]{1,100}$/.test(uid)) throw usageError(`잘못된 UID입니다: ${uid}`);
+  const profile = loadProfile(resolved, root);
+  if (profile.loadEnv || telegram || control) loadEnv(root);
+  const workDir = profile.workDir === 'kb' ? await kbRoot(root) : await realpath(cwd);
   const { configRoot, agentDir, binary } = await preparePiEnvironment(root);
   await linkSharedSettings(agentDir, configRoot);
-  Object.assign(process.env, { PI_TELEMETRY: '0', S8_PI_RESTART_DIR: agentDir });
+  if (sessionDir && path.relative(agentDir, path.resolve(sessionDir)).startsWith('..')) throw usageError('--session-dir는 .pi-runtime 아래여야 합니다.');
+  Object.assign(process.env, { PI_TELEMETRY: '0', S8_PI_RESTART_DIR: agentDir, S8_AGENT_MODE: resolved });
+  if (uid) process.env.S8_WORKER_UID = uid;
   process.chdir(workDir);
   // 패키지 관리 명령은 Pi CLI에 그대로 전달한다.
   if (isPackageCommand(args[0])) return startChild(binary, args).exited;
-  // 임의 도구·확장·세션 파일 인자로 관리 역할 경계를 바꾸지 못하게 검사한다.
-  managerArgs(root, args);
+  validatePiOptions(args);
 
   // 종료 신호를 받으면 Pi를 SIGTERM으로 정상 종료시키고 0으로 끝낸다.
   let current, stopping = false;
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => { stopping = true; current?.kill('SIGTERM'); });
   const restartFile = path.join(agentDir, `restart-${process.pid}`);
-  let extra = [];
+  const base = piArgs(root, profile, { sessionDir, telegram, control });
+  // --uid가 있으면 첫 실행에 작업 지시를 넣는다. /restart 재개(--continue)에는 다시 넣지 않는다.
+  let extra = uid ? [`uid ${uid} 의 업무를 수행해라.`] : [];
   while (true) {
-    if (managed) telegram = tmux('show-option', '-qv', '@s8-telegram') === 'take';
-    const { child, exited } = startChild(binary, [...piArgs(root, { managed, mode, cwd: workDir, telegram }), ...extra, ...args]);
+    const { child, exited } = startChild(binary, [...base, ...args, ...extra]);
     current = child;
     const status = await exited;
     if (stopping) return 0;
