@@ -6,12 +6,20 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MANAGER_TOOLS } from '../lib/manager/launch.mjs';
 
+/** start-pi.sh와 Node 진입점(서비스·전경 실행에 필요한 모듈)을 임시 저장소에 복사한다. */
+async function copyLauncher(dir) {
+  await copyFile(new URL('../../start-pi.sh', import.meta.url), path.join(dir, 'start-pi.sh'));
+  for (const file of ['bin/start.mjs', 'lib/runtime/foreground.mjs', 'lib/runtime/managed-sessions.mjs', 'lib/runtime/process.mjs', 'lib/manager/launch.mjs']) {
+    await mkdir(path.dirname(path.join(dir, 'pi', file)), { recursive: true });
+    await copyFile(new URL(`../${file}`, import.meta.url), path.join(dir, 'pi', file));
+  }
+  return path.join(dir, 'start-pi.sh');
+}
+
 test('unified foreground service entrypoints preserve scheduler setup and supervisor diagnostic arguments', async t => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-service-entry-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const script = path.join(dir, 'start-pi.sh');
-  await copyFile(new URL('../../start-pi.sh', import.meta.url), script);
-  await mkdir(path.join(dir, 'pi/bin'), { recursive: true });
+  const script = await copyLauncher(dir);
   await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   const stub = "console.log(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),kb:process.env.S8_KB_ROOT,config:process.env.S8_PI_CONFIG_ROOT}));";
@@ -33,12 +41,7 @@ test('unified foreground service entrypoints preserve scheduler setup and superv
 test('launcher exposes general and Projectman tools and passes inherited credentials without printing them', async t => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-tool-launcher-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const script = path.join(dir, 'start-pi.sh');
-  await copyFile(new URL('../../start-pi.sh', import.meta.url), script);
-  await mkdir(path.join(dir, 'pi/bin'), { recursive: true });
-  await mkdir(path.join(dir, 'pi/lib/manager'), { recursive: true });
-  await copyFile(new URL('../bin/manager-options.mjs', import.meta.url), path.join(dir, 'pi/bin/manager-options.mjs'));
-  await copyFile(new URL('../lib/manager/launch.mjs', import.meta.url), path.join(dir, 'pi/lib/manager/launch.mjs'));
+  const script = await copyLauncher(dir);
   await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
   const key = 'phcms_sk_' + 'A'.repeat(43);
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), `#!/usr/bin/env node
@@ -66,17 +69,12 @@ console.log(JSON.stringify(process.argv.slice(2)));
   assert.throws(() => execFileSync('bash', [script, '--managed', '--mode', 'project'], { ...options, stdio: 'pipe' }), /내부 실행 인자/);
 });
 
-test('launcher forwards user commands to the Node entrypoint and runs foreground commands directly', async t => {
+test('launcher forwards user commands to the runtime controller and runs foreground commands directly', async t => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-combined-launcher-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const script = path.join(dir, 'start-pi.sh');
-  await copyFile(new URL('../../start-pi.sh', import.meta.url), script);
-  await mkdir(path.join(dir, 'pi/bin'), { recursive: true });
-  await mkdir(path.join(dir, 'pi/lib/manager'), { recursive: true });
+  const script = await copyLauncher(dir);
   await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
-  await copyFile(new URL('../bin/manager-options.mjs', import.meta.url), path.join(dir, 'pi/bin/manager-options.mjs'));
-  await copyFile(new URL('../lib/manager/launch.mjs', import.meta.url), path.join(dir, 'pi/lib/manager/launch.mjs'));
-  await writeFile(path.join(dir, 'pi/bin/pi-runtime.mjs'), 'console.log(JSON.stringify({runtime:process.argv.slice(2)}));');
+  await writeFile(path.join(dir, 'pi/lib/runtime/user-command.mjs'), 'export async function runUserCommand(_root, input) { console.log(JSON.stringify({ runtime: input })); }');
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), '#!/usr/bin/env node\nconsole.log(JSON.stringify({pi:process.argv.slice(2)}));\n', { mode: 0o755 });
   const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: dir } };
   for (const input of [[], ['--mode', 'project', '--telegram', 'off', '--session', 'work'], ['--help']]) {
@@ -87,4 +85,33 @@ test('launcher forwards user commands to the Node entrypoint and runs foreground
   const version = foreground(['--version']).pi;
   assert.ok(version.includes('--version'));
   assert.ok(!version.includes(path.join(dir, 'pi/extensions/managed-session.mjs')));
+});
+
+test('foreground Pi restarts with --continue on request, loads .env over inherited values and stops on SIGTERM', async t => {
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-foreground-')));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const script = await copyLauncher(dir);
+  await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
+  // 첫 실행은 /restart처럼 restart-<부모 PID> 파일을 남기고 종료하고, 다음 실행은 인자를 기록한다.
+  await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), `#!/usr/bin/env node
+const fs = require('node:fs'), path = require('node:path');
+const runs = path.join(${JSON.stringify(dir)}, 'runs');
+fs.appendFileSync(runs, JSON.stringify({ args: process.argv.slice(2), url: process.env.PHCMS_API_URL }) + '\\n');
+if (process.argv.includes('fixture-wait')) setInterval(() => {}, 1000);
+else if (fs.readFileSync(runs, 'utf8').trim().split('\\n').length === 1) fs.writeFileSync(path.join(process.env.S8_PI_RESTART_DIR, 'restart-' + process.ppid), 'restart');
+`, { mode: 0o755 });
+  await writeFile(path.join(dir, '.env'), 'export PHCMS_API_URL="http://127.0.0.1:8000/api/v2"\n');
+  const env = { ...process.env, S8_KB_ROOT: dir, PHCMS_API_URL: 'http://inherited.invalid' };
+  execFileSync('bash', [script, '--foreground', '--mode', 'local', '--cwd', dir, '--telegram', '--print'], { encoding: 'utf8', env });
+  const runs = (await readFile(path.join(dir, 'runs'), 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(runs.length, 2);
+  assert.ok(!runs[0].args.includes('--continue'));
+  assert.ok(runs[1].args.includes('--continue'));
+  assert.ok(runs.every(run => run.url === 'http://127.0.0.1:8000/api/v2'));
+  const { spawn } = await import('node:child_process');
+  const child = spawn('bash', [script, '--foreground', '--mode', 'local', '--cwd', dir, '--no-telegram', '--print', '--model', 'fixture-wait'], { env, stdio: 'ignore' });
+  t.after(() => child.kill('SIGKILL'));
+  for (let i = 0; i < 100 && (await readFile(path.join(dir, 'runs'), 'utf8')).trim().split('\n').length < 3; i++) await new Promise(resolve => setTimeout(resolve, 50));
+  child.kill('SIGTERM');
+  assert.equal(await new Promise(resolve => child.once('exit', code => resolve(code))), 0);
 });

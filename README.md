@@ -101,7 +101,7 @@ pi/
 | worktree·변경 파일·패치·선행 결과 반영 | [development/workspace.mjs](pi/lib/development/workspace.mjs) | supervisor |
 | 완료보고·사용자 검토의견 수신 | [manager/inbox.mjs](pi/lib/manager/inbox.mjs), [manager 확장](pi/extensions/manager.ts) | 매니저 시작·기존 polling |
 | Projectman API·콘솔 | [projectman/client.ts](pi/lib/projectman/client.ts), [projectman/console.mjs](pi/lib/projectman/console.mjs) | `pi/extensions/projectman.ts`, `pi/bin/projectman-console.mjs` |
-| Pi 세션·서비스 시작·재시작 | [runtime/](pi/lib/runtime/) | `start-pi.sh` → `pi/bin/pi-runtime.mjs` |
+| Pi 세션·서비스 시작·재시작 | [runtime/](pi/lib/runtime/) | `start-pi.sh` → `pi/bin/start.mjs` |
 | 설정·알림 | [config/s8-config.mjs](pi/lib/config/s8-config.mjs), [telegram/notify.mjs](pi/lib/telegram/notify.mjs) | `pi/bin/s8-config.mjs`, 보고 outbox |
 | 예약 실행 | [scheduler/](pi/lib/scheduler/) | `start-pi.sh --service scheduler`, `pi/extensions/scheduler.ts` |
 
