@@ -9,7 +9,7 @@ import { managerArgs } from '../manager/launch.mjs';
 import { moveTelegram, validSession } from './managed-sessions.mjs';
 import { startPiServices } from './services.mjs';
 import { sleep } from './process.mjs';
-import { runTmux, withTmuxLock, ensureSession, ensureWindow, stopWindow, windows, quote, lockName, sessionOption } from './tmux-windows.mjs';
+import { runTmux, withTmuxLock, ensureSession, ensureWindow, stopWindow, windows, windowTail, quote, lockName, sessionOption } from './tmux-windows.mjs';
 
 /** 실행 중인 세션에 기록된 설정을 읽어, 같은 대화를 이어가는(--continue) startPiRuntime 옵션으로 돌려준다. 인자 검증은 startPiRuntime이 한다. */
 export async function savedRuntimeOptions(session, { run = runTmux } = {}) {
@@ -27,15 +27,16 @@ export async function savedRuntimeOptions(session, { run = runTmux } = {}) {
 /**
  * Pi 런타임을 (재)시작하고 { session, windows, telegramStatus, workers }를 돌려준다.
  * telegram: true면 이 세션으로 Telegram을 가져오고, false면 끈다. 생략하면 project 모드만 켠다.
- * local 모드는 공유 서비스를 시작하지 않는다.
+ * local 모드는 공유 서비스를 시작하지 않는다. log는 진행 단계를 한 줄씩 받는다.
  */
-export async function startPiRuntime(root, { session = 's8-main', mode = 'project', cwd, args = [], telegram, scheduler = true, supervisor = true, run = runTmux } = {}) {
+export async function startPiRuntime(root, { session = 's8-main', mode = 'project', cwd, args = [], telegram, scheduler = true, supervisor = true, run = runTmux, log = () => {} } = {}) {
   if (!validSession(session)) throw new Error('잘못된 세션 이름입니다.');
   if (!['project', 'local'].includes(mode)) throw new Error('Invalid mode');
   managerArgs(root, args);
   root = await realpath(root);
   cwd = await realpath(cwd ?? root);
   telegram ??= mode === 'project';
+  log(`tmux 세션 ${session} 준비`);
   await ensureSession(run, root, session);
 
   // 같은 체크아웃의 재시작과 Telegram 이전을 직렬화한다.
@@ -47,22 +48,30 @@ export async function startPiRuntime(root, { session = 's8-main', mode = 'projec
     }
     const previousOwner = await telegramOwner();
 
+    log('기존 Pi 창 중지');
     await stopWindow(run, root, session, 'pi');
-    const services = mode === 'project' ? await startPiServices(root, { session, scheduler, supervisor, run }) : [];
+    const services = mode === 'project' ? await startPiServices(root, { session, scheduler, supervisor, run, log }) : [];
     const workers = services.find(service => service.service === 'workers');
 
     const settings = { '@s8-telegram': telegram ? 'take' : 'off', '@s8-mode': mode, '@s8-cwd': cwd, '@s8-pi-args': JSON.stringify(args) };
     for (const [name, value] of Object.entries(settings)) await run(['set-option', '-t', session, name, value]);
     const command = ['bash', path.join(root, 'start-pi.sh'), '--managed', '--mode', mode, '--cwd', cwd, telegram ? '--telegram' : '--no-telegram', ...args].map(quote).join(' ');
+    log(`Pi 시작 (${mode} 모드, ${cwd})`);
     await ensureWindow(run, root, session, 'pi', `exec ${command}`);
     await run(['select-window', '-t', `${session}:pi`]);
 
     // 잘못된 인자 등으로 즉시 종료되는 경우를 잡기 위해 잠시 뒤 상태를 확인한다.
     await sleep(200);
     const active = await windows(run, session);
-    if (active.find(window => window.name === 'pi')?.dead !== false) throw new Error(`${session}:pi가 시작 직후 종료됐습니다. 해당 창에서 오류를 확인하세요.`);
+    if (active.find(window => window.name === 'pi')?.dead !== false) {
+      throw new Error(`${session}:pi가 시작 직후 종료됐습니다. 창 출력:\n${await windowTail(run, `${session}:pi`) || '(출력 없음)'}`);
+    }
+    log('Pi 실행 확인');
 
-    if (telegram) await moveTelegram(path.join(root, '.pi-runtime', `${session}.sock`));
+    if (telegram) {
+      log('Telegram 연결을 이 세션으로 이전');
+      await moveTelegram(path.join(root, '.pi-runtime', `${session}.sock`));
+    }
     const currentOwner = await telegramOwner();
     const telegramStatus = currentOwner === session
       ? `Telegram: ${previousOwner && previousOwner !== session ? previousOwner + ' → ' : ''}${session} 연결`

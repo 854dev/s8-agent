@@ -2,10 +2,9 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { access, chmod, constants, lstat, mkdir, readlink, realpath, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
-import { parseEnv } from 'node:util';
 import { managerArgs } from '../manager/launch.mjs';
 import { validSession } from './managed-sessions.mjs';
 
@@ -15,14 +14,33 @@ export const usageError = message => Object.assign(new Error(message), { exitCod
 const PACKAGE_COMMANDS = new Set(['install', 'remove', 'uninstall', 'update', 'list', 'config']);
 export const isPackageCommand = arg => PACKAGE_COMMANDS.has(arg);
 
-/** 루트 .env의 연결 설정을 환경변수로 덮어쓴다(셸 source와 같은 우선순위). 내용은 출력하지 않는다. */
+/**
+ * 루트 .env의 연결 설정을 환경변수로 덮어쓴다. ~·$VAR 확장 등 셸 문법을 그대로 지원하도록 bash로 읽는다.
+ * 값은 출력하지 않으며, 읽기 실패 시에도 bash 오류 출력(값 일부가 섞일 수 있음)을 그대로 내보내지 않는다.
+ */
 export function loadEnv(root) {
   const file = path.join(root, '.env');
-  if (existsSync(file)) Object.assign(process.env, parseEnv(readFileSync(file, 'utf8')));
+  if (!existsSync(file)) return;
+  let output;
+  try { output = execFileSync('bash', ['-c', 'set -a; source "$1" >/dev/null 2>&1 || exit 1; env -0', 'bash', file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); }
+  catch { throw new Error('.env를 읽지 못했습니다. 셸 문법을 확인하세요.'); }
+  for (const entry of output.split('\0')) {
+    const index = entry.indexOf('=');
+    const name = entry.slice(0, index);
+    // bash가 스스로 정하는 변수는 옮기지 않는다.
+    if (index > 0 && !['_', 'SHLVL', 'PWD', 'OLDPWD'].includes(name)) process.env[name] = entry.slice(index + 1);
+  }
 }
 
 /** KB 저장소 경로(S8_KB_ROOT, 기본 ../854_md). 상대 경로는 저장소 루트 기준이다. */
-export const kbRoot = root => realpath(path.resolve(root, process.env.S8_KB_ROOT || '../854_md'));
+export async function kbRoot(root) {
+  const directory = path.resolve(root, process.env.S8_KB_ROOT || '../854_md');
+  try { return await realpath(directory); }
+  catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    throw new Error(`KB 저장소를 찾을 수 없습니다: ${directory}. .env의 S8_KB_ROOT를 이 장비의 KB 경로로 설정하세요.`);
+  }
+}
 
 /** Pi 실행에 필요한 경로를 확인하고 공용 환경변수를 설정한다. */
 export async function preparePiEnvironment(root) {

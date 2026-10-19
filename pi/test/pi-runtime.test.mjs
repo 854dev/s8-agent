@@ -57,6 +57,7 @@ test('start-pi recreates all sessions and services and connects Telegram by defa
   const f = await fixture(t);
   const result = await f.launch(['--model', 'fixture model']);
   assert.match(result.stdout, /tmux 세션: s8-main/);
+  for (const step of ['기존 tmux 세션 모두 종료', '개발 워커 1개 등록', 'scheduler: 실행 확인', 'supervisor: 실행 확인', 'Pi 실행 확인']) assert.ok(result.stdout.includes(step), step);
   for (const name of ['shell', 'pi', 'scheduler', 'supervisor']) assert.ok(result.stdout.includes(`s8-main:${name}`));
   assert.ok((await f.run(['list-sessions', '-F', '#S'])).stdout.includes('s8-workers-'));
   assert.equal((await f.run(['list-clients'])).stdout.trim(), '');
@@ -124,7 +125,7 @@ test('concurrent launchers serialize restarts without duplicate service processe
 test('failed services retain output until restart and exclusions omit services after reset', async t => {
   const f = await fixture(t);
   await writeFile(path.join(f.root, 'pi/bin/scheduler.mjs'), 'console.error("FIXTURE_START_FAILURE"); process.exit(7);');
-  await assert.rejects(f.launch([]), /s8-main:scheduler가 시작 직후 종료/);
+  await assert.rejects(f.launch([]), /s8-main:scheduler가 시작 직후 종료(.|\n)*FIXTURE_START_FAILURE/);
   assert.match((await f.run(['capture-pane', '-p', '-S', '-', '-t', 's8-main:scheduler'])).stdout, /FIXTURE_START_FAILURE/);
   await writeFile(path.join(f.root, 'pi/bin/scheduler.mjs'), 'setInterval(() => {}, 1000);');
   await f.launch([]);

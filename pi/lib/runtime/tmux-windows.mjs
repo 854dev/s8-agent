@@ -48,6 +48,14 @@ const managedWindowOptions = (target, root) => [
   ';', 'set-option', '-w', '-t', target, 'automatic-rename', 'off',
 ];
 
+/** 창의 마지막 출력 몇 줄. 시작 직후 종료된 창의 오류를 보여줄 때 쓴다. */
+export async function windowTail(run, target, lines = 5) {
+  try {
+    const { stdout } = await run(['capture-pane', '-p', '-S', '-200', '-t', target]);
+    return stdout.split('\n').filter(line => line.trim() && !line.startsWith('Pane is dead')).slice(-lines).join('\n');
+  } catch { return ''; }
+}
+
 export async function windows(run, session) {
   const { stdout } = await run(['list-windows', '-t', `=${session}`, '-F', '#{window_id}\t#{window_name}\t#{@s8-window-root}\t#{pane_dead}\t#{@s8-worker-id}']);
   return stdout.trim().split('\n').filter(Boolean).map(line => {

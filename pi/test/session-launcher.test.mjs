@@ -100,7 +100,8 @@ fs.appendFileSync(runs, JSON.stringify({ args: process.argv.slice(2), url: proce
 if (process.argv.includes('fixture-wait')) setInterval(() => {}, 1000);
 else if (fs.readFileSync(runs, 'utf8').trim().split('\\n').length === 1) fs.writeFileSync(path.join(process.env.S8_PI_RESTART_DIR, 'restart-' + process.ppid), 'restart');
 `, { mode: 0o755 });
-  await writeFile(path.join(dir, '.env'), 'export PHCMS_API_URL="http://127.0.0.1:8000/api/v2"\n');
+  // 셸 문법(변수 확장, export)을 그대로 지원해야 한다.
+  await writeFile(path.join(dir, '.env'), 'BASE=http://127.0.0.1:8000\nexport PHCMS_API_URL="$BASE/api/v2"\n');
   const env = { ...process.env, S8_KB_ROOT: dir, PHCMS_API_URL: 'http://inherited.invalid' };
   execFileSync('bash', [script, '--foreground', '--mode', 'local', '--cwd', dir, '--telegram', '--print'], { encoding: 'utf8', env });
   const runs = (await readFile(path.join(dir, 'runs'), 'utf8')).trim().split('\n').map(JSON.parse);

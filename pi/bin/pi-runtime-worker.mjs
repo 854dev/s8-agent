@@ -2,9 +2,10 @@
 // .s8-runtime/runtime-restarts/<id>/request.json을 읽어 재시작하고 result.json에 결과를 남긴다.
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { appendFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { startPiRuntime } from '../lib/runtime/runtime.mjs';
-import { saveRestartResult, withRuntimeResetLock } from '../lib/runtime/restart.mjs';
+import { progressLog, saveRestartResult, withRuntimeResetLock } from '../lib/runtime/restart.mjs';
 import { runFullRestart, notifyFullRestart } from '../lib/runtime/full-restart.mjs';
 import { runTmux } from '../lib/runtime/tmux-windows.mjs';
 import { telegramOwner } from '../lib/telegram/status.mjs';
@@ -14,18 +15,21 @@ const id = process.argv[2];
 if (!/^[a-f0-9-]{36}$/.test(id ?? '')) throw new Error('Invalid restart ID');
 const directory = path.join(root, '.s8-runtime/runtime-restarts', id);
 const options = JSON.parse(await readFile(path.join(directory, 'request.json'), 'utf8'));
+// 진행 단계는 파일에 남기고, 요청한 터미널(restartPiRuntime)이 읽어 출력한다.
+const log = line => appendFileSync(progressLog(directory), `${line}\n`, { mode: 0o600 });
 
 async function restart() {
   // Telegram을 가진 세션이 사라지기 전에 'keep'(현재 소유 세션이면 유지)을 true/false로 확정한다.
   if (options.telegram === 'keep') options.telegram = (await telegramOwner()) === options.session;
   if (options.resetTmux) {
     // 이 프로세스는 분리돼 있어 호출자의 창이 종료돼도 계속 실행된다.
+    log('기존 tmux 세션 모두 종료');
     try { await runTmux(['kill-server']); }
     catch (error) {
       if (!/no server running|no sessions|No such file or directory/i.test(error.stderr ?? '')) throw error;
     }
   }
-  return options.all ? runFullRestart(root, { session: options.session, directory }) : startPiRuntime(root, options);
+  return options.all ? runFullRestart(root, { session: options.session, directory }) : startPiRuntime(root, { ...options, log });
 }
 
 try {

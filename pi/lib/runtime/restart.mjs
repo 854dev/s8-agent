@@ -31,13 +31,29 @@ export async function queuePiRuntimeRestart(root, options) {
   return { id, directory };
 }
 
-/** 재시작을 요청하고 result.json이 생길 때까지(최대 2분) 기다려 결과를 돌려준다. */
-export async function restartPiRuntime(root, options) {
+/** 제어 프로세스가 진행 단계를 한 줄씩 남기는 파일. restartPiRuntime이 읽어 호출자에게 전달한다. */
+export const progressLog = directory => path.join(directory, 'progress.log');
+
+/**
+ * 재시작을 요청하고 result.json이 생길 때까지(최대 2분) 기다려 결과를 돌려준다.
+ * onProgress는 제어 프로세스가 기록한 진행 단계를 한 줄씩 받는다.
+ */
+export async function restartPiRuntime(root, options, { onProgress = () => {} } = {}) {
   const { directory } = await queuePiRuntimeRestart(root, options);
+  let reported = 0;
+  const report = async () => {
+    let lines;
+    try { lines = (await readFile(progressLog(directory), 'utf8')).split('\n').slice(0, -1); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; return; }
+    for (const line of lines.slice(reported)) onProgress(line);
+    reported = lines.length;
+  };
   const result = await waitUntil(async () => {
+    await report();
     try { return JSON.parse(await readFile(path.join(directory, 'result.json'), 'utf8')); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
   }, { timeoutMs: 120000 });
+  await report();
   if (result?.ok) return result.value;
   if (result) throw new Error(result.error);
   throw new Error(`재시작 완료 확인 시간이 지났습니다. 제어 프로세스 기록: ${directory}`);

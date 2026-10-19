@@ -4,7 +4,7 @@
 import { mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { acquirePidLock, lockOwner, processAlive, sleep, waitUntil } from './process.mjs';
-import { ensureWindow, stopWindow, windows, withTmuxLock, runTmux, quote, lockName } from './tmux-windows.mjs';
+import { ensureWindow, stopWindow, windows, windowTail, withTmuxLock, runTmux, quote, lockName } from './tmux-windows.mjs';
 import { ensureWorkerPool, workersBusy } from '../development/worker-pool.mjs';
 
 // 서비스별 PID 잠금 파일(저장소 루트 기준).
@@ -31,28 +31,41 @@ async function stopService(run, root, session, name) {
 /**
  * 공유 서비스를 (재)시작하고 서비스별 결과 목록을 돌려준다. supervisor를 켜면 워커 풀 결과({ service: 'workers' })도 포함한다.
  * session은 startPiRuntime이 만들고 소유를 확인한 런타임 세션이다. 실행 중인 서비스는 새 프로세스로 교체한다. 단, 워커가 작업 중이거나 워커 설정 적용이 보류되면
- * 실행 중인 supervisor는 그대로 둔다({ kept: true }).
+ * 실행 중인 supervisor는 그대로 둔다({ kept: true }). log는 진행 단계를 한 줄씩 받는다.
  */
-export async function startPiServices(root, { session = 's8-main', scheduler = true, supervisor = true, run = runTmux } = {}) {
+export async function startPiServices(root, { session = 's8-main', scheduler = true, supervisor = true, run = runTmux, log = () => {} } = {}) {
   root = await realpath(root);
   if (!scheduler && !supervisor) return [];
 
   const results = [];
   let workerPool;
-  if (supervisor) { workerPool = await ensureWorkerPool(root, { run }); results.push({ service: 'workers', ...workerPool }); }
+  if (supervisor) {
+    log('개발 워커 풀 확인');
+    workerPool = await ensureWorkerPool(root, { run });
+    results.push({ service: 'workers', ...workerPool });
+    log(`개발 워커 ${workerPool.count}개 등록${workerPool.session ? ` (${workerPool.session})` : ''}${workerPool.deferred ? ' · 설정 적용 보류' : ''}`);
+  }
   for (const [name, enabled] of Object.entries({ scheduler, supervisor })) {
     if (!enabled) continue;
     results.push(await withTmuxLock(run, lockName('s8-service-', root + name), async () => {
       const current = (await windows(run, session)).find(window => window.name === name);
       if (!current || current.dead) await assertNoOutsideOwner(root, name);
       else {
-        if (name === 'supervisor' && (workerPool.deferred || await workersBusy(root))) return { service: name, session, window: name, kept: true };
+        if (name === 'supervisor' && (workerPool.deferred || await workersBusy(root))) {
+          log(`${name}: 진행 중인 개발 작업이 있어 기존 프로세스 유지`);
+          return { service: name, session, window: name, kept: true };
+        }
+        log(`${name}: 기존 프로세스 중지`);
         await stopService(run, root, session, name);
       }
+      log(`${name}: 시작`);
       const result = await ensureWindow(run, root, session, name, `exec bash ${quote(path.join(root, 'start-pi.sh'))} --service ${name}`);
       // 잘못된 설정 등으로 즉시 종료되는 경우를 잡는다. 창은 남아 있어 오류 출력을 확인할 수 있다.
       await sleep(200);
-      if ((await windows(run, session)).find(window => window.id === result.id)?.dead !== false) throw new Error(`${session}:${name}가 시작 직후 종료됐습니다. 해당 창에서 오류를 확인하세요.`);
+      if ((await windows(run, session)).find(window => window.id === result.id)?.dead !== false) {
+        throw new Error(`${session}:${name}가 시작 직후 종료됐습니다. 창 출력:\n${await windowTail(run, result.id) || '(출력 없음)'}`);
+      }
+      log(`${name}: 실행 확인`);
       return { service: name, session, window: name };
     }));
   }

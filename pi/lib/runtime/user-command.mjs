@@ -91,7 +91,8 @@ async function startRuntime(root, options) {
   // tmux 서버를 종료하기 전에 검증해야 잘못된 입력으로 기존 세션을 잃지 않는다.
   if (!validSession(options.session)) throw new Error('잘못된 세션 이름입니다.');
   managerArgs(root, options.args);
-  const result = await restartPiRuntime(root, { ...options, resetTmux: true });
+  console.log(`S8 런타임 시작: ${options.session} (${options.mode} 모드)`);
+  const result = await restartPiRuntime(root, { ...options, resetTmux: true }, { onProgress: line => console.log(`  - ${line}`) });
   console.log(`tmux 세션: ${result.session}`);
   for (const window of result.windows) console.log(`  ${result.session}:${window}`);
   const { workers } = result;
