@@ -21,7 +21,7 @@ async function fixture(t) {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await copyFile(new URL(`../../${file}`, import.meta.url), path.join(root, file));
   }
-  await writeFile(path.join(root, 's8-config.yml'), 'telegram: {}\n');
+  await writeFile(path.join(root, 's8-config.yml'), `kbRoot: ${JSON.stringify(root)}\ntelegram: {}\n`);
   for (const file of ['bin/s8.mjs', 'bin/agent.mjs', 'lib/agent/launch.mjs', 'lib/agent/profile.mjs', 'lib/runtime/user-command.mjs', 'bin/telegram-status.mjs', 'bin/pi-runtime-worker.mjs', 'lib/runtime/restart.mjs', 'lib/runtime/full-restart.mjs', 'lib/runtime/runtime.mjs', 'lib/runtime/services.mjs', 'lib/runtime/tmux-windows.mjs', 'lib/runtime/managed-sessions.mjs', 'lib/telegram/status.mjs', 'lib/runtime/process.mjs', 'lib/storage/json-file.mjs', 'lib/scheduler/control.mjs', 'lib/scheduler/store.mjs', 'lib/config/s8-config.mjs']) {
     await mkdir(path.dirname(path.join(root, 'pi', file)), { recursive: true });
     await copyFile(new URL(`../${file}`, import.meta.url), path.join(root, 'pi', file));
@@ -50,7 +50,7 @@ import('node:fs').then(async fs => {
 });
 `, { mode: 0o755 });
   const launch = args => exec('bash', [path.join(root, 's8.sh'), '--mode', 'project', ...args], {
-    env: { ...process.env, PATH: `${root}/tools:${process.env.PATH}`, S8_KB_ROOT: root, TMUX: '' }, timeout: 12000,
+    env: { ...process.env, PATH: `${root}/tools:${process.env.PATH}`, TMUX: '' }, timeout: 12000,
   });
   return { root, run, launch };
 }
@@ -236,7 +236,7 @@ sys.stdout.buffer.write(output)
 sys.exit(p.wait())
 `;
   const { stdout } = await exec('python3', ['-c', script, path.join(f.root, 's8.sh')], {
-    cwd: f.root, env: { ...process.env, PATH: `${f.root}/tools:${process.env.PATH}`, S8_KB_ROOT: f.root, TMUX: '' }, timeout: 25000,
+    cwd: f.root, env: { ...process.env, PATH: `${f.root}/tools:${process.env.PATH}`, TMUX: '' }, timeout: 25000,
   });
   assert.match(stdout, /실행 모드/);
   assert.match(stdout, /Telegram 현재 연결/);

@@ -25,7 +25,7 @@ export async function waitForInfrastructure({ fetchImpl = fetch, timeoutMs = 180
     ['frontend', 'http://127.0.0.1:4178/s8/', [200]],
     ['console', 'http://127.0.0.1:8791/api/projectman/session', [200, 401]],
     ['terminal', 'http://127.0.0.1:8790/api/terminal/health', [200]],
-    ['router', `http://${env.NGINX_BIND_IP || '127.0.0.1'}:${env.NGINX_HTTP_PORT || 80}/health`, [200]],
+    ['router', `http://${env.S8_BIND_IP || '127.0.0.1'}:${env.S8_HTTP_PORT || 80}/health`, [200]],
   ];
   if (env.PHCMS_API_URL) targets.push(['projectman', `${env.PHCMS_API_URL.replace(/\/$/, '')}/projectman/capabilities`, [200]]);
   const check = async ([name, url, statuses]) => {

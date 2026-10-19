@@ -1,12 +1,32 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
+import { isIP } from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument } from 'yaml';
 
 export const agentRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
-function normalize(telegram, source) {
-  if (!telegram || typeof telegram !== 'object' || Array.isArray(telegram) || Object.keys(telegram).some(key => !['allowedUserIds', 'allowedGroupIds', 'scheduleChatId'].includes(key))) throw new Error('Invalid Telegram config fields; credentials must stay in environment variables');
+// s8-config.yml: 비밀이 아닌 장비별 설정. 비밀값(서비스 키·봇 토큰)은 .env에만 둔다.
+// 파일이 없거나 항목을 생략하면 아래 기본값을 쓴다.
+const DEFAULTS = { kbRoot: '../854_md', projectman: { apiUrl: null, startCommand: null }, network: { bindIp: '127.0.0.1', httpPort: 80 } };
+
+const plainObject = value => value && typeof value === 'object' && !Array.isArray(value);
+function fields(value, allowed, name) {
+  if (value === undefined || value === null) return {};
+  if (!plainObject(value)) throw new Error(`s8-config.yml: ${name} must be a mapping`);
+  const unknown = Object.keys(value).filter(key => !allowed.includes(key));
+  if (unknown.length) throw new Error(`s8-config.yml: unknown ${name} keys: ${unknown.join(', ')}`);
+  return value;
+}
+// 값은 오류 메시지에 넣지 않는다(키 이름만 보여 준다).
+const text = (value, name, pattern = /^[^\0\r\n]{1,1000}$/) => {
+  if (typeof value !== 'string' || !pattern.test(value)) throw new Error(`s8-config.yml: ${name} must be a single-line string`);
+  return value;
+};
+
+function normalizeTelegram(telegram) {
+  telegram = fields(telegram, ['allowedUserIds', 'allowedGroupIds', 'scheduleChatId'], 'telegram');
   const id = value => {
     if (!['string', 'number'].includes(typeof value) || !/^-?[1-9]\d*$/.test(String(value)) || !Number.isSafeInteger(Number(value))) throw new Error('Telegram IDs must be nonzero, safe numeric IDs (quote IDs in YAML)');
     return String(value);
@@ -20,50 +40,86 @@ function normalize(telegram, source) {
   if (allowedUserIds.some(value => value.startsWith('-')) || allowedGroupIds.some(value => !value.startsWith('-'))) throw new Error('Telegram user IDs must be positive; group IDs must be negative');
   const scheduleChatId = telegram.scheduleChatId == null ? null : id(telegram.scheduleChatId);
   if (scheduleChatId && ![...allowedUserIds, ...allowedGroupIds].includes(scheduleChatId)) throw new Error('Scheduled Telegram target must be in an allowed user or group list');
-  return { allowedUserIds, allowedGroupIds, scheduleChatId, source };
+  return { allowedUserIds, allowedGroupIds, scheduleChatId };
 }
 
-export function telegramConfigFromEnv(env = process.env) {
-  const list = name => (env[name] ?? '').split(',').map(value => value.trim()).filter(Boolean);
-  return normalize({ allowedUserIds: list('TELEGRAM_ALLOWED_USER_IDS'), allowedGroupIds: list('TELEGRAM_ALLOWED_GROUP_IDS'), scheduleChatId: env.S8_SCHEDULE_TELEGRAM_CHAT_ID?.trim() || null }, 'environment');
+function httpUrl(value, name) {
+  try {
+    const url = new URL(value);
+    if (typeof value !== 'string' || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
+    return url.href;
+  } catch { throw new Error(`s8-config.yml: ${name} must be an HTTP(S) URL without credentials, query or fragment`); }
 }
 
-// 워커 풀 제거 전 설정 키. 기존 파일이 계속 읽히도록 받아들이고 무시한다.
-const RETIRED_KEYS = ['worker-entries', 'worker-communicator', 'repository-mappings', 'workers'];
-
-/** Non-credential settings only. A present file is the sole authority, never merged with env IDs. */
-export function loadS8Config(root = agentRoot, env = process.env) {
-  const file = path.join(root, 's8-config.yml');
+function readConfigFile(file) {
   let fd;
   try {
     if (!lstatSync(file).isFile()) throw new Error();
     fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   }
-  catch (error) { if (error.code === 'ENOENT') return { telegram: telegramConfigFromEnv(env), publicUrl: null }; throw new Error('Cannot open s8-config.yml as a regular file'); }
-  let data;
+  catch (error) { if (error.code === 'ENOENT') return {}; throw new Error('Cannot open s8-config.yml as a regular file'); }
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile() || stat.nlink !== 1 || stat.size > 64 * 1024) throw new Error('s8-config.yml must be a regular, unlinked file of at most 64 KB');
+    let data;
     try {
-      const text = readFileSync(fd, 'utf8');
-      if (Buffer.byteLength(text) > 64 * 1024) throw new Error();
-      const document = parseDocument(text, { uniqueKeys: true });
+      const source = readFileSync(fd, 'utf8');
+      if (Buffer.byteLength(source) > 64 * 1024) throw new Error();
+      const document = parseDocument(source, { uniqueKeys: true });
       if (document.errors.length) throw new Error();
       data = document.toJS({ maxAliasCount: 0 });
     } catch { throw new Error('Invalid s8-config.yml YAML; values are not displayed'); }
+    return data ?? {};
   } finally { closeSync(fd); }
-  if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !['telegram', 'publicUrl', ...RETIRED_KEYS].includes(key))) throw new Error('Invalid s8-config.yml settings');
-  let publicUrl = null;
-  if (data.publicUrl != null) {
-    try {
-      const url = new URL(data.publicUrl);
-      if (typeof data.publicUrl !== 'string' || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
-      publicUrl = url.href;
-    } catch { throw new Error('publicUrl must be an HTTP(S) URL without credentials, query or fragment'); }
-  }
-  return { telegram: normalize(data.telegram ?? (Object.hasOwn(data, 'worker-entries') ? {} : undefined), 'file'), publicUrl };
 }
 
-export function loadTelegramConfig(root = agentRoot, env = process.env) {
-  return loadS8Config(root, env).telegram;
+// 경로 앞의 ~는 홈 디렉터리로 바꾼다(~user 형식은 지원하지 않는다).
+const expandHome = value => value === '~' || value.startsWith('~/') ? path.join(os.homedir(), value.slice(1)) : value;
+
+/** s8-config.yml을 읽어 검증하고 기본값을 채운다. 상대 kbRoot는 저장소 루트 기준 절대 경로로 바꾼다. */
+export function loadS8Config(root = agentRoot) {
+  const data = fields(readConfigFile(path.join(root, 's8-config.yml')), ['kbRoot', 'projectman', 'network', 'telegram', 'publicUrl'], 'top-level');
+  const projectman = fields(data.projectman, ['apiUrl', 'startCommand'], 'projectman');
+  const network = fields(data.network, ['bindIp', 'httpPort'], 'network');
+  const bindIp = network.bindIp == null ? DEFAULTS.network.bindIp : text(network.bindIp, 'network.bindIp');
+  if (!isIP(bindIp) || bindIp === '0.0.0.0' || bindIp === '::') throw new Error('s8-config.yml: network.bindIp must be a specific IP address');
+  const httpPort = network.httpPort ?? DEFAULTS.network.httpPort;
+  if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) throw new Error('s8-config.yml: network.httpPort must be a port number');
+  return {
+    kbRoot: path.resolve(root, data.kbRoot == null ? DEFAULTS.kbRoot : expandHome(text(data.kbRoot, 'kbRoot'))),
+    projectman: {
+      apiUrl: projectman.apiUrl == null ? DEFAULTS.projectman.apiUrl : httpUrl(projectman.apiUrl, 'projectman.apiUrl').replace(/\/$/, ''),
+      startCommand: projectman.startCommand == null ? DEFAULTS.projectman.startCommand : text(projectman.startCommand, 'projectman.startCommand'),
+    },
+    network: { bindIp, httpPort },
+    telegram: normalizeTelegram(data.telegram),
+    publicUrl: data.publicUrl == null ? null : httpUrl(data.publicUrl, 'publicUrl'),
+  };
+}
+
+/**
+ * 설정을 하위 프로세스(Pi 확장·라우터·frontend·스케줄러)가 읽는 내부 환경변수로 넘긴다. 이 이름들은 사용자가 .env에 쓰는 값이 아니다.
+ * 설정에 없는 항목은 지워서 설정 파일만 기준이 되게 한다.
+ */
+export function settingsEnv(config) {
+  return {
+    S8_KB_ROOT: config.kbRoot,
+    PHCMS_API_URL: config.projectman.apiUrl,
+    PHCMS_START_COMMAND: config.projectman.startCommand,
+    S8_BIND_IP: config.network.bindIp,
+    S8_HTTP_PORT: String(config.network.httpPort),
+  };
+}
+
+export function applyS8Config(root = agentRoot, env = process.env) {
+  const config = loadS8Config(root);
+  for (const [name, value] of Object.entries(settingsEnv(config))) {
+    if (value == null) delete env[name];
+    else env[name] = value;
+  }
+  return config;
+}
+
+export function loadTelegramConfig(root = agentRoot) {
+  return loadS8Config(root).telegram;
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { copyFile, mkdir, mkdtemp, realpath, writeFile, readFile, rm } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, realpath, writeFile, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MANAGER_TOOLS } from '../extensions/manager.ts';
@@ -12,11 +12,14 @@ async function copyLauncher(dir) {
     await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
     await copyFile(new URL(`../../${file}`, import.meta.url), path.join(dir, file));
   }
-  for (const file of ['bin/agent.mjs', 'bin/s8.mjs', 'lib/agent/launch.mjs', 'lib/agent/profile.mjs']) {
+  for (const file of ['bin/agent.mjs', 'bin/s8.mjs', 'lib/agent/launch.mjs', 'lib/agent/profile.mjs', 'lib/config/s8-config.mjs']) {
     await mkdir(path.dirname(path.join(dir, 'pi', file)), { recursive: true });
     await copyFile(new URL(`../${file}`, import.meta.url), path.join(dir, 'pi', file));
   }
   await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
+  await symlink(new URL('../node_modules/yaml', import.meta.url).pathname, path.join(dir, 'pi/node_modules/yaml'));
+  // KB는 임시 저장소 자신으로 둔다.
+  await writeFile(path.join(dir, 's8-config.yml'), 'kbRoot: .\n');
   return { general: path.join(dir, 'start-general-agent.sh'), manager: path.join(dir, 'start-manager-agent.sh'), worker: path.join(dir, 'start-worker-agent.sh'), s8: path.join(dir, 's8.sh') };
 }
 
@@ -31,7 +34,7 @@ test('s8 service runs the scheduler in the KB with the Pi environment and reject
   const { s8 } = await copyLauncher(dir);
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   await writeFile(path.join(dir, 'pi/bin/scheduler.mjs'), "console.log(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),kb:process.env.S8_KB_ROOT,config:process.env.S8_PI_CONFIG_ROOT}));");
-  const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: '.' }, cwd: dir };
+  const options = { encoding: 'utf8', env: { ...process.env }, cwd: dir };
   const scheduler = JSON.parse(execFileSync('bash', [s8, 'service', 'scheduler'], options));
   assert.equal(scheduler.cwd, dir);
   assert.equal(scheduler.kb, dir);
@@ -47,7 +50,7 @@ test('manager mode exposes Projectman tools, works in the KB and passes credenti
   const { manager: agent } = await copyLauncher(dir);
   await echoPi(dir);
   const key = 'phcms_sk_' + 'A'.repeat(43);
-  const options = { encoding: 'utf8', env: { ...process.env, S8_KB_ROOT: dir, PHCMS_ACCESS_TOKEN: key } };
+  const options = { encoding: 'utf8', env: { ...process.env, PHCMS_ACCESS_TOKEN: key } };
   const output = execFileSync('bash', [agent, '--control', '--session-dir', path.join(dir, '.pi-runtime/managed/s8-main')], options);
   assert.equal(output.includes(key), false);
   const { args, cwd } = JSON.parse(output);
@@ -100,19 +103,20 @@ test('agent restarts with --continue on request, loads .env with shell syntax an
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), `#!/usr/bin/env node
 const fs = require('node:fs'), path = require('node:path');
 const runs = path.join(${JSON.stringify(dir)}, 'runs');
-fs.appendFileSync(runs, JSON.stringify({ args: process.argv.slice(2), url: process.env.PHCMS_API_URL }) + '\\n');
+fs.appendFileSync(runs, JSON.stringify({ args: process.argv.slice(2), url: process.env.PHCMS_API_URL, key: process.env.PHCMS_ACCESS_TOKEN }) + '\\n');
 if (process.argv.includes('fixture-wait')) setInterval(() => {}, 1000);
 else if (fs.readFileSync(runs, 'utf8').trim().split('\\n').length === 1) fs.writeFileSync(path.join(process.env.S8_PI_RESTART_DIR, 'restart-' + process.ppid), 'restart');
 `, { mode: 0o755 });
-  // 셸 문법(변수 확장, export)을 그대로 지원해야 한다.
-  await writeFile(path.join(dir, '.env'), 'BASE=http://127.0.0.1:8000\nexport PHCMS_API_URL="$BASE/api/v2"\n');
-  const env = { ...process.env, S8_KB_ROOT: dir, PHCMS_API_URL: 'http://inherited.invalid' };
+  // .env는 셸 문법(변수 확장, export)을 그대로 지원해야 한다. 연결 주소는 .env가 아니라 s8-config.yml이 정한다.
+  await writeFile(path.join(dir, '.env'), 'BASE=fixture\nexport PHCMS_ACCESS_TOKEN="$BASE-key"\nPHCMS_API_URL=http://ignored.invalid\n');
+  await writeFile(path.join(dir, 's8-config.yml'), 'kbRoot: .\nprojectman:\n  apiUrl: http://127.0.0.1:8000/api/v2\n');
+  const env = { ...process.env, PHCMS_API_URL: 'http://inherited.invalid' };
   execFileSync('bash', [agent, '--print'], { encoding: 'utf8', env });
   const runs = (await readFile(path.join(dir, 'runs'), 'utf8')).trim().split('\n').map(JSON.parse);
   assert.equal(runs.length, 2);
   assert.ok(!runs[0].args.includes('--continue'));
   assert.ok(runs[1].args.includes('--continue'));
-  assert.ok(runs.every(run => run.url === 'http://127.0.0.1:8000/api/v2'));
+  assert.ok(runs.every(run => run.url === 'http://127.0.0.1:8000/api/v2' && run.key === 'fixture-key'));
   const child = spawn('bash', [agent, '--print', '--model', 'fixture-wait'], { env, stdio: 'ignore' });
   t.after(() => child.kill('SIGKILL'));
   for (let i = 0; i < 100 && (await readFile(path.join(dir, 'runs'), 'utf8')).trim().split('\n').length < 3; i++) await new Promise(resolve => setTimeout(resolve, 50));

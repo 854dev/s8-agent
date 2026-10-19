@@ -5,7 +5,7 @@ import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { dueDate, isDue, validId, validateJob } from './store.mjs';
 import { visible } from '../../../apps/telegram-gateway/gateway.mjs';
-import { loadTelegramConfig, telegramConfigFromEnv } from '../config/s8-config.mjs';
+import { loadTelegramConfig } from '../config/s8-config.mjs';
 import { runProjectmanTurn } from '../projectman/dispatch.ts';
 import { acquirePidLock } from '../runtime/process.mjs';
 
@@ -71,7 +71,7 @@ function runScript(scriptPath, job, options) {
   });
 }
 
-export async function runScheduler({ root, cwd = process.cwd(), bash, env = process.env, fetchImpl = fetch, onResult = console.log, now = () => new Date(), telegramSettings = loadTelegramConfig(path.resolve(root, '../..'), env), projectmanTurn = runProjectmanTurn }) {
+export async function runScheduler({ root, cwd = process.cwd(), bash, env = process.env, fetchImpl = fetch, onResult = console.log, now = () => new Date(), telegramSettings = loadTelegramConfig(path.resolve(root, '../..')), projectmanTurn = runProjectmanTurn }) {
   const scripts = path.join(root, 'scripts');
   const jobsFile = path.join(root, 'jobs.json');
   const stateFile = path.join(root, 'state.json');

@@ -74,7 +74,7 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
     if (ctx.mode !== 'tui') return;
     const token = config.TELEGRAM_BOT_TOKEN;
     let current;
-    try { current = settings ?? loadTelegramConfig(undefined, config); }
+    try { current = settings ?? loadTelegramConfig(); }
     catch (error) { console.error(error.message); return; }
     let users = new Set(current.allowedUserIds);
     let groups = new Set(current.allowedGroupIds);
@@ -84,7 +84,7 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
     stopOwner = ownership({ port, key: token, started, session, onRelease: stop, onAcquire: releaseOwner => {
       // A prior Pi owner must re-read the shared policy before resuming polling.
       try {
-        current = settings ?? loadTelegramConfig(undefined, config);
+        current = settings ?? loadTelegramConfig();
         users = new Set(current.allowedUserIds); groups = new Set(current.allowedGroupIds);
         if (!users.size && !groups.size) { releaseOwner(); return; }
       } catch (error) { console.error(error.message); releaseOwner(); return; }

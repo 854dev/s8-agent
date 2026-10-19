@@ -1,6 +1,6 @@
 # s8 운영 절차
 
-인프라 기준은 [`INFRASTRUCTURE.md`](INFRASTRUCTURE.md)를 따른다. 에이전트 단독 실행은 `start-general-agent.sh`·`start-manager-agent.sh`·`start-worker-agent.sh`, tmux 런타임·서비스는 `s8.sh`, 통합 인프라 실행은 `start-infra.sh`를 사용하고, 그 밖에는 tmux, npm, Docker Compose, curl의 표준 명령을 사용한다.
+인프라 기준은 [`INFRASTRUCTURE.md`](INFRASTRUCTURE.md)를 따른다. 에이전트 단독 실행은 `start-general-agent.sh`·`start-manager-agent.sh`·`start-worker-agent.sh`, tmux 런타임·서비스는 `s8.sh`, 통합 인프라 실행은 `start-infra.sh`를 사용하고, 그 밖에는 tmux, npm, curl의 표준 명령을 사용한다.
 
 ## Telegram 전체 재시작
 
@@ -33,24 +33,23 @@ Pi 창이 열리면 `/login`을 실행한다. credential과 세션은 `.pi-runti
 
 - 기본 `s8-main` 세션에 `pi`·`scheduler`·`shell` 창을 준비한 뒤 자동 접속 없이 목록 출력 (PH-CMS 별도 실행)
 - 프로젝트 로컬 Pi 바이너리 선택
-- 루트 `.env`를 읽고 작업 디렉터리를 `${S8_KB_ROOT:-../854_md}`로 고정
+- 루트 `.env`(비밀값)와 `s8-config.yml`(설정)을 읽고 작업 디렉터리를 `kbRoot`(기본 `../854_md`)로 고정
 - 인증정보와 세션을 `.pi-runtime/`로 분리
 - `pi/settings.json`을 런타임 설정 링크로 참조하며, 공유 extension, skill, 시스템 지침은 `pi/`에서 로드
 - 사용할 기본 파일 도구와 `projectman`·`scheduler` 도구 명시
 
 ## Telegram ID 설정
 
-- 봇 토큰과 PH-CMS 서비스 키는 환경변수에만 유지한다. `s8-config.yml`에는 `telegram.allowedUserIds`, `allowedGroupIds`, `scheduleChatId`만 저장한다.
-- S8 Telegram 연결·독립 게이트웨이·스케줄러·부재중 운영 CLI는 같은 설정 로더를 사용한다. 파일이 있으면 ID 설정은 파일만 사용하며, 잘못된 파일은 환경변수로 우회하지 않는다.
-- 파일이 없으면 기존 ID 환경변수로 동작한다. 파일의 빈 허용 목록은 접근을 막고, `scheduleChatId: null`은 예약 알림을 보내지 않는다. 대상은 허용 목록의 개인 또는 그룹이어야 한다.
-- 이미 환경이 로드된 프로세스에서 `node pi/bin/s8-config.mjs init`으로 기존 ID만 이관한다. 저장소 루트 기준이며 인증정보를 읽어 복사하지 않고 기존 파일도 덮어쓰지 않는다. 일반 사용자 셸에 ID 환경이 없으면 예시 파일을 참고해 직접 준비한다.
-- `node pi/bin/s8-config.mjs show`로 비인증 설정과 출처를 검증한다. 허용 사용자 제거·그룹 추가는 접근 권한에 영향을 주므로 사용자 승인 범위에서만 변경한다.
+- 봇 토큰과 PH-CMS 서비스 키는 `.env`에만 둔다. `s8-config.yml`의 `telegram`에는 `allowedUserIds`, `allowedGroupIds`, `scheduleChatId`만 저장한다.
+- S8 Telegram 연결·독립 게이트웨이·스케줄러·부재중 운영 CLI는 같은 설정 로더를 사용한다. ID 설정은 이 파일만 사용하며 예전 ID 환경변수는 읽지 않는다.
+- 빈 허용 목록은 접근을 막고, `scheduleChatId: null`은 예약 알림을 보내지 않는다. 대상은 허용 목록의 개인 또는 그룹이어야 한다.
+- `node pi/bin/s8-config.mjs show`로 설정을 검증한다. 허용 사용자 제거·그룹 추가는 접근 권한에 영향을 주므로 사용자 승인 범위에서만 변경한다.
 - 변경 후 S8의 Telegram 연결과 스케줄러를 재시작한다. 기존 Pi가 polling 소유권을 다시 얻을 때도 파일 정책을 새로 읽는다. 이미 연결된 프로세스에 모든 변경이 즉시 반영되는 것은 아니다.
-- 롤백은 파일을 제거하고 기존 ID 환경변수로 재시작한다. 파일은 Git 제외 대상이며 작업 데이터·발급된 서비스 키·봇 토큰은 변경하지 않는다.
+- 파일은 Git 제외 대상이며 작업 데이터·발급된 서비스 키·봇 토큰은 변경하지 않는다.
 
 ## 작업요청 등록
 
-- PH-CMS의 `POST /projectman/intakes/preview`, `POST /projectman/intakes`, `GET /projectman/intakes/:requestId`가 있는 버전을 먼저 적용하고 S8을 재시작한다. API prefix는 기존 `PHCMS_API_URL`을 사용하며 새 환경변수·서비스 키·DB 마이그레이션은 없다. 운영 서버 적용은 별도 승인 후 수행한다.
+- PH-CMS의 `POST /projectman/intakes/preview`, `POST /projectman/intakes`, `GET /projectman/intakes/:requestId`가 있는 버전을 먼저 적용하고 S8을 재시작한다. API prefix는 `s8-config.yml`의 `projectman.apiUrl`을 사용하며 새 설정·서비스 키·DB 마이그레이션은 없다. 운영 서버 적용은 별도 승인 후 수행한다.
 - `intake_source`가 허용된 MD 파일 또는 실제 사용자 메시지를 원문 그대로 캡처한다. 모델이 원문을 다시 써서 전달하지 못하며 `sourceId`의 페이지 조회로 분석한다. 파일은 보호 경로·개발 루트 외부·하드 링크·UTF-8/제어문자·크기를 검증하고 읽는 동안의 변경도 확인한다. S8이 캡처를 분석하고 기존 항목을 조회한 뒤 `sourceId`와 등록안으로 `projectman intake_preview`를 호출한다. `intake_register` 또는 `/projectman-register <requestId>`의 대화형 확인 전에는 생성하지 않는다. headless 등록은 거부한다. Telegram 승인 UI 전달 여부는 별도 검증하며 확인되지 않으면 웹 터미널/TUI를 사용한다.
 - 서버는 기존 콘텐츠 생성의 계층·권한·채널 규칙·생성 감사 경계를 재사용한다. 등록은 채널별 직렬 트랜잭션이며 부모를 잠그고 미리보기의 콘텐츠 지문을 재검증한다. 중간 삽입 실패는 생성·감사를 모두 롤백한다. 같은 요청 ID로 다른 등록안을 보내면 409다.
 - S8은 성공 후 모든 항목을 재조회해 계층·자동 실행 꺼짐·승인 필요 설정을 확인한다. 응답 유실/검증 실패는 완료로 보고하지 않고 같은 요청 ID를 보존한다. 네트워크 오류에 쓰기 자동 재시도는 없다.
@@ -136,46 +135,11 @@ npm run preview --prefix frontend -- --host 127.0.0.1 --port 4178
 curl -fsS http://127.0.0.1:4178/s8/
 ```
 
-## Docker Compose와 Nginx
+## 라우터와 KB Browser
 
-`./start-infra.sh`는 저장소 루트 `.env`를 Compose에 명시 전달한다. 매번 기존 `s8-infra` 세션의 모든 창을 종료하고 새 창을 만든 뒤 Compose에 `up --build --force-recreate -d`를 실행해 Nginx·KB Browser 컨테이너를 교체한다. 실행 중이던 창 프로세스도 종료되므로 필요한 작업은 먼저 저장한다. frontend도 새 창에서 다시 시작한다. PHCMS 로직은 S8 실행 코드에 포함하지 않는다. 필요하면 `.env`의 `PHCMS_START_COMMAND`에 `cd /home/dev_854/ph-cms && pnpm build && pnpm dev`처럼 실행 명령을 지정하고, 새 `phcms` 창에서 실행한다. 미설정 시 해당 창은 비워 둔다. `NGINX_BIND_IP`는 셸 환경변수가 `.env`보다 우선하며 둘 다 없으면 localhost(`127.0.0.1`)에만 바인딩한다. 웹 터미널 세션 목록에서 `s8-infra`를 선택할 수 있다.
+`./start-infra.sh`는 `s8-config.yml`의 `kbRoot`·`network.bindIp`·`network.httpPort`를 환경변수로 라우터·KB Browser·frontend에 넘긴다(비밀값은 넘기지 않는다). 매번 기존 `s8-infra` 세션의 모든 창을 종료하고 새 창을 만든다. `router` 창에서 Node 라우터(`infra/router/router.mjs`)를, `kb-browser` 창에서 KB Browser(`127.0.0.1:8787`, 업로드는 `.s8-runtime/data/uploads`)를 실행한다. 사전에 `npm ci --prefix apps/kb-browser`가 필요하다. 리눅스에서는 일반 사용자에게 80번 포트를 허용하는 설정을 한 번 적용해야 한다([README의 80번 포트 허용](README.md#80번-포트-허용-리눅스)). 허용되지 않았으면 `start-infra.sh`가 명령을 안내하고 종료한다. 실행 중이던 창 프로세스도 종료되므로 필요한 작업은 먼저 저장한다. frontend도 새 창에서 다시 시작한다. PHCMS 로직은 S8 실행 코드에 포함하지 않는다. 필요하면 `s8-config.yml`의 `projectman.startCommand`에 `cd /home/dev_854/ph-cms && pnpm build && pnpm dev`처럼 실행 명령을 지정하고, 새 `phcms` 창에서 실행한다. 미설정 시 해당 창은 비워 둔다. `network.bindIp`가 없으면 localhost(`127.0.0.1`)에만 바인딩한다. 웹 터미널 세션 목록에서 `s8-infra`를 선택할 수 있다.
 
-로컬 전용 실행:
-
-```bash
-NGINX_BIND_IP=127.0.0.1 \
-  docker compose --env-file .env -f infra/nginx/docker-compose.yml up -d --build
-```
-
-Tailscale 전용 실행:
-
-```bash
-tailscale ip -4
-NGINX_BIND_IP=<TAILSCALE_IP> \
-  docker compose --env-file .env -f infra/nginx/docker-compose.yml up -d --build
-```
-
-상태와 로그:
-
-```bash
-docker compose --env-file .env -f infra/nginx/docker-compose.yml ps
-docker compose --env-file .env -f infra/nginx/docker-compose.yml logs --tail 100 nginx kb-browser
-```
-
-Nginx 설정 검사:
-
-```bash
-docker compose --env-file .env -f infra/nginx/docker-compose.yml \
-  run --rm --no-deps nginx nginx -t
-```
-
-중지:
-
-```bash
-docker compose --env-file .env -f infra/nginx/docker-compose.yml down
-```
-
-`down`은 서비스를 중단하므로 사용자의 명시적 요청이나 승인 후 실행한다.
+Tailscale 전용으로 쓸 때는 `tailscale ip -4`로 확인한 주소를 `s8-config.yml`의 `network.bindIp`에 넣는다. 경로 목록과 직접 실행 방법은 [`infra/router/README.md`](infra/router/README.md)를 따른다. 로그는 `s8-infra`의 `router`·`kb-browser` 창에서 확인한다.
 
 ## 상태 점검
 
@@ -183,7 +147,7 @@ docker compose --env-file .env -f infra/nginx/docker-compose.yml down
 ./start-general-agent.sh --version
 tmux has-session -t s8-main
 curl -fsS http://127.0.0.1:4178/s8/
-docker compose --env-file .env -f infra/nginx/docker-compose.yml ps
+tmux has-session -t s8-infra
 curl -fsS http://<BIND_IP>/health
 curl -fsS http://<BIND_IP>/api/docs/health
 curl -fsS -H 'Accept: text/html' http://<BIND_IP>/s8/knowledge-base
@@ -191,15 +155,14 @@ curl -fsS -H 'Accept: text/html' http://<BIND_IP>/s8/knowledge-base
 
 ## PH-CMS 프록시
 
-- PH-CMS는 호스트 `127.0.0.1:8000`에서 별도로 실행한다. Nginx 설정만으로 서버가 시작되지는 않는다.
+- PH-CMS는 호스트 `127.0.0.1:8000`에서 별도로 실행한다. 라우터만으로 서버가 시작되지는 않는다.
 - `/api/v2/`는 원래 URI를 유지해 PH-CMS로 전달한다. `/s8/`, 문서·업로드·터미널 경로는 그대로 유지한다.
 - 관리자 로그인: `http://<TAILSCALE_IP>/api/v2/admin/login`
 - 관리자 UI의 API URL은 같은 Tailscale origin, API prefix는 `/api/v2`로 지정한다. 원격 장치에서 `localhost:8000`을 지정하지 않는다.
-- 관리자 로그인 후 키 발급 요청은 PH-CMS 관리자 페이지의 같은 origin에서 실행한다. Nginx는 별도 관리자 인증을 제공하지 않으며 PH-CMS 인증·권한 검사를 유지한다.
-- 검증 후 무중단 적용: `docker exec 854md-nginx nginx -t && docker exec 854md-nginx nginx -s reload`
+- 관리자 로그인 후 키 발급 요청은 PH-CMS 관리자 페이지의 같은 origin에서 실행한다. 라우터는 별도 관리자 인증을 제공하지 않으며 PH-CMS 인증·권한 검사를 유지한다.
 - 상태 확인: `curl -fsS http://<TAILSCALE_IP>/api/v2/health`
-- `/api/v2/`만 502이면 PH-CMS 실행 상태와 컨테이너에서 `host.docker.internal:8000` 접근을 확인한다.
-- 롤백은 `/api/v2/` location과 `phcms_api` upstream을 제거하고 설정 검사·reload를 수행한다. PH-CMS DB와 S8 세션에는 영향을 주지 않는다.
+- `/api/v2/`만 502이면 PH-CMS가 `127.0.0.1:8000`에서 응답하는지 확인한다.
+- 롤백은 `infra/router/router.mjs`의 `/api/v2/` 경로를 제거하고 `router` 창을 다시 시작한다. PH-CMS DB와 S8 세션에는 영향을 주지 않는다.
 
 ## PH-CMS MCP 인증 연결
 
@@ -220,15 +183,14 @@ Pi가 시작되지 않음:
 - `pi/node_modules/.bin/pi` 존재 여부를 확인한다.
 - credential 문제면 Pi를 열어 `/login`을 다시 실행한다.
 
-Nginx `/health` 실패:
+라우터 `/health` 실패:
 
-- Docker daemon 상태를 확인한다.
-- `NGINX_BIND_IP`가 현재 장비에 존재하는 주소인지 확인한다.
-- Compose 상태와 Nginx 로그를 확인한다.
+- `s8-infra`의 `router` 창 출력을 확인한다.
+- `s8-config.yml`의 `network.bindIp`가 현재 장비에 존재하는 주소인지, 다른 프로세스가 같은 포트를 쓰지 않는지 확인한다. 권한 오류(EACCES)면 README의 80번 포트 허용을 적용한다.
 
 API health만 실패:
 
-- `kb-browser` 컨테이너 상태와 로그를 확인한다.
+- `s8-infra`의 `kb-browser` 창 출력을 확인한다.
 - `npm test --prefix apps/kb-browser`를 실행한다.
 
 `/s8/`만 502:
@@ -249,7 +211,8 @@ API health만 실패:
 bash -n start-general-agent.sh start-manager-agent.sh start-worker-agent.sh
 bash -n s8.sh
 ./start-general-agent.sh --version
-NGINX_BIND_IP=127.0.0.1 docker compose --env-file /dev/null -f infra/nginx/docker-compose.yml config --quiet
+bash -n start-infra.sh
+node --test pi/test/router.test.mjs
 npm test --prefix apps/terminal-gateway
 npm test --prefix apps/kb-browser
 npm run test:run --prefix frontend

@@ -11,9 +11,11 @@ import { hasReviewedPreflight } from '../lib/projectman/preflight.mjs';
 import { loadProfile } from '../lib/agent/profile.mjs';
 import { startWork } from '../lib/agent/work.mjs';
 import { flushDevelopmentOutbox } from '../lib/development/outbox.mjs';
+import { registerSecretFreeBash } from './secret-free-bash.ts';
 
 export const MANAGER_TOOLS: string[] = loadProfile('manager').tools;
-export const MANAGER_EXTENSION_TOOLS = ['projectman', 'kb', 'scheduler', 'run_worker'];
+// bash는 비밀값 환경변수를 지운 버전으로 대체한다.
+export const MANAGER_EXTENSION_TOOLS = ['projectman', 'kb', 'scheduler', 'run_worker', 'bash'];
 export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
   const libraries = new Map<string, ReturnType<typeof managerKb>>();
   // Development runs go to a worker (run_worker); general shell work uses bash.
@@ -26,6 +28,7 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
     return typeof value === 'function' ? value.bind(target) : value;
   } }));
   registerScheduler(pi, { projectmanOnly: true });
+  registerSecretFreeBash(pi);
   pi.registerTool({
     name: 'kb', label: 'KB', description: 'KB Markdown search/get/policy/write/delete only. Read policy before editing. Writes require an interactive confirmation and expectedVersion from get (null for create). No code, links or hidden paths.',
     parameters: Type.Object({ action: Type.Union([Type.Literal('search'), Type.Literal('get'), Type.Literal('policy'), Type.Literal('write'), Type.Literal('delete')]), query: Type.Optional(Type.String()), path: Type.Optional(Type.String()), content: Type.Optional(Type.String()), expectedVersion: Type.Optional(Type.Union([Type.String(), Type.Null()])) }),

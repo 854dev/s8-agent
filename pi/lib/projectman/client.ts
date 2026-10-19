@@ -55,10 +55,10 @@ export class ProjectmanClient {
     this.token = token;
     this.fetcher = fetcher;
     this.signal = signal;
-    if (!base || !token) throw new Error('PHCMS_API_URL and PHCMS_ACCESS_TOKEN are required');
+    if (!base || !token) throw new Error('Projectman needs projectman.apiUrl in s8-config.yml and PHCMS_ACCESS_TOKEN in .env');
     const url = new URL(base);
     if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) {
-      throw new Error('PHCMS_API_URL must use HTTPS or loopback HTTP');
+      throw new Error('projectman.apiUrl must use HTTPS or loopback HTTP');
     }
   }
 

@@ -322,7 +322,7 @@ export class Bot {
   constructor({ token, users, groups, fetchImpl = fetch, spawnPi = (key) => spawn(path.join(root, 'start-manager-agent.sh'), [
     '--mode', 'rpc', '--continue', '--session-dir', path.join(root, '.pi-runtime', 'telegram-sessions', key),
   ], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] }) }) {
-    if (!token || (!users.size && !groups.size)) throw new Error('Telegram requires an environment bot token and allowed IDs in s8-config.yml (or legacy environment settings)');
+    if (!token || (!users.size && !groups.size)) throw new Error('Telegram requires an environment bot token and allowed IDs in s8-config.yml');
     this.token = token;
     this.users = users;
     this.groups = groups;

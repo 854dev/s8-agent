@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadSkills } from '@earendil-works/pi-coding-agent';
@@ -67,4 +67,19 @@ test('Pi loads every profile skill without diagnostics, and vendored skills keep
   assert.deepEqual(names.worker, ['ponytail', 'test-driven-development', 'systematic-debugging', 'verification-before-completion', 's8-self-review']);
   assert.deepEqual(names.manager, ['s8-operations', 's8-requirements', 's8-task-plan', 's8-plan-review']);
   assert.deepEqual(names.general, ['ponytail']);
+});
+
+test('every role replaces bash with one that hides secret environment values from the agent', async t => {
+  const { registerSecretFreeBash } = await import('../extensions/secret-free-bash.ts');
+  const tools = new Map();
+  registerSecretFreeBash({ registerTool: tool => tools.set(tool.name, tool) }, os.tmpdir());
+  const previous = { PHCMS_ACCESS_TOKEN: process.env.PHCMS_ACCESS_TOKEN, S8_KB_ROOT: process.env.S8_KB_ROOT };
+  Object.assign(process.env, { PHCMS_ACCESS_TOKEN: 'fixture-secret-value', S8_KB_ROOT: '/fixture/kb' });
+  t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  const result = await tools.get('bash').execute('call', { command: 'env' }, undefined, () => {});
+  const output = result.content.map(part => part.text).join('');
+  assert.ok(output.includes('S8_KB_ROOT=/fixture/kb'));
+  assert.ok(!output.includes('fixture-secret-value'));
+  // 매니저·워커·범용 확장 모두 이 bash를 등록한다.
+  for (const file of ['manager.ts', 'worker.ts', 'general.mjs']) assert.match(readFileSync(new URL(`../extensions/${file}`, import.meta.url), 'utf8'), /registerSecretFreeBash\(pi/);
 });

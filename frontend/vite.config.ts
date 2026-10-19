@@ -1,16 +1,11 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
-import { loadEnv } from 'vite'
-import { fileURLToPath } from 'node:url'
 
-export default defineConfig(({ command, mode }) => {
-  // Compose uses the repository root configuration, not frontend/.env.
-  // Keep router settings server-side; never expose them through VITE_* variables.
-  const env = command === 'serve' && mode !== 'test'
-    ? loadEnv(mode, fileURLToPath(new URL('..', import.meta.url)), 'NGINX_')
-    : {}
-  const host = process.env.NGINX_BIND_IP || env.NGINX_BIND_IP || '127.0.0.1'
-  const port = process.env.NGINX_HTTP_PORT || env.NGINX_HTTP_PORT || '80'
+export default defineConfig(() => {
+  // Router settings come from s8-config.yml; start-infra.sh exports them (node pi/bin/s8-config.mjs shell-env).
+  // Keep them server-side; never expose them through VITE_* variables.
+  const host = process.env.S8_BIND_IP || '127.0.0.1'
+  const port = process.env.S8_HTTP_PORT || '80'
   const proxy = {
     '/api/projectman': { target: 'http://127.0.0.1:8791', changeOrigin: false },
     '/api/terminal': { target: 'http://127.0.0.1:8790', ws: true, changeOrigin: false },

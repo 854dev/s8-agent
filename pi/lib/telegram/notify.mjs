@@ -1,7 +1,7 @@
 import { visible } from '../../../apps/telegram-gateway/gateway.mjs';
-import { telegramConfigFromEnv } from '../config/s8-config.mjs';
+import { loadTelegramConfig } from '../config/s8-config.mjs';
 
-export const sendTelegram = async (text, env = process.env, fetchImpl = fetch, settings = telegramConfigFromEnv(env)) => {
+export const sendTelegram = async (text, env = process.env, fetchImpl = fetch, settings = loadTelegramConfig()) => {
   if (!env.TELEGRAM_BOT_TOKEN || !settings.scheduleChatId) return false;
   const allowed = new Set([...settings.allowedUserIds, ...settings.allowedGroupIds]);
   if (!allowed.has(settings.scheduleChatId)) throw new Error('Scheduled Telegram target must be in an allowed user or group list.');

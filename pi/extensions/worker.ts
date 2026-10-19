@@ -5,13 +5,13 @@
 // S8_WORKER_UID가 있으면 그 UID만 다룬다(start-worker-agent.sh --uid).
 import { fileURLToPath } from 'node:url';
 import { Type } from 'typebox';
-import { createBashTool, type ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { registerSecretFreeBash } from './secret-free-bash.ts';
 import { projectmanFromEnv } from '../lib/projectman/client.ts';
 import { loadProfile } from '../lib/agent/profile.mjs';
 import { claimWork, reportWork, stillActive } from '../lib/agent/worker-run.mjs';
 
 export const WORKER_TOOLS: string[] = loadProfile('worker').tools;
-const SECRET = /(?:TOKEN|PASSWORD|SECRET|API_KEY|ACCESS_KEY|AUTHORIZATION|COOKIE)/i;
 const CHECK_INTERVAL_MS = 30_000;
 const json = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }], details: undefined });
 
@@ -48,9 +48,7 @@ export default function worker(pi: ExtensionAPI, { root = fileURLToPath(new URL(
     },
   });
 
-  // 비밀정보 환경변수를 제거한 bash로 기본 bash를 대체한다.
-  const bash = createBashTool(process.cwd(), { spawnHook: context => ({ ...context, env: Object.fromEntries(Object.entries(context.env).filter(([key]) => !SECRET.test(key))) }) });
-  pi.registerTool({ ...bash, execute: (id, params, signal, onUpdate) => bash.execute(id, params, signal, onUpdate) });
+  registerSecretFreeBash(pi);
 
   pi.on('session_start', () => pi.setActiveTools(WORKER_TOOLS));
   pi.on('tool_call', async event => {

@@ -88,7 +88,7 @@ dev_854/
 - 예약 CRUD·실행·배치 제어: `pi/extensions/scheduler.ts`, `pi/lib/scheduler/`
 - 지식베이스·업로드 API: `apps/kb-browser/`
 - MCP 허브: `apps/mcp-hub/`
-- Nginx와 Compose: `infra/nginx/`
+- 라우터(경로별 proxy): `infra/router/`
 
 ## 코드 위치와 역할
 
@@ -153,9 +153,9 @@ npm run build --prefix frontend
 - Node.js 22.19.0 이상과 npm
 - 기본 통합 실행·지속 실행·웹 터미널에는 tmux
 - 예약 쉘 스크립트에는 Bash. Windows에서는 Git Bash 등으로 제공
-- 개발 작업의 테스트·빌드와 웹 인프라에는 Docker
+- 개발 작업의 테스트·빌드에는 Docker(웹 인프라에는 필요 없음)
 - Projectman에는 실행 중인 PH-CMS와 DB, 에이전트 서비스 키
-- 다른 장치에 웹 콘솔을 노출할 때는 Tailscale과 Nginx
+- 다른 장치에 웹 콘솔을 노출할 때는 Tailscale
 
 ```bash
 cd /path/to/s8-agent
@@ -178,19 +178,38 @@ tmux attach-session -t s8-main
 
 Pi와 서비스는 기본 `s8-main` 세션의 `pi`·`scheduler` 창에 유지된다. 작업 워커는 `s8-workers` 세션의 UID 창에서 실행된다. `shell` 창에서 호스트 명령을 실행한다. 스크립트는 자동 접속하지 않으며 웹 터미널에서 세션을 선택하거나 `tmux attach-session -t s8-main`으로 접속한다. PH-CMS는 별도로 실행한다.
 
-실행 스크립트는 시작할 때 저장소 루트의 `.env`를 로드한다(범용 모드는 제외). 처음 설정하는 장비에서만 예시를 복사하고, 이미 있는 설정은 덮어쓰지 않는다.
+### 설정 파일
+
+설정은 두 파일로 나눈다. 둘 다 Git에 포함되지 않으며, 처음 설정하는 장비에서만 예시를 복사한다.
 
 ```bash
-cp -n .env.example .env
+cp -n .env.example .env                  # 비밀값: 서비스 키, 봇 토큰
+cp -n s8-config.example.yml s8-config.yml  # 그 밖의 장비별 설정
+node pi/bin/s8-config.mjs show           # s8-config.yml 검증·확인
 ```
 
-```dotenv
-S8_KB_ROOT=/home/user/kb_root
-PHCMS_API_URL=http://127.0.0.1:8000/api/v2
-# PHCMS_ACCESS_TOKEN에는 직접 발급한 에이전트 서비스 키를 설정한다.
+| 파일 | 내용 | LLM 접근 |
+| --- | --- | --- |
+| `.env` | `PHCMS_ACCESS_TOKEN`(Projectman 에이전트 서비스 키), `TELEGRAM_BOT_TOKEN` | 읽기 차단, 에이전트 bash에 넘기지 않음 |
+| `s8-config.yml` | `kbRoot`, `projectman.apiUrl`·`startCommand`, `network.bindIp`·`httpPort`, `telegram` ID, `publicUrl` | 읽을 수 있음 |
+
+- 각 항목의 의미와 기본값은 [`.env.example`](.env.example)과 [`s8-config.example.yml`](s8-config.example.yml)의 주석에 있다.
+- `s8-config.yml`에 모르는 키가 있으면 시작하지 않는다. 예전 `.env`의 `S8_KB_ROOT`·`PHCMS_API_URL`·`NGINX_*`·`PHCMS_START_COMMAND`·Telegram ID 변수는 더 이상 읽지 않으므로 `s8-config.yml`로 직접 옮긴다.
+- 실행기는 시작할 때 `.env`를 읽고(범용 모드는 제외) `s8-config.yml` 값을 하위 프로세스에 넘긴다. 같은 이름의 환경변수가 셸에 있어도 설정 파일이 우선한다.
+
+### 80번 포트 허용 (리눅스)
+
+라우터는 일반 사용자 권한의 Node 프로세스로 `network.httpPort`(기본 80)를 연다. 리눅스는 기본으로 1024 미만 포트를 일반 사용자에게 막으므로, 장비마다 한 번 아래 명령으로 80번부터 허용한다. 설정은 재부팅 후에도 유지된다. macOS는 이 제한이 없어 필요 없다.
+
+```bash
+echo 'net.ipv4.ip_unprivileged_port_start=80' | sudo tee /etc/sysctl.d/90-s8-router-port.conf
+sudo sysctl --system
+sysctl net.ipv4.ip_unprivileged_port_start   # 80이면 적용됨
 ```
 
-`S8_KB_ROOT`에는 실제 지식베이스의 절대 경로를 지정한다. `.env`는 Git에 포함되지 않는다.
+- 허용하지 않은 상태로 `./start-infra.sh`를 실행하면 이 명령을 안내하고 아무것도 바꾸지 않은 채 종료한다.
+- 이 설정은 장비 전체에 적용된다. 이 장비의 모든 사용자 프로세스(에이전트가 실행한 명령 포함)가 80번 이상 포트를 열 수 있으므로, 여러 사람이 쓰는 장비에서는 적용 전에 검토한다.
+- 되돌리기: `sudo rm /etc/sysctl.d/90-s8-router-port.conf && sudo sysctl -w net.ipv4.ip_unprivileged_port_start=1024`
 
 ## 실행 스크립트
 
@@ -199,7 +218,7 @@ PHCMS_API_URL=http://127.0.0.1:8000/api/v2
 | 스크립트 | 역할 | 실행 예 |
 | --- | --- | --- |
 | `s8.sh` | 모든 tmux 세션 종료 후 선택한 모드로 시작 | `./s8.sh --session manager` |
-| `start-infra.sh` | 기존 `s8-infra` 창과 Nginx·KB Browser 컨테이너를 교체하고 frontend·콘솔 API·터미널 게이트웨이를 재시작 (PHCMS 명령은 선택 설정) | `./start-infra.sh` |
+| `start-infra.sh` | 기존 `s8-infra` 창을 교체하고 라우터·KB Browser·frontend·콘솔 API·터미널 게이트웨이를 재시작 (PHCMS 명령은 선택 설정) | `./start-infra.sh` |
 | `s8.sh work <UID>` | 승인된 작업의 워커를 `s8-workers:<UID>` 창에 실행 | `./s8.sh work abc123` |
 | `s8.sh finish <UID> --run-id <UUID> --confirm-stopped` | 멈춘 실행을 실패로 보고해 마무리(claim 기록이 없어도 가능, Projectman 화면의 `실패로 마무리`와 동일, 절차는 OPERATIONS.md) | `./s8.sh finish abc123 --run-id … --confirm-stopped` |
 | `s8.sh service scheduler` | 통합 실행에서 사용하는 예약 데몬 진입점. 단독 실행도 지원 | `./s8.sh service scheduler` |
@@ -248,7 +267,7 @@ npm --prefix frontend run preview -- --host 127.0.0.1 --port 4178 --strictPort
 ## 웹 터미널
 
 - `/s8/terminal`은 기본으로 호스트 셸에 접속한다. 세션 선택에서 같은 호스트 사용자·tmux 서버의 PHCMS, S8 스케줄러·작업 워커, Pi 등 모든 실행 세션을 제어한다. Pi 관리 표시가 없어도 접속할 수 있으며, tmux 밖의 서비스는 호스트 셸에서 운영 명령으로 제어한다.
-- `./start-infra.sh`는 저장소 루트 `.env`를 Compose에 명시 전달하고, 실행할 때마다 기존 `s8-infra` 창 전체(PHCMS 포함)와 Nginx·KB Browser 컨테이너를 교체한 뒤 frontend·Projectman 콘솔 API·터미널 게이트웨이를 재시작한다. 사전에 `pi`, `frontend`, `apps/terminal-gateway`의 npm 의존성을 설치한다. PHCMS 실행은 선택 사항이며 `.env`의 `PHCMS_START_COMMAND`에 명령을 지정하면 새 `phcms` 창에서 실행한다. 기본값은 미설정으로, PHCMS 창은 비워 둔다. 실행 중인 창의 프로세스는 종료되므로 필요한 작업은 먼저 저장한다. 웹 터미널 세션 목록에서 `s8-infra`를 선택해 접속한다. `NGINX_BIND_IP`가 셸 환경변수나 `.env`에 없으면 localhost(`127.0.0.1`)에만 바인딩한다.
+- `./start-infra.sh`는 `s8-config.yml`의 KB 경로·바인딩 IP·포트를 라우터·KB Browser·frontend에 넘기고(비밀값은 넘기지 않는다), 실행할 때마다 기존 `s8-infra` 창 전체(PHCMS 포함)와 라우터·KB Browser를 교체한 뒤 frontend·Projectman 콘솔 API·터미널 게이트웨이를 재시작한다. 라우터(`infra/router/router.mjs`)와 KB Browser는 Docker 없이 `router`·`kb-browser` 창의 Node 프로세스로 실행한다. 리눅스에서는 먼저 [80번 포트 허용](#80번-포트-허용-리눅스)을 한 번 적용한다. 사전에 `pi`, `frontend`, `apps/terminal-gateway`, `apps/kb-browser`의 npm 의존성을 설치한다. PHCMS 실행은 선택 사항이며 `s8-config.yml`의 `projectman.startCommand`에 명령을 지정하면 새 `phcms` 창에서 실행한다. 기본값은 미설정으로, PHCMS 창은 비워 둔다. 실행 중인 창의 프로세스는 종료되므로 필요한 작업은 먼저 저장한다. 웹 터미널 세션 목록에서 `s8-infra`를 선택해 접속한다. `network.bindIp`가 없으면 localhost(`127.0.0.1`)에만 바인딩한다.
 - `./s8.sh --sessions`로 목록, `./s8.sh --session main`으로 생성·재시작한 뒤 창 목록을 출력한다. 접속은 웹 터미널이나 `tmux attach -t s8-main`을 사용한다.
 - `./s8.sh --mode project --session main --telegram take`는 모든 tmux 세션을 종료한 뒤 Pi와 공유 서비스를 새로 시작하고 Telegram을 연결한다. `--telegram`은 `--telegram take`, `--no-telegram`은 `--telegram off`의 호환 별칭이다. 연결을 끈 세션에서도 TUI의 `/telegram`으로 나중에 연결할 수 있다.
 - backend 설치·실행, Tailscale 전용 노출 및 복구는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.
@@ -258,7 +277,7 @@ npm --prefix frontend run preview -- --host 127.0.0.1 --port 4178 --strictPort
 
 ## Telegram 연동 (Pi 터미널 세션 공유)
 
-기존 `~/.pi/agent/telegram.json`은 자동으로 읽거나 복사하지 않는다. 봇 토큰은 기존 `.env` 또는 실행 환경의 `TELEGRAM_BOT_TOKEN`에 유지하고, 사용자·그룹 ID와 예약 알림 대상은 저장소 루트 `s8-config.yml`에 설정한다. 서비스 키나 봇 토큰을 YAML에 넣지 않는다.
+기존 `~/.pi/agent/telegram.json`은 자동으로 읽거나 복사하지 않는다. 봇 토큰은 `.env`의 `TELEGRAM_BOT_TOKEN`에 두고, 사용자·그룹 ID와 예약 알림 대상은 저장소 루트 `s8-config.yml`에 설정한다. 서비스 키나 봇 토큰을 YAML에 넣지 않는다.
 
 ```yaml
 telegram:
@@ -271,10 +290,9 @@ telegram:
 
 - 예시: [`s8-config.example.yml`](s8-config.example.yml). 실제 `s8-config.yml`은 Git에서 제외하지만 에이전트가 비인증 설정으로 조회·수정할 수 있다.
 - 예약 알림 대상은 허용 목록에 포함된 개인/그룹 chat ID를 명시한다. 대상 미지정은 `null`이며 임의 사용자에게 자동 전송하지 않는다.
-- 파일이 있으면 모든 ID 설정은 파일만 사용한다. 누락된 목록은 빈 목록, 누락된 알림 대상은 `null`이며 기존 환경변수와 합치지 않는다. 잘못된 파일·숫자 ID·허용되지 않은 알림 대상이면 명확히 실패한다.
-- 파일이 없을 때만 기존 `TELEGRAM_ALLOWED_USER_IDS`, `TELEGRAM_ALLOWED_GROUP_IDS`, `S8_SCHEDULE_TELEGRAM_CHAT_ID`를 사용한다. 기존 `TELEGRAM_ALLOWED_CHAT_IDS`는 지원하지 않는다.
-- 이미 ID 환경이 로드된 S8에서 `node ../s8-agent/pi/bin/s8-config.mjs init`으로 ID만 이관할 수 있다. 인증정보는 이관하지 않고 기존 파일은 덮어쓰지 않는다. `show`는 ID·알림 대상·설정 출처만 출력한다.
-- 변경 후 S8의 Telegram 연결과 스케줄러를 재시작한다. 빈 허용 목록은 접근을 막으므로 기존 사용자가 남아 있는지 확인하고 변경한다. 롤백은 파일을 제거하고 기존 환경변수로 재시작한다.
+- ID 설정은 이 파일만 사용한다. 누락된 목록은 빈 목록, 누락된 알림 대상은 `null`이다. 예전 ID 환경변수(`TELEGRAM_ALLOWED_*`, `S8_SCHEDULE_TELEGRAM_CHAT_ID`)는 읽지 않는다. 잘못된 파일·숫자 ID·허용되지 않은 알림 대상이면 명확히 실패한다.
+- `node pi/bin/s8-config.mjs show`로 검증한 설정을 확인한다.
+- 변경 후 S8의 Telegram 연결과 스케줄러를 재시작한다. 빈 허용 목록은 접근을 막으므로 기존 사용자가 남아 있는지 확인하고 변경한다.
 
 두 허용 목록 중 하나만 설정해도 된다. 개인 채팅은 `from.id`가 허용 사용자 목록에 있어야 한다. 그룹·슈퍼그룹은 `chat.id`가 허용 그룹 목록에 있어야 하며, 그 그룹의 **모든 참여자**가 봇을 사용할 수 있다. 허용된 사용자가 미등록 그룹에서 보낸 메시지는 무시한다. 그룹 전체 메시지를 받으려면 BotFather의 privacy mode 설정을 별도 확인한다. 그룹 권한이 과도하다면 그룹 ID 대신 개인 채팅의 사용자 ID만 사용한다. 토큰은 환경에만 유지하고 로컬 ID 설정도 Git에 넣지 않는다.
 
@@ -355,12 +373,12 @@ Pi 1.3.0에도 내장 MCP가 있지만 `pi-mcp-extension@1.5.0`의 설치와 패
 ## PH-CMS·Projectman 연결
 
 - S8이 비관리자 agent 서비스 키를 `PHCMS_ACCESS_TOKEN`에 보관한다. 변수 이름은 기존 호환성을 유지하지만 MCP 호출에는 JWT가 아닌 서비스 키가 필요하다.
-- Projectman 도구는 `PHCMS_API_URL`의 API를 직접 사용하며, 카운트 테스트 실행기는 MCP 요청에 `Authorization: Bearer <서비스 키>`를 보낸다.
+- Projectman 도구는 `s8-config.yml`의 `projectman.apiUrl` API를 직접 사용하며, 카운트 테스트 실행기는 MCP 요청에 `Authorization: Bearer <서비스 키>`를 보낸다.
 - MCP는 요청의 인증 헤더를 PH-CMS API에 전달하며 S8 환경 파일을 읽지 않는다. Pi는 직접 API를 사용한다.
 - `s8.sh`가 시작 시 로드한 환경을 도구에 전달한다. 기본 허용 목록에 `projectman`·`scheduler`를 포함하므로 데이터·예약 조회는 이 도구로 요청한다. 도구가 인증에 환경변수를 사용하며 에이전트는 키 원문이나 환경 파일을 조회하지 않는다.
 - 실행 중인 Pi에는 실행 인자 변경이 즉시 반영되지 않는다. 종료 후 `./s8.sh --continue`로 재개하거나 Telegram `/restart`로 재시작한다. 관리 진입점에서는 `--tools`, 임의 확장·세션 파일·파일 첨부 옵션으로 허용 목록을 바꿀 수 없다.
 - PH-CMS 루트에서 `pnpm dev -- --server --mcp`로 API·MCP를 실행한다. 서버·관리자 UI·MCP의 API prefix를 같은 값으로 맞춘다. 현재 카운트 테스트 CLI의 MCP URL은 장비별 소스 설정이므로 다른 장비에서는 변경해야 한다.
-- Nginx의 `/api/v2/`는 PH-CMS API·관리자 UI로 프록시하며, MCP는 별도의 `/mcp` 엔드포인트를 사용한다.
+- 라우터의 `/api/v2/`는 PH-CMS API·관리자 UI로 프록시하며, MCP는 별도의 `/mcp` 엔드포인트를 사용한다.
 - 인증정보는 읽어 자동 이관하거나 로그·Git에 기록하지 않는다. 설정·재시작 안내는 [`OPERATIONS.md`](OPERATIONS.md)의 PH-CMS MCP 절을 참고한다.
 
 ## 작업요청 → Projectman 등록
@@ -415,7 +433,7 @@ git diff --check
 
 `pi/test/pi-sdk.test.mjs`는 로컬 모의 API와 실제 설치된 Pi SDK로 매니저의 Bash 실행과 파일 쓰기를 검증한다. 외부 모델 API나 실제 인증정보는 사용하지 않는다.
 
-웹 터미널 backend와 Nginx의 별도 검증은 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 참고한다.
+웹 터미널 backend와 라우터의 별도 검증은 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 참고한다.
 
 ### Telegram 알림 설정
 

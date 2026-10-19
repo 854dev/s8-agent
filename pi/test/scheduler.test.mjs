@@ -9,6 +9,8 @@ import { isDue, validateJob } from '../lib/scheduler/store.mjs';
 import { runScheduler, sendTelegram } from '../lib/scheduler/daemon.mjs';
 import { controlSchedules } from '../lib/scheduler/control.mjs';
 
+// 실제 s8-config.yml을 읽지 않도록 Telegram 설정은 항상 주입한다.
+const telegram = { allowedUserIds: ['123'], allowedGroupIds: [], scheduleChatId: '123' };
 const job = { id: 'morning', time: '09:00', timezone: 'Asia/Seoul', enabled: true, script: 'echo hello' };
 
 test('validates daily jobs and only runs once per local date/time', () => {
@@ -120,34 +122,34 @@ test('expired jobs never start; a running batch is stopped at the operation dead
 });
 
 test('scheduled notifications require an explicitly allowed Telegram target', async () => {
-  assert.equal(await sendTelegram('check', {}, () => assert.fail('No target must not send')), false);
-  const env = { TELEGRAM_BOT_TOKEN: 'fixture-bot', TELEGRAM_ALLOWED_USER_IDS: '123', S8_SCHEDULE_TELEGRAM_CHAT_ID: '456' };
-  await assert.rejects(sendTelegram('check', env, () => assert.fail('Unauthorized target must not send')), /allowed/);
-  env.S8_SCHEDULE_TELEGRAM_CHAT_ID = '123';
+  const env = { TELEGRAM_BOT_TOKEN: 'fixture-bot' };
+  assert.equal(await sendTelegram('check', {}, () => assert.fail('No token must not send'), telegram), false);
+  assert.equal(await sendTelegram('check', env, () => assert.fail('No target must not send'), { ...telegram, scheduleChatId: null }), false);
+  await assert.rejects(sendTelegram('check', env, () => assert.fail('Unauthorized target must not send'), { ...telegram, scheduleChatId: '456' }), /allowed/);
   assert.equal(await sendTelegram('check', env, async (_url, options) => {
     assert.deepEqual(JSON.parse(options.body), { chat_id: '123', text: 'check' });
     return { ok: true, json: async () => ({ ok: true }) };
-  }), true);
+  }, telegram), true);
 });
 
 test('Telegram retries transient failures up to three attempts but never retries a permanent rejection', async () => {
-  const env = { TELEGRAM_BOT_TOKEN: 'fixture-bot', TELEGRAM_ALLOWED_USER_IDS: '123', S8_SCHEDULE_TELEGRAM_CHAT_ID: '123' };
+  const env = { TELEGRAM_BOT_TOKEN: 'fixture-bot' };
   let attempts = 0;
   assert.equal(await sendTelegram('check', env, async () => {
     attempts++;
     if (attempts === 1) throw new TypeError('fetch failed');
     if (attempts === 2) return { ok: false, status: 503, json: async () => ({ ok: false, error_code: 503 }) };
     return { ok: true, json: async () => ({ ok: true }) };
-  }), true);
+  }, telegram), true);
   assert.equal(attempts, 3);
   attempts = 0;
   await assert.rejects(sendTelegram('check', env, async () => {
     attempts++;
     return { ok: false, status: 403, json: async () => ({ ok: false, error_code: 403 }) };
-  }), /HTTP 403/);
+  }, telegram), /HTTP 403/);
   assert.equal(attempts, 1);
   attempts = 0;
-  await assert.rejects(sendTelegram('check', env, async () => { attempts++; throw new TypeError('fetch failed'); }), /fetch failed/);
+  await assert.rejects(sendTelegram('check', env, async () => { attempts++; throw new TypeError('fetch failed'); }, telegram), /fetch failed/);
   assert.equal(attempts, 3);
 });
 
@@ -162,7 +164,7 @@ test('execution success never hides failed delivery; status is safe and a restar
   await writeFile(path.join(root, 'state.json'), JSON.stringify({ version: 1, jobs: { morning: { lastRunDate: '2026-02-02', notificationStatus: 'sent', notifiedAt: '2026-02-02T00:00:00Z' } } }));
   const results = [];
   let attempts = 0;
-  const options = { root, cwd: temp, env: { TELEGRAM_BOT_TOKEN: 'fixture-bot', TELEGRAM_ALLOWED_USER_IDS: '123', S8_SCHEDULE_TELEGRAM_CHAT_ID: '123' }, now: () => new Date('2026-02-03T00:00:00Z'), onResult: value => results.push(value), fetchImpl: async () => {
+  const options = { root, cwd: temp, env: { TELEGRAM_BOT_TOKEN: 'fixture-bot' }, telegramSettings: telegram, now: () => new Date('2026-02-03T00:00:00Z'), onResult: value => results.push(value), fetchImpl: async () => {
     attempts++;
     const current = JSON.parse(await readFile(path.join(root, 'state.json'), 'utf8')).jobs.morning;
     assert.equal(current.notificationStatus, 'pending');
@@ -195,7 +197,7 @@ test('Projectman jobs poll every five minutes, stay silent when idle, and notify
   assert.throws(() => validateJob({ id: 'work', kind: 'projectman', projectUid: 'cnt_project', intervalMinutes: 10, timezone: 'Asia/Seoul' }), /intervalMinutes=5/);
   const sent = [], output = [];
   let active = false, polls = 0, completePoll;
-  const options = { root, cwd: temp, env: { S8_PI_BINARY: 'fake-pi', S8_PI_CONFIG_ROOT: path.join(temp, 'pi'), TELEGRAM_BOT_TOKEN: 'fixture-bot', TELEGRAM_ALLOWED_USER_IDS: '123', S8_SCHEDULE_TELEGRAM_CHAT_ID: '123' },
+  const options = { root, cwd: temp, env: { S8_PI_BINARY: 'fake-pi', S8_PI_CONFIG_ROOT: path.join(temp, 'pi'), TELEGRAM_BOT_TOKEN: 'fixture-bot' }, telegramSettings: telegram,
     onResult: text => output.push(text), fetchImpl: async (_url, options) => { sent.push(JSON.parse(options.body)); return { ok: true, json: async () => ({ ok: true }) }; },
     projectmanTurn: async ({ notify }) => {
       polls++;
