@@ -1,3 +1,5 @@
+// 런타임 재시작 제어 프로세스. queuePiRuntimeRestart가 분리 실행하며, 인자는 재시작 ID 하나다.
+// .s8-runtime/runtime-restarts/<id>/request.json을 읽어 재시작하고 result.json에 결과를 남긴다.
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
@@ -12,11 +14,12 @@ const id = process.argv[2];
 if (!/^[a-f0-9-]{36}$/.test(id ?? '')) throw new Error('Invalid restart ID');
 const directory = path.join(root, '.s8-runtime/runtime-restarts', id);
 const options = JSON.parse(await readFile(path.join(directory, 'request.json'), 'utf8'));
+
 async function restart() {
+  // Telegram을 가진 세션이 사라지기 전에 'keep'(현재 소유 세션이면 유지)을 true/false로 확정한다.
+  if (options.telegram === 'keep') options.telegram = (await telegramOwner()) === options.session;
   if (options.resetTmux) {
-    // Resolve “keep” before destroying the session that owns Telegram.
-    if (options.telegram === 'keep') options.telegram = (await telegramOwner()) === options.session;
-    // This controller is detached, so killing the caller's pane cannot stop it.
+    // 이 프로세스는 분리돼 있어 호출자의 창이 종료돼도 계속 실행된다.
     try { await runTmux(['kill-server']); }
     catch (error) {
       if (!/no server running|no sessions|No such file or directory/i.test(error.stderr ?? '')) throw error;
@@ -24,6 +27,7 @@ async function restart() {
   }
   return options.all ? runFullRestart(root, options, directory) : startPiRuntime(root, options);
 }
+
 try {
   const value = options.resetTmux ? await withRuntimeResetLock(root, restart) : await restart();
   await saveRestartResult(directory, { ok: true, value });

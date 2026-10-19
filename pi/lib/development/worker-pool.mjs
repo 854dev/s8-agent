@@ -44,6 +44,11 @@ export async function workerStates(root, entries = loadS8Config(root).workerEntr
   }));
 }
 
+/** 작업 중이거나 상태를 알 수 없는 워커가 있으면 true. 종료가 끝난(프로세스 없는 stopping) 워커는 제외한다. */
+export async function workersBusy(root) {
+  return (await workerStates(root)).some(worker => worker.status !== 'idle' && worker.status !== 'offline' && !(worker.status === 'stopping' && !worker.alive));
+}
+
 export async function ensureWorkerPool(root, { run = runTmux, ssh, entries = loadS8Config(root).workerEntries } = {}) {
   root = await realpath(root);
   const workerIds = Object.keys(entries).filter(id => localManagedWorker(entries[id])).sort();

@@ -22,11 +22,9 @@ async function fixture(t) {
   return { root, run };
 }
 
-test('default starts both services once and concurrent or later launchers reuse windows in one tmux session', async t => {
+test('default starts both services and workers as windows of the runtime and worker sessions', async t => {
   const f = await fixture(t);
-  await Promise.all([startPiServices(f.root, { run: f.run }), startPiServices(f.root, { run: f.run })]);
-  const later = await startPiServices(f.root, { run: f.run });
-  assert.ok(later.filter(item => item.service !== 'workers').every(item => item.reused));
+  await startPiServices(f.root, { run: f.run });
   const starts = (await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').sort();
   assert.deepEqual(starts, ['scheduler', 'supervisor', 'worker', 'worker']);
   const names = (await f.run(['list-sessions', '-F', '#S'])).stdout;
@@ -52,14 +50,15 @@ test('a same-name service from a different checkout is rejected without stopping
   await f.run(['has-session', '-t', '=s8-main']);
 });
 
-test('standalone owners and stale locks are not duplicated or silently removed', async t => {
+test('a live owner outside tmux is not duplicated; a dead owner lock is cleared', async t => {
   const f = await fixture(t), directory = path.join(f.root, '.s8-runtime/scheduler');
   await mkdir(directory, { recursive: true }); const file = path.join(directory, 'owner.lock');
   await writeFile(file, `${process.pid}\n`);
   await assert.rejects(startPiServices(f.root, { run: f.run, supervisor: false }), /실행 중/);
   await writeFile(file, '2147483647\n');
-  await assert.rejects(startPiServices(f.root, { run: f.run, supervisor: false }), /잠금이 남아/);
-  assert.equal(await readFile(file, 'utf8'), '2147483647\n');
+  await startPiServices(f.root, { run: f.run, supervisor: false });
+  await assert.rejects(readFile(file), { code: 'ENOENT' });
+  assert.equal((await readFile(path.join(f.root, 'starts'), 'utf8')).trim(), 'scheduler');
 });
 
 test('supervisor singleton lock rejects concurrent owners and releases on shutdown', async t => {
@@ -69,40 +68,17 @@ test('supervisor singleton lock rejects concurrent owners and releases on shutdo
 });
 
 
-test('another runtime links the same service windows without launching duplicate processes', async t => {
-  const f = await fixture(t);
-  await startPiServices(f.root, { run: f.run });
-  await f.run(['new-session', '-d', '-s', 's8-other', '-n', 'shell', 'sleep 60']);
-  await f.run(['set-option', '-t', 's8-other', '@s8-runtime-root', f.root]);
-  await startPiServices(f.root, { session: 's8-other', run: f.run });
-  for (const service of ['scheduler', 'supervisor']) {
-    const id = async session => (await f.run(['display-message', '-p', '-t', `${session}:${service}`, '#{window_id}'])).stdout;
-    assert.equal(await id('s8-main'), await id('s8-other'));
-  }
-  assert.deepEqual((await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').sort(), ['scheduler', 'supervisor', 'worker', 'worker']);
-});
-
-test('restart replaces shared service processes in their existing linked windows', async t => {
+test('a second start replaces service processes in their existing windows', async t => {
   const f = await fixture(t);
   await startPiServices(f.root, { run: f.run });
   const before = (await f.run(['list-windows', '-t', 's8-main', '-F', '#{window_name}\t#{window_id}\t#{pane_pid}'])).stdout.trim().split('\n').map(line => line.split('\t'));
-  await startPiServices(f.root, { run: f.run, restart: true });
+  await startPiServices(f.root, { run: f.run });
   const after = (await f.run(['list-windows', '-t', 's8-main', '-F', '#{window_name}\t#{window_id}\t#{pane_pid}'])).stdout.trim().split('\n').map(line => line.split('\t'));
   for (const name of ['scheduler', 'supervisor']) {
     const old = before.find(row => row[0] === name), fresh = after.find(row => row[0] === name);
     assert.equal(fresh[1], old[1]); assert.notEqual(fresh[2], old[2]);
   }
   assert.equal((await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').length, 6);
-});
-
-test('legacy service sessions are linked without restarting their process', async t => {
-  const f = await fixture(t);
-  await f.run(['new-session', '-d', '-s', 's8-scheduler', '-c', f.root, 'sleep 60']);
-  await f.run(['set-option', '-t', 's8-scheduler', '@s8-service-root', f.root]);
-  const before = (await f.run(['display-message', '-p', '-t', 's8-scheduler:', '#{pane_pid}'])).stdout;
-  await startPiServices(f.root, { run: f.run, supervisor: false });
-  assert.equal((await f.run(['display-message', '-p', '-t', 's8-main:scheduler', '#{pane_pid}'])).stdout, before);
-  await assert.rejects(readFile(path.join(f.root, 'starts')), { code: 'ENOENT' });
 });
 
 test('worker pool uses explicit IDs and canonical checkout identity across launchers', async t => {

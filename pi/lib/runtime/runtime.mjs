@@ -1,68 +1,80 @@
+// 매니저 런타임 시작: tmux 세션 <session>에 pi 창(매니저 Pi)과 공유 서비스 창을 띄운다.
+// 실행 설정은 세션 옵션에 기록해 /restart all(savedRuntimeOptions)과 Pi 창 내부(start-pi.sh --managed)가 읽는다.
+//   @s8-runtime-root 소유 저장소  @s8-managed 관리 세션 표시  @s8-mode project|local
+//   @s8-cwd 작업 디렉터리  @s8-telegram take|off  @s8-pi-args Pi 실행 인자(JSON)
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { telegramOwner } from '../telegram/status.mjs';
 import { managerArgs } from '../manager/launch.mjs';
 import { moveTelegram, validSession } from './managed-sessions.mjs';
 import { startPiServices } from './services.mjs';
-import { runTmux, withTmuxLock, ensureWindow, stopWindow, windows, quote } from './tmux-windows.mjs';
+import { sleep } from './process.mjs';
+import { runTmux, withTmuxLock, ensureWindow, stopWindow, windows, quote, lockName, sessionOption } from './tmux-windows.mjs';
 
-export async function startPiRuntime(root, { session = 's8-main', args = [], scheduler = true, supervisor = true, telegram, mode = 'project', cwd, run = runTmux } = {}) {
+/** 세션이 없으면 이 저장소 소유로 만든다. 동시에 다른 실행이 먼저 만들었다면 그 세션을 사용한다. */
+async function ensureSession(run, root, session) {
+  try { await run(['has-session', '-t', `=${session}`]); return; } catch {}
+  try {
+    await run(['new-session', '-d', '-s', session, '-n', 'shell', '-c', root,
+      ';', 'set-option', '-t', session, '@s8-runtime-root', root,
+      ';', 'set-option', '-t', session, '@s8-managed', '1']);
+  } catch (error) {
+    try { await run(['has-session', '-t', `=${session}`]); } catch { throw error; }
+  }
+}
+
+/** 실행 중인 세션에 기록된 설정을 읽어, 같은 대화를 이어가는(--continue) startPiRuntime 옵션으로 돌려준다. 인자 검증은 startPiRuntime이 한다. */
+export async function savedRuntimeOptions(session, { run = runTmux } = {}) {
+  const option = name => sessionOption(run, session, name);
+  const mode = await option('@s8-mode') || 'project';
+  const cwd = await option('@s8-cwd') || undefined;
+  const telegram = await option('@s8-telegram') === 'take';
+  const saved = await option('@s8-pi-args');
+  const args = saved ? JSON.parse(saved) : [];
+  if (!Array.isArray(args) || args.some(value => typeof value !== 'string')) throw new Error('저장된 Pi 실행 옵션이 올바르지 않습니다.');
+  if (!args.includes('--continue') && !args.includes('--no-session')) args.push('--continue');
+  return { session, mode, cwd, telegram, args };
+}
+
+/**
+ * Pi 런타임을 (재)시작하고 { session, windows, telegramStatus, workers }를 돌려준다.
+ * telegram: true면 이 세션으로 Telegram을 가져오고, false면 끈다. 생략하면 project 모드만 켠다.
+ * local 모드는 공유 서비스를 시작하지 않는다.
+ */
+export async function startPiRuntime(root, { session = 's8-main', mode = 'project', cwd, args = [], telegram, scheduler = true, supervisor = true, run = runTmux } = {}) {
   if (!validSession(session)) throw new Error('잘못된 세션 이름입니다.');
   if (!['project', 'local'].includes(mode)) throw new Error('Invalid mode');
-  if (mode === 'local') { scheduler = false; supervisor = false; }
   managerArgs(root, args);
   root = await realpath(root);
-  let exists = false;
-  try { await run(['has-session', '-t', `=${session}`]); exists = true; } catch {}
-  if (!exists) {
-    try {
-      await run(['new-session', '-d', '-s', session, '-n', 'shell', '-c', root,
-        ';', 'set-option', '-t', session, '@s8-runtime-root', root,
-        ';', 'set-option', '-t', session, '@s8-managed', '1']);
-    } catch (error) {
-      try { await run(['has-session', '-t', `=${session}`]); } catch { throw error; }
-    }
-  }
-  // Serialize complete restarts and Telegram handoffs across this checkout.
-  const lock = 's8-runtime-root-' + createHash('sha256').update(root).digest('hex');
-  return withTmuxLock(run, lock, async () => {
-    const owner = (await run(['show-option', '-qv', '-t', session, '@s8-runtime-root'])).stdout.trim();
-    if (owner !== root) throw new Error(`${session}은 이 저장소의 런타임 세션이 아닙니다. 다른 --session 이름을 사용하세요.`);
-    const previousOwner = await telegramOwner();
-    const savedTelegram = (await run(['show-option', '-qv', '-t', session, '@s8-telegram'])).stdout.trim();
-    if (telegram === 'keep') telegram = previousOwner === session;
-    telegram ??= savedTelegram ? savedTelegram === 'take' : mode === 'project';
-    const savedMode = (await run(['show-option', '-qv', '-t', session, '@s8-mode'])).stdout.trim() || 'project';
-    const savedCwd = (await run(['show-option', '-qv', '-t', session, '@s8-cwd'])).stdout.trim();
-    cwd = await realpath(cwd ?? (savedMode === mode && savedCwd ? savedCwd : root));
-    const sameProfile = savedMode === mode && (!savedCwd || savedCwd === cwd);
-    const pi = (await windows(run, session)).find(window => window.name === 'pi');
-    // Validate ownership before stopping anything. Other manager sessions stay alive.
+  cwd = await realpath(cwd ?? root);
+  telegram ??= mode === 'project';
+  await ensureSession(run, root, session);
+
+  // 같은 체크아웃의 재시작과 Telegram 이전을 직렬화한다.
+  return withTmuxLock(run, lockName('s8-runtime-root-', root), async () => {
+    if (await sessionOption(run, session, '@s8-runtime-root') !== root) throw new Error(`${session}은 이 저장소의 런타임 세션이 아닙니다. 다른 --session 이름을 사용하세요.`);
+    // 무엇이든 중지하기 전에 다시 띄울 창이 모두 이 저장소 소유인지 확인한다.
+    const managed = mode === 'project' ? ['pi', ...(scheduler ? ['scheduler'] : []), ...(supervisor ? ['supervisor'] : [])] : ['pi'];
     for (const window of await windows(run, session)) {
-      if (['pi', ...(scheduler ? ['scheduler'] : []), ...(supervisor ? ['supervisor'] : [])].includes(window.name) && window.root !== root) throw new Error(`${session}:${window.name}은 S8이 관리하는 창이 아닙니다.`);
+      if (managed.includes(window.name) && window.root !== root) throw new Error(`${session}:${window.name}은 S8이 관리하는 창이 아닙니다.`);
     }
-    let launchArgs = [...args];
-    if (!launchArgs.length && pi && sameProfile) {
-      const saved = (await run(['show-option', '-qv', '-t', session, '@s8-pi-args'])).stdout.trim();
-      if (saved) launchArgs = JSON.parse(saved);
-      if (!Array.isArray(launchArgs) || launchArgs.some(value => typeof value !== 'string')) throw new Error('저장된 Pi 실행 옵션이 올바르지 않습니다.');
-      managerArgs(root, launchArgs);
-    }
-    if (pi && sameProfile && !launchArgs.includes('--continue') && !launchArgs.includes('--no-session')) launchArgs.push('--continue');
+    const previousOwner = await telegramOwner();
+
     await stopWindow(run, root, session, 'pi');
-    const services = mode === 'project' ? await startPiServices(root, { session, scheduler, supervisor, restart: true, run }) : [];
+    const services = mode === 'project' ? await startPiServices(root, { session, scheduler, supervisor, run }) : [];
     const workers = services.find(service => service.service === 'workers');
-    const command = ['bash', path.join(root, 'start-pi.sh'), '--managed', '--mode', mode, '--cwd', cwd, telegram ? '--telegram' : '--no-telegram', ...launchArgs].map(quote).join(' ');
-    await run(['set-option', '-t', session, '@s8-telegram', telegram ? 'take' : 'off']);
-    await run(['set-option', '-t', session, '@s8-mode', mode]);
-    await run(['set-option', '-t', session, '@s8-cwd', cwd]);
-    await run(['set-option', '-t', session, '@s8-pi-args', JSON.stringify(launchArgs)]);
+
+    const settings = { '@s8-telegram': telegram ? 'take' : 'off', '@s8-mode': mode, '@s8-cwd': cwd, '@s8-pi-args': JSON.stringify(args) };
+    for (const [name, value] of Object.entries(settings)) await run(['set-option', '-t', session, name, value]);
+    const command = ['bash', path.join(root, 'start-pi.sh'), '--managed', '--mode', mode, '--cwd', cwd, telegram ? '--telegram' : '--no-telegram', ...args].map(quote).join(' ');
     await ensureWindow(run, root, session, 'pi', `exec ${command}`);
     await run(['select-window', '-t', `${session}:pi`]);
-    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // 잘못된 인자 등으로 즉시 종료되는 경우를 잡기 위해 잠시 뒤 상태를 확인한다.
+    await sleep(200);
     const active = await windows(run, session);
     if (active.find(window => window.name === 'pi')?.dead !== false) throw new Error(`${session}:pi가 시작 직후 종료됐습니다. 해당 창에서 오류를 확인하세요.`);
+
     if (telegram) await moveTelegram(path.join(root, '.pi-runtime', `${session}.sock`));
     const currentOwner = await telegramOwner();
     const telegramStatus = currentOwner === session

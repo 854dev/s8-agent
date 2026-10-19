@@ -90,7 +90,7 @@ Pi 창이 열리면 `/login`을 실행한다. credential과 세션은 `.pi-runti
 npm start --prefix apps/terminal-gateway
 ```
 
-- 선택한 세션의 Pi와 공유 스케줄러·개발 감독을 같은 창에서 재시작하고 접속 없이 목록만 출력한다. `--telegram take`는 그 세션으로 Telegram 연결을 이전하고, `--telegram off`는 해당 세션만 비활성화한다. 터미널에서는 옵션을 생략하면 현재 연결 유지 / 여기로 가져오기를 선택한다. 비대화형 재실행은 저장된 설정을 유지한다. TUI의 `/telegram`은 상태·선택 메뉴, `/telegram take`와 `/telegram off`는 즉시 이전·해제다. off 후에는 다른 대기 세션이 연결을 이어받을 수 있다. 기존 `--telegram`과 `--no-telegram`은 호환 별칭이다. 재시작 제어는 별도 프로세스에서 수행하므로 호출한 Pi가 종료돼도 계속 진행한다.
+- 선택한 세션의 Pi와 공유 스케줄러·개발 감독을 같은 창에서 재시작하고 접속 없이 목록만 출력한다. `--telegram take`는 그 세션으로 Telegram 연결을 이전하고, `--telegram off`는 해당 세션만 비활성화한다. 터미널에서는 옵션을 생략하면 현재 연결 유지 / 여기로 가져오기를 선택한다. 비대화형 실행에서 옵션을 생략하면 모드 기본값(project 연결, local 꺼짐)을 쓴다. TUI의 `/telegram`은 상태·선택 메뉴, `/telegram take`와 `/telegram off`는 즉시 이전·해제다. off 후에는 다른 대기 세션이 연결을 이어받을 수 있다. 기존 `--telegram`과 `--no-telegram`은 호환 별칭이다. 재시작 제어는 별도 프로세스에서 수행하므로 호출한 Pi가 종료돼도 계속 진행한다.
 - 웹에서는 `/s8/terminal`이 기본으로 호스트 셸 `s8-host-shell`에 연결된다. S8 Pi 세션도 선택할 수 있다.
 - `셸 열기`는 고정 셸을 생성·재사용한다. 브라우저 연결 해제는 셸을 종료하지 않는다. 모바일 입력은 보조 키 버튼을 사용한다.
 - 설치, 네트워크 경계와 복구 절차는 [`apps/terminal-gateway/README.md`](apps/terminal-gateway/README.md)를 따른다.

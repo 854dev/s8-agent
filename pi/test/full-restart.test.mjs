@@ -11,15 +11,16 @@ async function fixture(t) {
   const directory = path.join(root, '.s8-runtime/runtime-restarts/test');
   await mkdir(directory, { recursive: true });
   const events = [], stopped = new Set();
+  const options = { '@s8-runtime-root': root, '@s8-mode': 'project', '@s8-cwd': root, '@s8-telegram': 'take', '@s8-pi-args': '["--model","fixture"]' };
   const run = async args => {
-    if (args[0] === 'show-option') return { stdout: root };
+    if (args[0] === 'show-option') return { stdout: options[args.at(-1)] ?? '' };
     if (args[0] === 'list-windows' && args.includes('-a')) return { stdout: `s8-work\tscheduler\t${root}\ns8-work\tsupervisor\t${root}\ns8-other\tscheduler\t/other-checkout` };
     if (args[0] === 'list-windows') return { stdout: ['scheduler', 'supervisor'].map(name => `@${name}\t${name}\t${root}\t${stopped.has(name) ? '1' : '0'}`).join('\n') };
     if (args[0] === 'send-keys') { const name = args[2].slice(1); stopped.add(name); events.push(`stop:${name}`); }
     return { stdout: '' };
   };
-  const deps = { run, infra: async () => { events.push('infra'); }, ready: async () => { events.push('ready'); }, runtime: async (_root, options) => { events.push('pi'); assert.equal(options.session, 's8-work'); assert.equal(options.telegram, undefined); return { session: options.session }; } };
-  return { root, directory, events, deps };
+  const deps = { run, infra: async () => { events.push('infra'); }, ready: async () => { events.push('ready'); }, runtime: async (_root, options) => { events.push('pi'); assert.equal(options.session, 's8-work'); assert.equal(options.telegram, true); assert.deepEqual(options.args, ['--model', 'fixture', '--continue']); return { session: options.session }; } };
+  return { root, directory, events, deps, options };
 }
 
 test('full restart stops shared workers, starts infra, waits for readiness then replaces the current Pi', async t => {
@@ -67,11 +68,10 @@ test('infrastructure runner uses a fixed script and completion notifications pre
 
 test('local full restart leaves project infrastructure and services untouched', async t => {
   const f = await fixture(t);
-  const run = async args => args.at(-1) === '@s8-mode' ? { stdout: 'local' } : f.deps.run(args);
-  await runFullRestart(f.root, { session: 's8-work' }, f.directory, { ...f.deps, run, runtime: async (_root, options) => {
+  f.options['@s8-mode'] = 'local';
+  await runFullRestart(f.root, { session: 's8-work' }, f.directory, { ...f.deps, runtime: async (_root, options) => {
     assert.equal(options.mode, 'local');
-    assert.equal(options.scheduler, false);
-    assert.equal(options.supervisor, false);
+    assert.equal(options.cwd, f.root);
     f.events.push('local-pi');
   } });
   assert.deepEqual(f.events, ['local-pi']);
