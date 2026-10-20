@@ -58,16 +58,24 @@ export async function preparePiEnvironment(root) {
   return { configRoot, agentDir, binary };
 }
 
-/** 인증·세션은 장비별 비공개 경로(.pi-runtime)에 두고 공용 설정 파일만 링크한다. 다른 파일이 있으면 덮어쓰지 않는다. */
+/**
+ * 인증·세션은 장비별 비공개 경로(.pi-runtime)에 두고 공용 설정 파일만 링크한다. 다른 파일이 있으면 덮어쓰지 않는다.
+ * 저장소 폴더를 옮겨도 깨지지 않도록 상대 경로로 링크하고, 이전 위치의 pi/settings.json을 가리키는 링크는 새로 만든다.
+ */
 async function linkSharedSettings(agentDir, configRoot) {
   await mkdir(agentDir, { recursive: true });
   await chmod(agentDir, 0o700);
-  const link = path.join(agentDir, 'settings.json'), target = path.join(configRoot, 'settings.json');
+  const link = path.join(agentDir, 'settings.json');
+  const target = path.relative(agentDir, path.join(configRoot, 'settings.json'));
   let stat;
   try { stat = await lstat(link); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   if (!stat) return symlink(target, link);
-  if (!stat.isSymbolicLink()) throw new Error('런타임 설정 파일이 이미 있습니다. 덮어쓰지 않습니다.');
-  if (await readlink(link) !== target) throw new Error('런타임 설정 링크가 공유 설정을 가리키지 않습니다.');
+  if (!stat.isSymbolicLink()) throw new Error(`${link}가 pi/settings.json으로 가는 바로가기가 아니라 일반 파일이라 Pi 설정을 불러올 수 없습니다. 내용을 확인한 뒤 지우면 다음 실행 때 다시 만듭니다.`);
+  const current = await readlink(link);
+  if (current === target) return;
+  if (!current.endsWith(path.join('pi', 'settings.json'))) throw new Error(`${link}가 pi/settings.json이 아닌 ${current}를 가리키고 있어 Pi 설정을 불러올 수 없습니다. 이 바로가기를 지우면 다음 실행 때 다시 만듭니다.`);
+  await rm(link);
+  return symlink(target, link);
 }
 
 /**
