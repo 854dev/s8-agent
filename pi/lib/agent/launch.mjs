@@ -126,11 +126,12 @@ function startChild(command, args) {
  * 에이전트를 이 터미널에서 실행하고 종료 코드를 돌려준다.
  * Pi가 .pi-runtime/restart-<이 프로세스 PID> 파일을 남기고 종료하면(/restart) 최근 대화로 다시 시작한다.
  */
-export async function runAgent(root, { mode, cwd = process.cwd(), telegram = false, control = false, sessionDir, uid, args = [] }) {
+export async function runAgent(root, { mode, cwd = process.cwd(), telegram = false, control = false, sessionDir, uid, requestId, args = [] }) {
   const resolved = resolveMode(mode);
   if (!resolved) throw usageError(`모드는 ${MODES.join(', ')} 중 하나여야 합니다: ${mode}`);
   if (uid !== undefined && resolved !== 'worker') throw usageError('--uid는 worker 모드에서만 사용합니다.');
   if (uid !== undefined && !/^[\w-]{1,100}$/.test(uid)) throw usageError(`잘못된 UID입니다: ${uid}`);
+  if (requestId !== undefined && (resolved !== 'worker' || uid || !/^[\w-]{1,100}$/.test(requestId))) throw usageError('--request는 UID 없는 워커 세션에서 유효한 요청 ID와 함께 사용합니다.');
   const profile = loadProfile(resolved, root);
   if (profile.loadEnv || telegram || control) loadEnv(root);
   const workDir = profile.workDir === 'kb' ? await kbRoot(root) : await realpath(cwd);
@@ -149,6 +150,7 @@ export async function runAgent(root, { mode, cwd = process.cwd(), telegram = fal
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => { stopping = true; current?.kill('SIGTERM'); });
   const restartFile = path.join(agentDir, `restart-${process.pid}`);
   const base = piArgs(root, profile, { sessionDir, telegram, control });
+  if (requestId) base.push('--s8-research', requestId);
   // --uid가 있으면 첫 실행에 작업 지시를 넣는다. /restart 재개(--continue)에는 다시 넣지 않는다.
   let extra = uid ? [`uid ${uid} 의 업무를 수행해라.`] : [];
   while (true) {

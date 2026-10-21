@@ -57,45 +57,37 @@ test('worker claims a ready task once, retrying a lost response with the same re
   assert.equal(f.operations.length, 1);
 });
 
-test('worker refuses non-work items, unready tasks and revoked runs', async t => {
+test('claim delegates workflow eligibility to the server and accepts unconfirmed local metadata', async t => {
   const project = await fixture(t, { type: 'project' });
   await assert.rejects(claimWork({ root: project.root, client: project.client, uid: 'task1' }), /task 또는 subtask/);
-  const todo = await fixture(t, { state: 'todo' });
-  await assert.rejects(claimWork({ root: todo.root, client: todo.client, uid: 'task1' }), /ready/);
-  const revoked = await fixture(t);
-  await claimWork({ root: revoked.root, client: revoked.client, uid: 'task1' });
-  revoked.row.workflow.run.id = 'someone-else';
-  await assert.rejects(claimWork({ root: revoked.root, client: revoked.client, uid: 'task1' }), /유효하지 않습니다/);
+  const f = await fixture(t, { state: 'todo' });
+  f.row.workflow.confirmation = undefined;
+  f.row.workflow.grant = undefined;
+  await claimWork({ root: f.root, client: f.client, uid: 'task1' });
+  assert.equal(f.operations[0].action, 'claim');
 });
 
-test('report is delivered once through the outbox and missing required checks fail the work', async t => {
+test('report preserves the Worker assessment even without named checks', async t => {
   const f = await fixture(t, { commandNames: ['test'] });
   const { claim } = await claimWork({ root: f.root, client: f.client, uid: 'task1' });
   const outcome = await reportWork({ root: f.root, client: f.client, claim, cwd: f.root, result: { status: 'completed', summary: 'done', verification: [] } });
-  assert.deepEqual(outcome, { status: 'failed', delivered: true, conflict: false, state: 'blocked' });
+  assert.deepEqual(outcome, { status: 'completed', delivered: true, conflict: false, state: 'review' });
   const outbox = JSON.parse(await readFile(path.join(f.root, '.s8-runtime/runs', claim.runId, 'outbox.json'), 'utf8'));
   assert.equal(outbox.operation.expectedRevision, claim.revision);
   assert.equal(f.operations.filter(op => op.action === 'report').length, 1);
-  await assert.rejects(claimWork({ root: f.root, client: f.client, uid: 'task1' }), /이미 보고/);
+  assert.equal((await claimWork({ root: f.root, client: f.client, uid: 'task1' })).claim.reported, true);
 });
 
-test('worker extension gates tools on claim and report and stays on one UID', async t => {
+test('worker file and shell tools remain available before claim and after report', async t => {
   const f = await fixture(t);
   const tools = new Map(), handlers = {};
-  const pi = { registerTool: tool => tools.set(tool.name, tool), on: (name, handler) => { handlers[name] = handler; }, setActiveTools() {} };
-  worker(pi, { root: f.root, client: f.client, workerId: 'w1' });
-  assert.ok(tools.has('bash'), 'bash is replaced by a secret-stripping variant');
+  worker({ registerTool: tool => tools.set(tool.name, tool), on: (name, handler) => { handlers[name] = handler; }, setActiveTools() {} }, { root: f.root, client: f.client });
+  const call = toolName => handlers.tool_call?.({ toolName, input: {} });
+  for (const name of ['edit', 'write', 'bash', 'read']) assert.equal(await call(name), undefined);
   const projectman = tools.get('projectman'), ctx = { cwd: f.root };
-  const call = toolName => handlers.tool_call({ toolName, input: {} });
-  assert.equal((await call('edit')).block, true);
-  assert.equal((await call('kb')).block, true);
-  await projectman.execute('1', { action: 'get', uid: 'task1' }, undefined, undefined, ctx);
-  assert.equal(await call('edit'), undefined);
-  await assert.rejects(projectman.execute('2', { action: 'get', uid: 'task2' }, undefined, undefined, ctx), /task1만/);
-  await projectman.execute('3', { action: 'report', uid: 'task1', status: 'completed', summary: 'done', verification: [] }, undefined, undefined, ctx);
-  assert.equal(f.row.state, 'review');
-  assert.equal((await call('bash')).block, true);
-  await assert.rejects(projectman.execute('4', { action: 'report', uid: 'task1', status: 'completed', summary: 'again' }, undefined, undefined, ctx), /이미 보고/);
+  await projectman.execute('get', { action: 'get', uid: 'task1' }, undefined, undefined, ctx);
+  await projectman.execute('report', { action: 'report', uid: 'task1', status: 'completed', summary: 'done' }, undefined, undefined, ctx);
+  for (const name of ['edit', 'write', 'bash', 'read', 'agent_message']) assert.equal(await call(name), undefined);
 });
 
 /** git 저장소와 격리된 tmux 서버, 인자를 기록하는 가짜 start-worker-agent.sh를 갖춘 실행기 픽스처. */
@@ -116,51 +108,46 @@ async function workFixture(t, options) {
   return { ...f, repo, run, start, launched };
 }
 
-/** start-worker-agent.sh가 하는 일: 넘겨받은 claim을 보내고, 파일을 쓰고, 보고한다. */
 async function workAs(f, uid, file, content) {
   const { claim } = await claimWork({ root: f.root, client: f.client, uid });
-  const worktree = path.join(f.root, '.s8-runtime/worktrees', uid);
-  await writeFile(path.join(worktree, file), content);
-  return reportWork({ root: f.root, client: f.client, claim, cwd: worktree, result: { status: 'completed', summary: 'done', verification: [] } });
+  await writeFile(path.join(f.repo, file), content);
+  return reportWork({ root: f.root, client: f.client, claim, cwd: f.repo, result: { status: 'completed', summary: 'done', verification: [] } });
 }
 
-test('run_worker prepares a worktree, hands its claim to a worker window and the worker reports a task patch', async t => {
+test('run_worker uses the task directory without touching Git index or preparing worktrees', async t => {
   const f = await workFixture(t);
+  await writeFile(path.join(f.repo, 'base.txt'), 'user staged change');
+  await exec('git', ['add', 'base.txt'], { cwd: f.repo });
+  const before = (await exec('git', ['write-tree'], { cwd: f.repo })).stdout;
   const started = await f.start();
+  assert.equal(started.worktree, f.repo);
   assert.equal(started.target, `${WORK_SESSION}:task1`);
-  assert.equal(f.row.state, 'ready', 'the launcher does not claim');
   await until(async () => (await f.launched()).length === 1);
-  assert.equal((await f.launched())[0], `w1 --uid task1 --cwd ${started.worktree}`);
-  assert.equal((await f.start()).running, true, 'a live worker window is not started twice');
-  const { claim } = await claimWork({ root: f.root, client: f.client, uid: 'task1' });
-  assert.equal(claim.runId, (await readClaim(f.root, 'task1')).runId);
-  assert.equal(f.row.workflow.run.workerId, 'w1');
-  await writeFile(path.join(started.worktree, 'out.txt'), 'done');
-  await reportWork({ root: f.root, client: f.client, claim, cwd: started.worktree, result: { status: 'completed', summary: 'done', verification: [] } });
+  assert.equal((await f.launched())[0], `w1 --uid task1 --cwd ${f.repo}`);
+  assert.equal((await f.start()).running, true);
+  await workAs(f, 'task1', 'out.txt', 'done');
   assert.equal(f.row.state, 'review');
-  assert.match(await readFile(path.join(f.root, '.s8-runtime/runs', claim.runId, 'task.patch'), 'utf8'), /out\.txt/);
-  assert.equal((await exec('git', ['status', '--porcelain'], { cwd: f.repo })).stdout, '');
+  assert.equal((await exec('git', ['write-tree'], { cwd: f.repo })).stdout, before);
+  await assert.rejects(readdir(path.join(f.root, '.s8-runtime/worktrees')), /ENOENT/);
 });
 
-test('large files and links are reported; protected paths are left out of the patch with a note', async t => {
-  const f = await workFixture(t);
-  const started = await f.start();
-  const { claim } = await claimWork({ root: f.root, client: f.client, uid: 'task1' });
-  await writeFile(path.join(started.worktree, 'package-lock.json'), 'x'.repeat(300_000));
-  await symlink('package-lock.json', path.join(started.worktree, 'lock-link'));
-  await mkdir(path.join(started.worktree, 'node_modules/pkg'), { recursive: true });
-  await writeFile(path.join(started.worktree, 'node_modules/pkg/index.js'), 'x');
-  const outcome = await reportWork({ root: f.root, client: f.client, claim, cwd: started.worktree, result: { status: 'completed', summary: 'done', verification: [], remainingItems: ['다음에 스타일 정리'] } });
-  assert.equal(outcome.status, 'completed', 'remaining follow-ups do not fail the work');
-  const { report } = JSON.parse(await readFile(path.join(f.root, '.s8-runtime/runs', claim.runId, 'outbox.json'), 'utf8'));
-  assert.deepEqual(report.changedFiles.sort(), ['lock-link', 'package-lock.json']);
-  assert.match(report.remainingItems.at(-1), /node_modules\/pkg\/index\.js/);
-  const patch = await readFile(path.join(f.root, '.s8-runtime/runs', claim.runId, 'task.patch'), 'utf8');
-  assert.match(patch, /package-lock\.json/);
-  assert.doesNotMatch(patch, /node_modules/);
+test('nonempty non-Git folders and Git subdirectories start without repository restrictions', async t => {
+  for (const nonGit of [true, false]) {
+    const f = await workFixture(t);
+    const directory = path.join(f.repo, 'nested');
+    await mkdir(directory);
+    await writeFile(path.join(directory, 'firebase.json'), '{}');
+    if (nonGit) await rm(path.join(f.repo, '.git'), { recursive: true });
+    f.row.workflow.spec.repoPath = directory;
+    f.row.workflow.confirmation = undefined;
+    f.row.workflow.spec.assignee = 'another-worker';
+    const started = await f.start();
+    assert.equal(started.worktree, directory);
+    assert.deepEqual((await readdir(directory)).sort(), ['firebase.json']);
+  }
 });
 
-test('run_worker resumes a claimed run in the same worktree and refuses unconfirmed or unready work', async t => {
+test('run_worker resumes the original claim and leaves state validation to Projectman', async t => {
   const f = await workFixture(t, { uids: ['task1', 'task2', 'task3'] });
   const first = await f.start('task1');
   const { claim } = await claimWork({ root: f.root, client: f.client, uid: 'task1' });
@@ -170,16 +157,17 @@ test('run_worker resumes a claimed run in the same worktree and refuses unconfir
   assert.equal(resumed.worktree, first.worktree);
   assert.equal((await readClaim(f.root, 'task1')).runId, claim.runId);
   f.rows.get('task2').workflow.confirmation = undefined;
-  await assert.rejects(f.start('task2'), /confirmation/);
+  assert.equal((await f.start('task2')).worktree, f.repo);
   f.rows.get('task3').state = 'todo';
-  await assert.rejects(f.start('task3'), /ready/);
+  assert.equal((await f.start('task3')).worktree, f.repo);
+  await f.run(['kill-window', '-t', `${WORK_SESSION}:task3`]);
   // 콘솔의 retry로 blocked에서 ready로 돌아온 작업은 끝난 실행 기록이 있어도 다시 실행한다.
   Object.assign(f.rows.get('task3'), { state: 'ready', workflow: { ...f.rows.get('task3').workflow, run: { id: 'old', status: 'finished' } } });
   assert.equal((await f.start('task3')).resumed, false);
-  assert.deepEqual((await readdir(path.join(f.root, '.s8-runtime/worktrees'))).filter(name => !name.endsWith('.json')).sort(), ['task1', 'task3']);
+  await assert.rejects(readdir(path.join(f.root, '.s8-runtime/worktrees')), /ENOENT/);
 });
 
-test('dependency results compose into the worktree of a later task', async t => {
+test('sequential tasks share the directory without automatic patch imports', async t => {
   const f = await workFixture(t, { uids: ['task1', 'task2'] });
   await f.start('task1');
   await workAs(f, 'task1', 'shared.txt', 'first\n');
@@ -187,7 +175,7 @@ test('dependency results compose into the worktree of a later task', async t => 
   f.rows.get('task2').workflow.spec.dependsOn = ['task1'];
   const second = await f.start('task2');
   assert.equal(await readFile(path.join(second.worktree, 'shared.txt'), 'utf8'), 'first\n');
-  assert.equal((await exec('git', ['status', '--porcelain'], { cwd: f.repo })).stdout, '');
+  assert.match((await exec('git', ['status', '--porcelain'], { cwd: f.repo })).stdout, /shared.txt/);
 });
 
 test('resolved problems in executionErrors keep a completed report completed', () => {
@@ -196,13 +184,13 @@ test('resolved problems in executionErrors keep a completed report completed', (
   assert.deepEqual(report.executionErrors, ['테스트 기대값을 바로잡았고 최종 검증은 통과했다.']);
 });
 
-test('report truncation retains failures and never converts failed verification to completion', () => {
+test('report retains failed checks without overriding the Worker assessment', () => {
   const verification = [{ name: 'first failure', ok: false, summary: 'failed' }, ...Array.from({ length: 25 }, (_, index) => ({ name: `passed-${index}`, ok: true }))];
   const report = reportForServer({ status: 'completed', summary: 'fixture', verification });
-  assert.equal(report.status, 'failed');
+  assert.equal(report.status, 'completed');
   assert.equal(report.verification.length, 20);
   assert.equal(report.verification[0].ok, false);
-  assert.ok(report.executionErrors.length);
+  assert.equal(report.executionErrors.length, 0);
 });
 
 test('Telegram retry does not repeat the server report or manager receipt', async t => {
@@ -244,10 +232,75 @@ test('finish reports a stopped run as failed even without a local claim record, 
   assert.equal(f.operations.filter(op => op.action === 'report').length, 1);
 });
 
-test('finish closes a local claim so the worker cannot continue it', async t => {
+test('finish marks a local claim reported for resident scheduling', async t => {
   const f = await workFixture(t);
   const { claim } = await claimWork({ root: f.root, client: f.client, uid: 'task1' });
   await finishStoppedRun({ root: f.root, client: f.client, uid: 'task1', runId: claim.runId, confirmed: true, run: f.run });
   assert.equal((await readClaim(f.root, 'task1')).reported, true);
-  await assert.rejects(claimWork({ root: f.root, client: f.client, uid: 'task1' }), /이미 보고/);
+  assert.equal((await claimWork({ root: f.root, client: f.client, uid: 'task1' })).claim.reported, true);
+});
+
+test('temporary research exposes the same tools and relies on Manager instructions', async t => {
+  const f = await fixture(t);
+  const tools = new Map(), handlers = {}, enabled = [];
+  let flag;
+  worker({ registerTool: tool => tools.set(tool.name, tool), registerFlag() {}, getFlag: () => flag, on: (name, handler) => { handlers[name] = handler; }, setActiveTools: names => enabled.push(...names) }, { root: f.root, client: f.client, workerId: 'a' });
+  flag = 'research-1'; // The actual CLI applies extension flags after loading.
+  handlers.session_start();
+  assert.equal(enabled.includes('agent_message'), true);
+  assert.equal(enabled.includes('projectman'), true);
+  for (const name of ['read', 'bash', 'agent_message']) assert.equal(await handlers.tool_call?.({ toolName: name }), undefined);
+  for (const name of ['edit', 'write', 'projectman']) assert.equal(await handlers.tool_call?.({ toolName: name }), undefined);
+  assert.ok(tools.has('projectman'));
+});
+
+test('distributed finish refuses a Manager with no local owner evidence', async t => {
+  const f = await fixture(t);
+  await writeFile(path.join(f.root, 's8-config.yml'), 'communication:\n  enabled: true\n  nodeId: manager-host\n  credentialsFile: /fixture/secrets.json\n  managerUrl: ws://127.0.0.1:8090\n');
+  await assert.rejects(finishStoppedRun({ root: f.root, client: f.client, uid: 'task1', runId: randomUUID(), confirmed: true, run: async () => { throw new Error('Must not use local tmux as remote proof'); } }), /소유 장비/);
+});
+
+test('temporary research is launched in a distinct tmux window and session directory', async t => {
+  const { startResearch, existingResearch } = await import('../lib/communication/research.mjs');
+  const f = await workFixture(t);
+  const input = { requestId: 'research-123' };
+  const launched = await startResearch(`${f.root}/`, 'a', input, { run: f.run });
+  await until(async () => readFile(path.join(f.root, 'launches'), 'utf8').then(text => text.includes('--request research-123'), () => false));
+  assert.equal(launched.target, 's8-workers:research-a-research-123');
+  const command = await readFile(path.join(f.root, 'launches'), 'utf8');
+  assert.match(command, /--session-dir .*\.pi-runtime\/research\/a\/research-123/);
+  assert.doesNotMatch(command, /--uid/);
+  assert.equal((await existingResearch(f.root, 'a', { run: f.run }))[0].requestId, input.requestId);
+});
+
+for (const distributed of [false, true]) test(`launcher resumes a lost claim response without a second claim (distributed=${distributed})`, async t => {
+  const f = await workFixture(t);
+  if (distributed) await writeFile(path.join(f.root, 's8-config.yml'), `communication:\n  enabled: true\n  nodeId: owner-host\n  managerUrl: ws://127.0.0.1:8090\n  credentialsFile: /fixture/communication-secrets.json\n  repositories:\n    ${f.repo}:\n      path: ${f.repo}\n      remote: origin\n`);
+  const first = await f.start();
+  f.client.loseNext = true;
+  await assert.rejects(claimWork({ root: f.root, client: f.client, uid: 'task1', workerId: 'w1' }), /timeout/);
+  const pending = await readClaim(f.root, 'task1');
+  assert.equal(pending.revision, undefined);
+  assert.equal(f.row.state, 'doing');
+  await f.run(['kill-window', '-t', `${WORK_SESSION}:task1`]);
+  const resumed = await f.start();
+  assert.equal(resumed.resumed, true);
+  assert.equal(resumed.worktree, first.worktree);
+  const result = await claimWork({ root: f.root, client: f.client, uid: 'task1', workerId: 'w1' });
+  assert.equal(result.claim.runId, pending.runId);
+  assert.equal(f.operations.filter(operation => operation.action === 'claim').length, 1);
+});
+
+test('sequential tasks can revert a prior change directly in the working directory', async t => {
+  const f = await workFixture(t, { uids: ['task1', 'task2', 'task3'] });
+  await f.start('task1');
+  await workAs(f, 'task1', 'base.txt', 'parent change\n');
+  f.rows.get('task1').state = 'done';
+  f.rows.get('task2').workflow.spec.dependsOn = ['task1'];
+  await f.start('task2');
+  await workAs(f, 'task2', 'base.txt', 'base');
+  f.rows.get('task2').state = 'done';
+  f.rows.get('task3').workflow.spec.dependsOn = ['task2'];
+  const third = await f.start('task3');
+  assert.equal(await readFile(path.join(third.worktree, 'base.txt'), 'utf8'), 'base');
 });

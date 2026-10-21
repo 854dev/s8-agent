@@ -1,8 +1,31 @@
 {
   "systemPrompt": "SYSTEM.md",
-  "extensions": ["manager.ts"],
-  "tools": ["projectman", "kb", "scheduler", "run_worker", "set_worker_mode", "read", "bash", "edit", "write", "grep", "find", "ls"],
-  "skills": ["s8-operations", "s8-requirements", "s8-task-plan", "s8-plan-review"],
+  "extensions": [
+    "manager.ts"
+  ],
+  "tools": [
+    "agent_message",
+    "projectman",
+    "kb",
+    "scheduler",
+    "run_worker",
+    "set_worker_mode",
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls"
+  ],
+  "skills": [
+    "projectman",
+    "projectman-manager",
+    "s8-operations",
+    "s8-requirements",
+    "s8-task-plan",
+    "s8-plan-review"
+  ],
   "workDir": "kb",
   "loadEnv": true
 }

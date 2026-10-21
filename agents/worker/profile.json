@@ -1,8 +1,28 @@
 {
   "systemPrompt": "SYSTEM.md",
-  "extensions": ["worker.ts", "s8-guard.ts"],
-  "tools": ["projectman", "read", "bash", "edit", "write", "grep", "find", "ls"],
-  "skills": ["vendor/ponytail/ponytail", "vendor/superpowers/test-driven-development", "vendor/superpowers/systematic-debugging", "vendor/superpowers/verification-before-completion", "s8-self-review"],
+  "extensions": [
+    "worker.ts"
+  ],
+  "tools": [
+    "agent_message",
+    "projectman",
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls"
+  ],
+  "skills": [
+    "projectman",
+    "projectman-worker",
+    "vendor/ponytail/ponytail",
+    "vendor/superpowers/test-driven-development",
+    "vendor/superpowers/systematic-debugging",
+    "vendor/superpowers/verification-before-completion",
+    "s8-self-review"
+  ],
   "workDir": "cwd",
   "loadEnv": true
 }

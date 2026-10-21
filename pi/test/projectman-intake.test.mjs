@@ -143,7 +143,10 @@ test('source capture preserves real Markdown/user messages instead of model-writ
   await link(file, path.join(repo, 'duplicate.md'));
   await assert.rejects(captureIntakeSource(cwd, [], file), /single-link/);
   await assert.rejects(captureIntakeSource(cwd, [], path.join(repo, 'private-secret.md')), /permitted/);
-  await assert.rejects(captureIntakeSource(cwd, [], '/outside/request.md'));
+  const elsewhere = await mkdtemp(path.join(os.tmpdir(), 's8-external-source-'));
+  t.after(() => rm(elsewhere, { recursive: true, force: true }));
+  await writeFile(path.join(elsewhere, 'request.md'), 'External project request');
+  assert.equal((await captureIntakeSource(cwd, [], path.join(elsewhere, 'request.md'))).source.text, 'External project request');
   const messages = [
     { type: 'message', id: 'one', message: { role: 'user', content: '첫 원문' } },
     { type: 'message', id: 'model', message: { role: 'assistant', content: '만들어낸 원문' } },

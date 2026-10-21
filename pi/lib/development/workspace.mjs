@@ -5,9 +5,6 @@ import { git } from './git.mjs';
 
 export const safePath = value => typeof value === 'string' && value.length > 0 && !path.isAbsolute(value) && !value.includes('\\') && value.split('/').every(part => part && part !== '..' && part !== '.' && !/secret/i.test(part) && !['.git', '.env', '.pi-runtime', '.s8-runtime', 'auth.json', 'firebase.json', 'node_modules'].includes(part) && (!part.startsWith('.env.') || part === '.env.example')) && !/\.(pem|key)$/i.test(value);
 
-// 저장소에 커밋돼 있으면 안 되는 경로. AGENTS.md 등 지침 파일과 .github/는 허용한다.
-const protectedTracked = files => files.filter(file => !safePath(file) && !['AGENTS.md', 'CLAUDE.md', '.gitignore', '.gitattributes'].includes(file) && !file.startsWith('.github/'));
-
 /**
  * 실행 위치(repoPath)를 git 저장소로 준비한다. 폴더가 없거나 비어 있으면 만들고 git init 후 빈 첫 커밋을 남긴다.
  * 커밋이 없는 저장소에는 빈 첫 커밋만 만든다(파일은 커밋하지 않는다). 파일이 있는데 git 저장소가 아니면
@@ -45,8 +42,6 @@ export async function prepareWorktree({ root, uid, repoPath, baseCommit: request
     return { worktree, ...info };
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const baseCommit = (await git(repo, ['rev-parse', '--verify', `${requestedCommit ?? 'HEAD'}^{commit}`])).stdout.trim();
-  const tracked = (await git(repo, ['ls-tree', '-r', '--name-only', '-z', baseCommit])).stdout.split('\0').filter(Boolean);
-  if (protectedTracked(tracked).length) throw new Error('Repository contains protected tracked paths; prepare a clean development repository');
   await git(repo, ['worktree', 'add', '--detach', worktree, baseCommit]);
   const info = { repo, baseCommit, uid };
   await writeFile(meta, `${JSON.stringify(info)}\n`, { mode: 0o600, flag: 'wx' });
@@ -98,16 +93,31 @@ export function developmentWorkspace(root) {
 }
 
 /** 바뀐 파일 목록. 보호 경로(.env·secret·node_modules 등)는 changedFiles·패치에서 빼고 skippedFiles로 돌려준다. */
-export async function workspaceChanges(worktree) {
-  const tracked = (await git(worktree, ['diff', '--name-only', 'HEAD', '-z'])).stdout.split('\0').filter(Boolean);
+export async function workspaceChanges(worktree, baseline = 'HEAD') {
+  const tracked = (await git(worktree, ['diff', '--name-only', baseline, '-z'])).stdout.split('\0').filter(Boolean);
   const untracked = (await git(worktree, ['ls-files', '--others', '--exclude-standard', '-z'])).stdout.split('\0').filter(Boolean);
   const all = [...new Set([...tracked, ...untracked])];
   return { changedFiles: all.filter(safePath), skippedFiles: all.filter(file => !safePath(file)) };
 }
 
+/** Snapshot a private worktree; reset its temporary index to HEAD afterwards. */
+export async function workspaceTree(cwd, baseline = 'HEAD') {
+  await git(cwd, ['read-tree', baseline]);
+  try {
+    const { changedFiles, skippedFiles } = await workspaceChanges(cwd, baseline);
+    if (skippedFiles.length) throw new Error();
+    for (const file of changedFiles) {
+      const info = await lstat(path.join(cwd, file)).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
+      if (info?.isSymbolicLink() || (info?.isFile() && info.nlink !== 1)) throw new Error();
+    }
+    if (changedFiles.length) await git(cwd, ['add', '-A', '--', ...changedFiles]);
+    return (await git(cwd, ['write-tree'])).stdout.trim();
+  } finally { await git(cwd, ['read-tree', 'HEAD']); }
+}
+
 export async function workspacePatch(worktree, baseline = 'HEAD') {
   await git(worktree, ['read-tree', baseline]);
-  const { changedFiles } = await workspaceChanges(worktree);
+  const { changedFiles } = await workspaceChanges(worktree, baseline);
   if (!changedFiles.length) return '';
   let patch = (await git(worktree, ['diff', '--binary', baseline, '--', ...changedFiles])).stdout;
   const fresh = (await git(worktree, ['ls-files', '--others', '--exclude-standard', '-z'])).stdout.split('\0').filter(Boolean);

@@ -70,6 +70,45 @@ function httpUrl(value, name) {
   } catch { throw new Error(`s8-config.yml: ${name} must be an HTTP(S) URL without credentials, query or fragment`); }
 }
 
+function normalizeCommunication(value, root) {
+  const config = fields(value, ['enabled', 'nodeId', 'server', 'managerUrl', 'credentialsFile', 'repositories'], 'communication');
+  const enabled = config.enabled ?? false;
+  if (typeof enabled !== 'boolean') throw new Error('s8-config.yml: communication.enabled must be boolean');
+  const nodeId = config.nodeId == null ? null : text(config.nodeId, 'communication.nodeId', WORKER_ID);
+  const credentialsFile = config.credentialsFile == null ? null : path.resolve(root, expandHome(text(config.credentialsFile, 'communication.credentialsFile')));
+  let server = null, managerUrl = null;
+  if (config.server != null) {
+    const input = fields(config.server, ['bindIp', 'port'], 'communication.server');
+    const bindIp = input.bindIp ?? '127.0.0.1', port = input.port ?? 8090;
+    if (typeof bindIp !== 'string' || !isIP(bindIp) || ['0.0.0.0', '::'].includes(bindIp)) throw new Error('s8-config.yml: communication.server.bindIp must be a specific IP address');
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('s8-config.yml: communication.server.port must be a port number');
+    server = { bindIp, port };
+  }
+  if (config.managerUrl != null) {
+    try {
+      const url = new URL(config.managerUrl);
+      if (typeof config.managerUrl !== 'string' || !['ws:', 'wss:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error();
+      managerUrl = url.href;
+    } catch { throw new Error('s8-config.yml: communication.managerUrl must be a WS(S) origin without credentials, query or fragment'); }
+  }
+  if (enabled && (!nodeId || !credentialsFile || !managerUrl)) throw new Error('s8-config.yml: enabled communication requires nodeId, credentialsFile and managerUrl');
+  const repositories = {};
+  if (config.repositories != null) {
+    if (!plainObject(config.repositories) || Object.keys(config.repositories).length > 100) throw new Error('s8-config.yml: communication.repositories must be a mapping of at most 100 repositories');
+    for (const [source, entry] of Object.entries(config.repositories)) {
+      if (!path.isAbsolute(source) || /[\0\r\n]/.test(source) || source.length > 1000) throw new Error('s8-config.yml: repository keys must be approved absolute repoPath values');
+      const repo = fields(entry, ['path', 'remote', 'kind'], 'communication.repositories[]');
+      const kind = repo.kind ?? 'git';
+      if (!['git', 'files'].includes(kind)) throw new Error('s8-config.yml: repository kind must be git or files');
+      const local = path.resolve(root, expandHome(text(repo.path, 'communication.repositories[].path')));
+      const remote = kind === 'git' && repo.remote != null ? text(repo.remote, 'communication.repositories[].remote', /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/) : null;
+      if (kind === 'files' && repo.remote != null) throw new Error('s8-config.yml: files repositories cannot specify a Git remote');
+      repositories[source] = { path: local, kind, remote };
+    }
+  }
+  return { enabled, nodeId, server, managerUrl, credentialsFile, repositories };
+}
+
 function readConfigFile(file) {
   let fd;
   try {
@@ -97,13 +136,16 @@ const expandHome = value => value === '~' || value.startsWith('~/') ? path.join(
 
 /** s8-config.yml을 읽어 검증하고 기본값을 채운다. 상대 kbRoot는 저장소 루트 기준 절대 경로로 바꾼다. */
 export function loadS8Config(root = agentRoot) {
-  const data = fields(readConfigFile(path.join(root, 's8-config.yml')), ['kbRoot', 'projectman', 'network', 'workers', 'telegram', 'publicUrl'], 'top-level');
+  const data = fields(readConfigFile(path.join(root, 's8-config.yml')), ['kbRoot', 'projectman', 'network', 'workers', 'telegram', 'publicUrl', 'communication'], 'top-level');
   const projectman = fields(data.projectman, ['apiUrl', 'startCommand'], 'projectman');
   const network = fields(data.network, ['bindIp', 'httpPort'], 'network');
   const bindIp = network.bindIp == null ? DEFAULTS.network.bindIp : text(network.bindIp, 'network.bindIp');
   if (!isIP(bindIp) || bindIp === '0.0.0.0' || bindIp === '::') throw new Error('s8-config.yml: network.bindIp must be a specific IP address');
   const httpPort = network.httpPort ?? DEFAULTS.network.httpPort;
   if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) throw new Error('s8-config.yml: network.httpPort must be a port number');
+  const communication = normalizeCommunication(data.communication, root);
+  const workers = normalizeWorkers(data.workers);
+  if (communication.enabled && workers.some(worker => worker.id === 'manager')) throw new Error('s8-config.yml: manager is reserved and cannot be a communication Worker ID');
   return {
     kbRoot: path.resolve(root, data.kbRoot == null ? DEFAULTS.kbRoot : expandHome(text(data.kbRoot, 'kbRoot'))),
     projectman: {
@@ -111,7 +153,8 @@ export function loadS8Config(root = agentRoot) {
       startCommand: projectman.startCommand == null ? DEFAULTS.projectman.startCommand : text(projectman.startCommand, 'projectman.startCommand'),
     },
     network: { bindIp, httpPort },
-    workers: normalizeWorkers(data.workers),
+    workers,
+    communication,
     telegram: normalizeTelegram(data.telegram),
     publicUrl: data.publicUrl == null ? null : httpUrl(data.publicUrl, 'publicUrl'),
   };

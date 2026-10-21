@@ -1,8 +1,25 @@
 {
   "systemPrompt": "SYSTEM.md",
-  "extensions": ["general.mjs"],
-  "tools": ["read", "bash", "edit", "write", "grep", "find", "ls"],
-  "skills": ["vendor/ponytail/ponytail", "vendor/superpowers/test-driven-development", "vendor/superpowers/systematic-debugging", "vendor/superpowers/verification-before-completion", "s8-self-review"],
+  "extensions": [
+    "general.mjs"
+  ],
+  "tools": [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls"
+  ],
+  "skills": [
+    "projectman",
+    "vendor/ponytail/ponytail",
+    "vendor/superpowers/test-driven-development",
+    "vendor/superpowers/systematic-debugging",
+    "vendor/superpowers/verification-before-completion",
+    "s8-self-review"
+  ],
   "workDir": "cwd",
   "loadEnv": false
 }

@@ -186,3 +186,24 @@ test('console lists resident workers, switches modes and queues instructions onl
   assert.equal((await instruct('task-1')).status, 202);
   assert.deepEqual((await status())[0].queue, ['task-1']);
 });
+
+test('console routes remote Worker controls through communicator and exposes unavailable delivery', async t => {
+  const { listenLocal } = await import('../lib/communication/local.mjs');
+  const f = await fixture(t, { client: { getWorkflow: async () => ({ state: 'ready', workflow: { grant: {}, revision: 1 } }) } });
+  await writeFile(path.join(f.root, 's8-config.yml'), 'communication:\n  enabled: true\n  nodeId: manager-host\n  credentialsFile: /fixture/secrets.json\n  managerUrl: ws://127.0.0.1:8090\n');
+  const commands = [];
+  const remote = { id: 'remote-a', nodeId: 'host-a', connected: true, running: true, mode: 'passive', configMode: 'passive', queue: [] };
+  t.after(await listenLocal(f.root, 'communicator', async input => {
+    if (input.action === 'workers') return { state: 'finished', workers: [remote] };
+    commands.push(input);
+    return input.type === 'task.run' ? { state: 'unavailable' } : { state: 'finished' };
+  }));
+  const listed = await (await fetch(`${f.base}/api/projectman/workers`, { headers: f.headers })).json();
+  assert.equal(listed.workers[0].nodeId, 'host-a');
+  const mode = await fetch(`${f.base}/api/projectman/workers/remote-a/mode`, { method: 'POST', headers: f.headers, body: '{"mode":"paused"}' });
+  assert.equal(mode.status, 200);
+  assert.equal(commands[0].type, 'worker.mode.set');
+  const task = await fetch(`${f.base}/api/projectman/workers/remote-a/instructions`, { method: 'POST', headers: f.headers, body: '{"uid":"task-1"}' });
+  assert.equal(task.status, 409);
+  assert.equal((await task.json()).delivery.state, 'unavailable');
+});

@@ -25,10 +25,10 @@ test('profiles define role extension, prompt, tools, work directory and connecti
   assert.ok(manager.extensions[0].endsWith('pi/extensions/manager.ts'));
   assert.ok(manager.systemPrompt.endsWith('agents/manager/SYSTEM.md'));
   const worker = loadProfile('worker');
-  assert.deepEqual(worker.tools, ['projectman', 'read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']);
+  assert.deepEqual(worker.tools, ['agent_message', 'projectman', 'read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']);
   assert.equal(worker.workDir, 'cwd');
   assert.equal(worker.loadEnv, true);
-  assert.deepEqual(worker.extensions.map(file => file.split('/').at(-1)), ['worker.ts', 's8-guard.ts']);
+  assert.deepEqual(worker.extensions.map(file => file.split('/').at(-1)), ['worker.ts']);
 });
 
 test('Pi arguments disable discovery and load only profile, Telegram or control extensions', () => {
@@ -64,9 +64,9 @@ test('Pi loads every profile skill without diagnostics, and vendored skills keep
     }
   }
   // 워커와 범용(즉석 개발)은 구현·검증 스킬, 매니저는 설계 스킬을 받는다. 커밋·서브에이전트를 지시하는 스킬은 넣지 않는다.
-  assert.deepEqual(names.worker, ['ponytail', 'test-driven-development', 'systematic-debugging', 'verification-before-completion', 's8-self-review']);
-  assert.deepEqual(names.general, names.worker);
-  assert.deepEqual(names.manager, ['s8-operations', 's8-requirements', 's8-task-plan', 's8-plan-review']);
+  assert.deepEqual(names.worker, ['projectman', 'projectman-worker', 'ponytail', 'test-driven-development', 'systematic-debugging', 'verification-before-completion', 's8-self-review']);
+  assert.deepEqual(names.general, names.worker.filter(name => name !== 'projectman-worker'));
+  assert.deepEqual(names.manager, ['projectman', 'projectman-manager', 's8-operations', 's8-requirements', 's8-task-plan', 's8-plan-review']);
 });
 
 test('every role replaces bash with one that hides secret environment values from the agent', async t => {

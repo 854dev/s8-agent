@@ -17,3 +17,5 @@ s8의 Pi 실행 환경, tmux, frontend, 라우터 또는 지식베이스 API를 
 - 서비스 중단을 유발하는 `start-infra.sh` 재실행과 `s8-infra` 세션 종료는 사용자의 명시적 요청이나 승인 후 실행한다.
 - 인증정보와 `.pi-runtime/`, `.s8-runtime/` 내부 파일을 읽거나 결과에 복사하지 않는다.
 - 변경한 파일과 검증 결과를 완료 보고에 남긴다.
+
+Projectman 작업 자체의 사용법은 projectman, 매니저의 등록·위임·검토는 projectman-manager 스킬을 참고한다. 이 스킬은 실행 환경과 서비스 운영을 다룬다.

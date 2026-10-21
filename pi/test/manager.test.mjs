@@ -42,7 +42,7 @@ test('manager enables general tools and rejects shell schedule mutations', async
   for (const handler of handlers.get('session_start')) handler({}, { sessionManager: { getBranch: () => [] } });
   assert.deepEqual(active, MANAGER_TOOLS);
   assert.equal(handlers.has('user_bash'), false);
-  await assert.rejects(tools.get('projectman').execute('test', { action: 'intake_source', sourcePath: '/tmp/private.md' }), /cannot read source files/);
+  await assert.rejects(tools.get('projectman').execute('test', { action: 'intake_source', sourcePath: '/tmp/private.md' }), /Projectman needs/);
   const execute = args => tools.get('scheduler').execute('test', args, undefined, undefined, { hasUI: true, ui: { confirm: async () => true } });
   await assert.rejects(execute({ action: 'create', id: 'evil', kind: 'shell', script: 'echo evil' }), /only permits/);
   const store = path.join(root, '.s8-runtime/scheduler');
@@ -82,8 +82,7 @@ test('persistent manager SDK session exposes general tools alongside Projectman'
   await session.close();
   const [record] = (await readFile(path.join(directory, 'manager.events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
   assert.deepEqual([...record.tools].sort(), [...MANAGER_TOOLS].sort());
-  assert.match(record.systemPrompt, /일반 대화/);
-  assert.match(record.systemPrompt, /기능 구현.*Projectman work/);
+  assert.equal(record.systemPrompt, await readFile(new URL('../../agents/manager/SYSTEM.md', import.meta.url), 'utf8'));
 });
 
 test('KB CRUD requires policy and current document version; protected paths remain denied', async t => {

@@ -9,6 +9,7 @@ import { flushDevelopmentOutbox, reportForServer } from '../development/outbox.m
 import { hasSession, runTmux, windows } from '../runtime/tmux-windows.mjs';
 import { readClaim, markReported } from './worker-run.mjs';
 import { WORK_SESSION } from './work.mjs';
+import { loadS8Config } from '../config/s8-config.mjs';
 
 // 거부 사유는 고정 문구만 쓴다(콘솔 화면에 그대로 보여 준다). 상위 오류에는 응답 본문이 섞일 수 있다.
 const refuse = message => { throw Object.assign(new Error(message), { code: 'FINISH_REFUSED' }); };
@@ -17,13 +18,21 @@ const readJson = async file => { try { return JSON.parse(await readFile(file, 'u
 export async function finishStoppedRun({ root, client, uid, runId, confirmed = false, run = runTmux }) {
   if (!confirmed) refuse('모든 장비에서 실행이 멈췄는지 확인한 뒤 --confirm-stopped를 붙이세요.');
   if (!/^[A-Za-z0-9_-]{1,100}$/.test(uid ?? '') || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(runId ?? '')) refuse('작업 UID와 UUID 형식의 --run-id가 필요합니다.');
+  const communication = loadS8Config(root).communication;
+  let central;
+  if (communication.enabled) {
+    const local = await readClaim(root, uid);
+    if (local?.runId !== runId || local.nodeId !== communication.nodeId) refuse('원격 실행은 매니저의 tmux 상태로 마무리할 수 없습니다. 실행 소유 장비에서 워커 종료와 claim을 확인하세요.');
+    central = await client.getWorkflow(uid);
+    if (central.workflow?.run?.id !== runId || central.workflow.run.workerId !== local.operation?.workerId) refuse('Projectman의 현재 실행 소유 워커와 로컬 claim이 다릅니다. 마무리하지 않았습니다.');
+  }
   if (await hasSession(run, WORK_SESSION) && (await windows(run, WORK_SESSION)).some(window => window.name === uid && !window.dead)) {
     refuse(`워커 창이 아직 실행 중입니다. 먼저 종료하세요: tmux kill-window -t ${WORK_SESSION}:${uid}`);
   }
   const directory = path.join(root, '.s8-runtime/runs', runId), outbox = path.join(directory, 'outbox.json');
   // 워커가 보고했지만 전달되지 않은 경우는 그 보고를 그대로 보낸다.
   if (!await readJson(outbox)) {
-    const current = await client.getWorkflow(uid);
+    const current = central ?? await client.getWorkflow(uid);
     if (current.workflow?.run?.id !== runId) refuse('서버의 현재 run이 지정한 run ID와 다릅니다. 보고하지 않았습니다.');
     if (current.workflow.run.status === 'finished') return { uid, runId, status: 'already-finished', state: current.state };
     if (current.state !== 'doing') refuse(`doing 상태의 실행만 마무리할 수 있습니다(state: ${current.state}).`);

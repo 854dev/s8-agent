@@ -20,6 +20,8 @@ const HELP = `사용법: ./s8.sh [--mode project|general] [--cwd 경로] [Pi 옵
   finish UID --run-id UUID --confirm-stopped  멈춘 실행을 실패로 보고해 마무리
   service scheduler  예약 데몬 전경 실행
   service worker ID  상주 워커 루프 전경 실행 (s8-config.yml의 workers)
+  service communicator  매니저 통신 서버 전경 실행
+  workers          매니저 없이 설정된 상주 워커를 s8-workers tmux에 실행
   --telegram take  이 세션으로 Telegram 연결 이전 (단독 --telegram도 호환)
   --telegram off   이 세션의 Telegram 연결 비활성 (--no-telegram도 호환)
   --no-telegram    Telegram 없이 단독 실행

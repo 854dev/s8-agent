@@ -1,6 +1,6 @@
 ---
 name: s8-task-plan
-description: 요구사항이 정해진 개발 작업을 Projectman task·subtask의 실행 계획(spec.plan, completionCriteria, commandNames, dependsOn)으로 쓸 때 사용한다. delegate 전에 사용한다.
+description: 요구사항이 정해진 개발 작업의 목적·접근·인터페이스·완료 조건·검증 방법을 Projectman 실행 계획으로 정리할 때 사용한다.
 license: MIT (superpowers writing-plans 기반, pi/skills/vendor/superpowers/LICENSE)
 metadata:
   based-on: obra/superpowers skills/writing-plans 7.0.0
@@ -12,16 +12,18 @@ metadata:
 
 ## 먼저 코드베이스 확인
 
-- repoPath 저장소의 AGENTS.md·README와 바뀔 파일, 호출자, 기존 테스트를 read/grep으로 확인한다. 폴더가 없거나 비어 있으면 빈 저장소에서 시작하는 계획으로 쓴다(첫 실행 때 실행기가 만든다). 파일이 있는데 git 저장소가 아니면 사용자에게 git init과 첫 커밋을 요청한다.
+- repoPath 저장소의 AGENTS.md·README와 바뀔 파일, 호출자, 기존 테스트를 read/grep으로 확인한다. 실행 환경과 선행 결과 반영은 projectman 공통 스킬의 현재 동작을 참고한다.
 - 이미 있는 헬퍼·라이브러리·패턴을 찾는다. 계획은 기존 방식을 따른다.
 
 ## 작업 나누기
 
 - task 하나는 한 번의 워커 실행으로 끝나고 스스로 검증 가능한 결과를 낸다. 설정·문서·테스트는 그것이 필요한 task에 넣는다.
 - 조사·계획·구현·검증을 고정 단계 task로 나누지 않는다.
-- 나중 task가 앞 task 결과를 써야 하면 dependsOn으로 잇는다(워커가 선행 패치를 받는다).
+- 나중 task가 앞 task 결과를 써야 하면 의존 관계와 필요한 전달·반영 방법을 적는다. 자동 패치 적용을 가정하지 않는다.
 
-## spec.plan에 쓸 것
+## 계획에 쓸 것
+
+필요한 항목을 변경 규모에 맞게 선택한다. 작은 변경에는 짧은 설명이면 충분하다.
 
 ```
 목표: 한 문장
@@ -38,12 +40,9 @@ metadata:
 - "적절히 처리", "엣지 케이스 처리", "테스트 추가" 같은 아무것도 정하지 않는 문장은 쓰지 않는다.
 - 계획이 구현할 코드보다 길면 코드를 대신 쓴 것이다. 본문을 시그니처·테스트로 줄인다.
 
-## 나머지 필드
+## Projectman에 기록
 
-- completionCriteria: 사용자가 확인할 수 있는 결과 문장. 각 기준이 어떤 검증으로 증명되는지 연결되게 쓴다.
-- commandNames: 워커가 실행해 보고할 검증 명령 이름(테스트·린트·빌드). 허용 목록이 아니다.
-- decisionRefs: 사용자 결정이 나온 대화 참조. 비어 있으면 안 된다.
-- 커밋·푸시·배포 단계는 넣지 않는다. 결과는 워커 보고와 패치로 전달된다.
+완료 조건은 사용자가 확인할 결과와 이를 증명할 검증을 연결한다. 도구의 spec 필드·결정 참조·위임·실행 확정 방법은 projectman-manager 스킬을 참고한다. 커밋·푸시·배포는 사용자의 요청 범위에 있을 때만 계획에 포함한다.
 
 ## 자기 점검
 

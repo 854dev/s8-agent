@@ -14,6 +14,7 @@ export const residentWindow = id => `worker-${id}`;
 // 서비스별 PID 잠금 파일(저장소 루트 기준).
 const lockFiles = {
   scheduler: '.s8-runtime/scheduler/owner.lock',
+  communicator: '.s8-runtime/communication/owner.lock',
 };
 
 /** 서비스 창이 없는데 잠금 소유자가 살아 있으면 tmux 밖에서 실행 중인 것이므로 중복 실행을 거부한다. */
@@ -38,7 +39,8 @@ async function stopService(run, root, session, name) {
 export async function startPiServices(root, { session = 's8-main', scheduler = true, run = runTmux, log = () => {} } = {}) {
   root = await realpath(root);
   const results = [];
-  for (const [name, enabled] of Object.entries({ scheduler })) {
+  const communication = loadS8Config(root).communication;
+  for (const [name, enabled] of Object.entries({ scheduler, communicator: communication.enabled && Boolean(communication.server) })) {
     if (!enabled) continue;
     results.push(await withTmuxLock(run, lockName('s8-service-', root + name), async () => {
       const current = (await windows(run, session)).find(window => window.name === name);

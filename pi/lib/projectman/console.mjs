@@ -9,6 +9,16 @@ import { readEventPage } from './events.mjs';
 import { finishStoppedRun } from '../agent/finish.mjs';
 import { loadS8Config, WORKER_MODES } from '../config/s8-config.mjs';
 import { queueInstruction, setWorkerMode, workerStatuses } from '../agent/resident.mjs';
+import { localRequest } from '../communication/local.mjs';
+
+async function listedWorkers(root) {
+  const config = loadS8Config(root);
+  if (!config.communication.enabled) return workerStatuses(root, config.workers);
+  const result = await localRequest(root, 'communicator', { action: 'workers' });
+  const connected = result.workers ?? [];
+  const missing = config.workers.filter(worker => !connected.some(item => item.id === worker.id));
+  return [...connected, ...(await workerStatuses(root, missing)).map(worker => ({ ...worker, running: false, connected: false, nodeId: config.communication.nodeId }))];
+}
 
 const json = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(data)); };
 async function body(req) {
@@ -100,15 +110,21 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
       }
       // 상주 워커: 목록·모드 변경·작업 지시. 워커 목록은 s8-config.yml의 workers다.
       if (req.method === 'GET' && url.pathname === '/api/projectman/workers') {
-        return json(res, 200, { workers: await workerStatuses(root, loadS8Config(root).workers) });
+        return json(res, 200, { workers: await listedWorkers(root) });
       }
       const workerAction = /^\/api\/projectman\/workers\/([a-z][a-z0-9-]{0,31})\/(mode|instructions)$/.exec(url.pathname);
       if (req.method === 'POST' && workerAction) {
-        const worker = loadS8Config(root).workers.find(item => item.id === workerAction[1]);
+        const communication = loadS8Config(root).communication;
+        const worker = (await listedWorkers(root)).find(item => item.id === workerAction[1]);
         if (!worker) return json(res, 404, { error: 's8-config.yml에 없는 워커입니다.' });
         const input = await body(req);
         if (workerAction[2] === 'mode') {
           if (Object.keys(input).some(key => key !== 'mode') || !(input.mode === null || WORKER_MODES.includes(input.mode))) return json(res, 400, { error: `모드는 ${WORKER_MODES.join(', ')} 또는 null(설정값)입니다.` });
+          if (communication.enabled) {
+            const result = await localRequest(root, 'communicator', { action: 'send', workerId: worker.id, type: 'worker.mode.set', payload: { mode: input.mode ?? 'default' } });
+            if (result.state !== 'finished') return json(res, 409, { error: '워커에게 모드 변경을 확인받지 못했습니다.', delivery: result });
+            return json(res, 200, { worker: (await listedWorkers(root)).find(item => item.id === worker.id) });
+          }
           await setWorkerMode(root, worker.id, input.mode);
           return json(res, 200, { worker: (await workerStatuses(root, [worker]))[0] });
         }
@@ -118,6 +134,11 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
         if (task.state !== 'ready' || !task.workflow?.grant || task.workflow.run?.status === 'running') return json(res, 409, { error: '사람이 계획을 확정한 실행 대기(ready) 작업만 지시할 수 있습니다.' });
         const assignee = task.workflow.assignment?.assignee ?? task.workflow.spec?.assignee;
         if (assignee && assignee !== worker.id) return json(res, 409, { error: `${assignee}에게 배정된 작업입니다.` });
+        if (communication.enabled) {
+          const result = await localRequest(root, 'communicator', { action: 'send', workerId: worker.id, type: 'task.run', payload: { uid: input.uid }, context: { taskUid: input.uid } });
+          if (!['pending', 'accepted'].includes(result.state)) return json(res, 409, { error: '워커가 작업 지시를 접수하지 못했습니다.', delivery: result });
+          return json(res, 202, { worker: (await listedWorkers(root)).find(item => item.id === worker.id), delivery: result });
+        }
         await queueInstruction(root, worker.id, input.uid, 'console');
         return json(res, 202, { worker: (await workerStatuses(root, [worker]))[0] });
       }

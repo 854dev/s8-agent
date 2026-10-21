@@ -14,10 +14,12 @@ import { loadS8Config, WORKER_MODES } from '../lib/config/s8-config.mjs';
 import { modeOverride, queueInstruction, setWorkerMode, workerStatuses } from '../lib/agent/resident.mjs';
 import { flushDevelopmentOutbox } from '../lib/development/outbox.mjs';
 import { registerSecretFreeBash } from './secret-free-bash.ts';
+import { localRequest } from '../lib/communication/local.mjs';
+import { registerCommunication } from './communication.mjs';
 
 export const MANAGER_TOOLS: string[] = loadProfile('manager').tools;
 // bash는 비밀값 환경변수를 지운 버전으로 대체한다.
-export const MANAGER_EXTENSION_TOOLS = ['projectman', 'kb', 'scheduler', 'run_worker', 'set_worker_mode', 'bash'];
+export const MANAGER_EXTENSION_TOOLS = ['projectman', 'kb', 'scheduler', 'run_worker', 'set_worker_mode', 'agent_message', 'bash'];
 const agentRoot = fileURLToPath(new URL('../..', import.meta.url));
 const residentWorker = (id: string) => {
   const worker = loadS8Config(agentRoot).workers.find(item => item.id === id);
@@ -25,16 +27,10 @@ const residentWorker = (id: string) => {
   return worker;
 };
 export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
+  registerCommunication(pi, { root: agentRoot, role: 'manager' });
   const libraries = new Map<string, ReturnType<typeof managerKb>>();
   // Development runs go to a worker (run_worker); general shell work uses bash.
-  projectman(new Proxy(pi, { get(target, key) {
-    if (key === 'registerTool') return tool => target.registerTool({ ...tool, async execute(id, args, ...rest) {
-      if (args.action === 'intake_source' && args.sourcePath !== undefined) throw new Error('Manager cannot read source files; capture a user message instead');
-      return tool.execute(id, args, ...rest);
-    } });
-    const value = Reflect.get(target, key);
-    return typeof value === 'function' ? value.bind(target) : value;
-  } }));
+  projectman(pi);
   registerScheduler(pi, { projectmanOnly: true });
   registerSecretFreeBash(pi);
   pi.registerTool({
@@ -58,10 +54,14 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
   });
   pi.registerTool({
     name: 'run_worker', label: 'Run worker',
-    description: 'Start work on one human-confirmed ready task or subtask UID. With workerId, queue it for that resident worker from s8-config.yml (it starts when the worker is free, unless paused). Without workerId, start a one-off worker now, or resume a run this machine already claimed, in tmux window s8-workers:<UID>. The worker claims, implements and reports by itself; its report arrives through the manager inbox.',
+    description: 'Start a Projectman task or subtask UID in its task directory. Git and worktree setup are left to the Worker. With workerId, queue it for that resident worker from s8-config.yml (it starts when the worker is free, unless paused). Without workerId, start a one-off worker now, or resume a run this machine already claimed, in tmux window s8-workers:<UID>. The worker claims, implements and reports by itself; its report arrives through the manager inbox.',
     parameters: Type.Object({ uid: Type.String(), workerId: Type.Optional(Type.String()) }),
     async execute(_id, args) {
       if (args.workerId) {
+        if (loadS8Config(agentRoot).communication.enabled) {
+          const result = await localRequest(agentRoot, 'communicator', { action: 'send', workerId: args.workerId, type: 'task.run', payload: { uid: args.uid }, context: { taskUid: args.uid } });
+          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: undefined };
+        }
         const worker = residentWorker(args.workerId);
         await queueInstruction(agentRoot, worker.id, args.uid, 'manager');
         const [status] = await workerStatuses(agentRoot, [worker]);
@@ -76,6 +76,12 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
     description: 'List resident workers (action list) or change one worker mode at runtime: active polls ready tasks, passive waits for run_worker with workerId or the console, paused takes no new work. mode default reverts to the s8-config.yml value. Change modes only when the user asks.',
     parameters: Type.Object({ action: Type.Union([Type.Literal('list'), Type.Literal('set')]), workerId: Type.Optional(Type.String()), mode: Type.Optional(Type.Union([...WORKER_MODES.map(mode => Type.Literal(mode)), Type.Literal('default')])) }),
     async execute(_id, args) {
+      if (loadS8Config(agentRoot).communication.enabled) {
+        const result = args.action === 'list'
+          ? await localRequest(agentRoot, 'communicator', { action: 'workers' })
+          : await localRequest(agentRoot, 'communicator', { action: 'send', workerId: args.workerId, type: 'worker.mode.set', payload: { mode: args.mode } });
+        return { content: [{ type: 'text', text: JSON.stringify(result) }], details: undefined };
+      }
       const workers = loadS8Config(agentRoot).workers;
       if (args.action === 'set') {
         if (!args.workerId || !args.mode) throw new Error('set에는 workerId와 mode가 필요합니다.');
@@ -121,7 +127,7 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
           if (!seen.has(key) && (needsPreflight || humanQuestion || needsReview || readyToRun)) {
             seen.add(key);
             if (seen.size > 1000) seen.delete(seen.values().next().value!);
-            pi.sendMessage({ customType: 'projectman-update', content: `Projectman 작업 ${item.uid}에 새 계획·결과·장애가 있습니다. workflow_get으로 확인하세요. 실행 전 사람과 대화하고 최종 계획을 확정하세요. 확정 후 개발자의 구현 결정을 질문으로 돌리지 마세요. ready 상태(사람이 계획 확정)라면 run_worker로 워커를 실행하세요(상주 워커에게 맡기려면 workerId). review 상태라면 결과와 검증 근거를 확인하고 review_result로 검토 의견을 기록하세요. 최종 complete는 사용자가 화면에서 처리합니다. 완료·실패 보고는 별도 inbox로도 전달됩니다. 수정이 필요하면 새로운 work를 생성하세요.`, display: true }, { triggerTurn: true, deliverAs: 'followUp' });
+            pi.sendMessage({ customType: 'projectman-update', content: `Projectman 작업 ${item.uid}에 업데이트가 있습니다. workflow_get으로 현재 계획·실행·질문·결과를 확인하고 projectman-manager 스킬에 따라 필요한 조치를 판단하세요.`, display: true }, { triggerTurn: true, deliverAs: 'followUp' });
             break;
           }
         }

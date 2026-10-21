@@ -30,7 +30,8 @@ async function runResident(args) {
     import('../lib/config/s8-config.mjs'), import('../lib/agent/resident.mjs'), import('../lib/agent/work.mjs'),
     import('../lib/runtime/tmux-windows.mjs'), import('../lib/runtime/process.mjs'), import('../lib/projectman/client.ts'),
   ]);
-  const worker = loadS8Config(root).workers.find(item => item.id === args[0]);
+  const config = loadS8Config(root);
+  const worker = config.workers.find(item => item.id === args[0]);
   if (!worker) throw usageError(`s8-config.yml의 workers에 없는 워커입니다: ${args[0]}`);
   const lock = resident.residentLockFile(root, worker.id);
   await mkdir(path.dirname(lock), { recursive: true, mode: 0o700 });
@@ -38,14 +39,44 @@ async function runResident(args) {
   const controller = new AbortController();
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.once(signal, () => controller.abort());
   // Projectman 연결 설정이 없으면 지시도 ready 작업도 다룰 수 없으므로 시작하지 않는다.
-  const client = projectmanFromEnv();
+  let communication;
   try {
+    const client = projectmanFromEnv();
+    const { flushDevelopmentOutbox } = await import('../lib/development/outbox.mjs');
+    if (config.communication.enabled) {
+      const { connectResident } = await import('../lib/communication/service.mjs');
+      communication = await connectResident(root, config.communication, worker);
+    }
     await resident.runResidentWorker(root, worker, {
       client,
+      nextInstruction: () => communication?.nextInstruction() ?? null,
+      externalBusy: () => communication?.busy ?? false,
+      flushReports: config.communication.enabled ? () => flushDevelopmentOutbox({ root, client }) : undefined,
       start: uid => startWork(root, uid, { client, workerId: worker.id }),
       taskAlive: async uid => (await windows(runTmux, WORK_SESSION).catch(() => [])).some(window => window.name === uid && !window.dead),
     }, { signal: controller.signal });
-  } finally { await release(); }
+  } finally { await communication?.close(); await release(); }
+}
+
+async function runCommunicator(args) {
+  if (args.length) throw usageError('사용법: ./s8.sh service communicator');
+  // Credentials live in an explicit private file; this service does not need .env.
+  const [{ loadS8Config }, { runCommunicator }, { acquirePidLock }] = await Promise.all([
+    import('../lib/config/s8-config.mjs'), import('../lib/communication/service.mjs'), import('../lib/runtime/process.mjs'),
+  ]);
+  const config = loadS8Config(root).communication;
+  if (!config.enabled || !config.server) throw usageError('communication.enabled와 server 설정이 필요합니다.');
+  const lock = path.join(root, '.s8-runtime/communication/owner.lock');
+  await mkdir(path.dirname(lock), { recursive: true, mode: 0o700 });
+  const release = await acquirePidLock(lock);
+  const controller = new AbortController();
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.once(signal, () => controller.abort());
+  let close;
+  try {
+    close = await runCommunicator(root, config, { log: event => console.log(JSON.stringify(event)) });
+    console.log(`매니저 통신 서버 시작: ${config.server.bindIp}:${config.server.port}`);
+    if (!controller.signal.aborted) await new Promise(resolve => controller.signal.addEventListener('abort', resolve, { once: true }));
+  } finally { await close?.(); await release(); }
 }
 
 async function runWork([uid, ...rest]) {
@@ -73,7 +104,12 @@ try {
   else if (command === 'service') {
     if (args[0] === 'scheduler') await runScheduler(args.slice(1));
     else if (args[0] === 'worker') await runResident(args.slice(1));
-    else throw usageError('서비스는 scheduler, worker ID입니다.');
+    else if (args[0] === 'communicator') await runCommunicator(args.slice(1));
+    else throw usageError('서비스는 scheduler, worker ID, communicator입니다.');
+  } else if (command === 'workers') {
+    if (args.length) throw usageError('사용법: ./s8.sh workers');
+    const { startResidentWorkers } = await import('../lib/runtime/services.mjs');
+    console.log(JSON.stringify(await startResidentWorkers(root)));
   } else {
     // 런타임 제어 모듈은 사용자 실행에서만 불러온다(서비스 시작을 가볍게 유지).
     const { runUserCommand } = await import('../lib/runtime/user-command.mjs');
