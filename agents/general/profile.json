@@ -21,5 +21,5 @@
     "s8-self-review"
   ],
   "workDir": "cwd",
-  "loadEnv": false
+  "loadEnv": true
 }

@@ -71,7 +71,7 @@ function httpUrl(value, name) {
 }
 
 function normalizeCommunication(value, root) {
-  const config = fields(value, ['enabled', 'nodeId', 'server', 'managerUrl', 'credentialsFile', 'repositories'], 'communication');
+  const config = fields(value, ['enabled', 'nodeId', 'server', 'managerUrl', 'credentialsFile'], 'communication');
   const enabled = config.enabled ?? false;
   if (typeof enabled !== 'boolean') throw new Error('s8-config.yml: communication.enabled must be boolean');
   const nodeId = config.nodeId == null ? null : text(config.nodeId, 'communication.nodeId', WORKER_ID);
@@ -91,22 +91,9 @@ function normalizeCommunication(value, root) {
       managerUrl = url.href;
     } catch { throw new Error('s8-config.yml: communication.managerUrl must be a WS(S) origin without credentials, query or fragment'); }
   }
-  if (enabled && (!nodeId || !credentialsFile || !managerUrl)) throw new Error('s8-config.yml: enabled communication requires nodeId, credentialsFile and managerUrl');
-  const repositories = {};
-  if (config.repositories != null) {
-    if (!plainObject(config.repositories) || Object.keys(config.repositories).length > 100) throw new Error('s8-config.yml: communication.repositories must be a mapping of at most 100 repositories');
-    for (const [source, entry] of Object.entries(config.repositories)) {
-      if (!path.isAbsolute(source) || /[\0\r\n]/.test(source) || source.length > 1000) throw new Error('s8-config.yml: repository keys must be approved absolute repoPath values');
-      const repo = fields(entry, ['path', 'remote', 'kind'], 'communication.repositories[]');
-      const kind = repo.kind ?? 'git';
-      if (!['git', 'files'].includes(kind)) throw new Error('s8-config.yml: repository kind must be git or files');
-      const local = path.resolve(root, expandHome(text(repo.path, 'communication.repositories[].path')));
-      const remote = kind === 'git' && repo.remote != null ? text(repo.remote, 'communication.repositories[].remote', /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/) : null;
-      if (kind === 'files' && repo.remote != null) throw new Error('s8-config.yml: files repositories cannot specify a Git remote');
-      repositories[source] = { path: local, kind, remote };
-    }
-  }
-  return { enabled, nodeId, server, managerUrl, credentialsFile, repositories };
+  if (enabled && (!nodeId || !credentialsFile)) throw new Error('s8-config.yml: enabled communication requires nodeId and credentialsFile');
+  if (enabled && !server && !managerUrl) throw new Error('s8-config.yml: enabled communication requires server or managerUrl');
+  return { enabled, nodeId, server, managerUrl, credentialsFile };
 }
 
 function readConfigFile(file) {
@@ -145,7 +132,6 @@ export function loadS8Config(root = agentRoot) {
   if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) throw new Error('s8-config.yml: network.httpPort must be a port number');
   const communication = normalizeCommunication(data.communication, root);
   const workers = normalizeWorkers(data.workers);
-  if (communication.enabled && workers.some(worker => worker.id === 'manager')) throw new Error('s8-config.yml: manager is reserved and cannot be a communication Worker ID');
   return {
     kbRoot: path.resolve(root, data.kbRoot == null ? DEFAULTS.kbRoot : expandHome(text(data.kbRoot, 'kbRoot'))),
     projectman: {

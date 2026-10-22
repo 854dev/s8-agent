@@ -20,7 +20,6 @@ ${COMMON}`,
 Projectman 워커: 실행 위치 저장소에서 UID 작업을 직접 claim·수행·보고한다.
 Projectman의 작업 디렉터리에서 tmux로 실행하려면 ./s8.sh work UID를 사용한다.
   --uid UID        수행할 task·subtask UID. 지정하면 바로 작업을 시작한다
-  --request ID     매니저의 임시 조사·검토 요청 전용 세션 (Projectman claim 없음)
   --cwd 경로       작업 디렉터리 (기본: 실행 위치)
 ${COMMON}`,
 };
@@ -37,7 +36,6 @@ function parseOptions(input) {
     if (arg === '--mode') throw usageError('모드는 실행 스크립트로 고릅니다: start-general-agent.sh, start-manager-agent.sh, start-worker-agent.sh');
     else if (arg === '--cwd') options.cwd = value();
     else if (arg === '--uid') options.uid = value();
-    else if (arg === '--request') options.requestId = value();
     else if (arg === '--session-dir') options.sessionDir = value();
     else if (arg === '--telegram') options.telegram = true;
     else if (arg === '--control') options.control = true;

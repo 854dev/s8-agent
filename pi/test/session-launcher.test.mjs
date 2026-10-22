@@ -95,6 +95,26 @@ test('general and worker launchers run in the invocation directory and package c
   }
 });
 
+test('all launcher modes pass the .env ClinePass key to Pi without putting it in arguments or output', async t => {
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-clinepass-launcher-')));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const launchers = await copyLauncher(dir);
+  await writeFile(path.join(dir, '.env'), 'CLINE_API_KEY=fixture-clinepass-key\n');
+  await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), `#!/usr/bin/env node
+console.log(JSON.stringify({ args: process.argv.slice(2), keyMatches: process.env.CLINE_API_KEY === 'fixture-clinepass-key' }));
+`, { mode: 0o755 });
+  for (const mode of ['general', 'manager', 'worker']) {
+    const output = execFileSync('bash', [launchers[mode], '--provider', 'clinepass', '--model', 'cline-pass/glm-5.3', '--print'], {
+      encoding: 'utf8', cwd: dir, env: { ...process.env, CLINE_API_KEY: 'fixture-inherited-key' },
+    });
+    assert.ok(!output.includes('fixture-clinepass-key'), mode);
+    const { args, keyMatches } = JSON.parse(output);
+    assert.equal(keyMatches, true, mode);
+    assert.ok(args.includes(path.join(dir, 'pi/node_modules/pi-clinepass-provider/src/index.ts')), mode);
+    assert.equal(args[args.indexOf('--provider') + 1], 'clinepass');
+  }
+});
+
 test('agent restarts with --continue on request, loads .env with shell syntax and stops on SIGTERM', async t => {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-foreground-')));
   t.after(() => rm(dir, { recursive: true, force: true }));

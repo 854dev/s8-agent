@@ -8,7 +8,7 @@ import { Type } from 'typebox';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { openManagerSession } from './helpers/manager-session.mjs';
 import { runModelSession } from './helpers/model-session.mjs';
-import { developmentWorkspace } from '../lib/development/workspace.mjs';
+import { developmentWorkspace } from './helpers/workspace.mjs';
 
 // Exercise the installed SDK's real HTTP streaming, tool dispatch and session
 // records using a local provider. No account credentials or external API calls.

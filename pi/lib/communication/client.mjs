@@ -3,7 +3,7 @@ import { readCredentials } from './credentials.mjs';
 import { connectPeer } from './peer.mjs';
 import { MAX_BYTES, VERSION } from './protocol.mjs';
 
-/** One resident Worker owns this reconnecting connection. Pending requests are never replayed. */
+/** One existing Worker Pi session owns this reconnecting connection. Pending requests are never replayed. */
 export async function startWorkerConnection(config, workerId, { onMessage, onConnection = () => {}, reconnectMs = 2000, timeoutMs } = {}) {
   const credentials = await readCredentials(config.credentialsFile);
   if (!Object.hasOwn(credentials, workerId)) throw new Error('Communication: this Worker has no configured credential');

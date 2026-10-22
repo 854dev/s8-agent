@@ -5,7 +5,6 @@ import { mkdir, realpath } from 'node:fs/promises';
 import { projectmanFromEnv } from '../projectman/client.ts';
 import { ensureSession, ensureWindow, quote, runTmux, windows } from '../runtime/tmux-windows.mjs';
 import { dispatchClaim, readClaim } from './worker-run.mjs';
-import { loadS8Config } from '../config/s8-config.mjs';
 
 export const WORK_SESSION = 's8-workers';
 
@@ -16,9 +15,8 @@ export async function startWork(root, uid, { client = projectmanFromEnv(), run =
   await ensureSession(run, root, WORK_SESSION);
   if ((await windows(run, WORK_SESSION)).some(window => window.name === uid && !window.dead)) return { uid, target, running: true };
   const task = await client.getWorkflow(uid);
-  const config = loadS8Config(root).communication;
   const source = task.workflow?.spec?.repoPath;
-  const worktree = path.resolve(root, config.repositories?.[source]?.path ?? source ?? root);
+  const worktree = path.resolve(root, source ?? root);
   await mkdir(worktree, { recursive: true });
   const saved = await readClaim(root, uid);
   const resumed = Boolean(saved?.operation && saved.runId && !saved.reported && task.workflow?.run?.id === saved.runId);

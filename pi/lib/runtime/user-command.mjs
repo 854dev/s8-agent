@@ -32,7 +32,7 @@ const HELP = `사용법: ./s8.sh [--mode project|general] [--cwd 경로] [Pi 옵
   --help, -h       이 도움말 표시
   Pi 옵션: --continue, --no-session, --model, --provider, --thinking
   에이전트 하나만 이 터미널에서 실행하려면 ./start-general-agent.sh, ./start-manager-agent.sh, ./start-worker-agent.sh를 사용한다.
-  비밀값(.env): PHCMS_ACCESS_TOKEN, TELEGRAM_BOT_TOKEN
+  비밀값(.env): PHCMS_ACCESS_TOKEN, TELEGRAM_BOT_TOKEN, CLINE_API_KEY
   설정(s8-config.yml): KB 경로(kbRoot, 기본값 ../854_md), Projectman 주소, 바인딩 IP·포트, Telegram ID·알림 대상`;
 
 /** 런타임 옵션은 소비하고 나머지는 Pi 인자(args)로 넘긴다. 옵션 위치는 자유롭다. */

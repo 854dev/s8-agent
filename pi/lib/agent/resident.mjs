@@ -95,7 +95,7 @@ export function pickReadyTask(items, workerId, skip = new Set()) {
  * deps: client(Projectman), start(uid) → startWork 결과, taskAlive(uid) → UID 창이 살아 있는지, log(문장).
  * skip은 시작에 실패한 ready 작업(uid:revision)을 기억해 같은 오류를 반복하지 않는다.
  */
-export async function residentTick(root, worker, { client, start, taskAlive, nextInstruction = () => null, externalBusy = () => false, log = () => {}, skip = new Set(), now = () => new Date() }) {
+export async function residentTick(root, worker, { client, start, taskAlive, log = () => {}, skip = new Set(), now = () => new Date() }) {
   const file = path.join(directory(root, worker.id), 'state.json');
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const state = await readJson(file) ?? {};
@@ -111,7 +111,7 @@ export async function residentTick(root, worker, { client, start, taskAlive, nex
   }
 
   const mode = await modeOverride(root, worker.id) ?? worker.mode;
-  if (mode === 'paused' || externalBusy()) return save();
+  if (mode === 'paused') return save();
 
   const begin = async (uid, source) => {
     try {
@@ -127,13 +127,6 @@ export async function residentTick(root, worker, { client, start, taskAlive, nex
       return false;
     }
   };
-
-  // Connected requests wait only in the resident's bounded memory queue.
-  const connected = nextInstruction();
-  if (connected) {
-    await begin(connected.uid, 'manager');
-    return save();
-  }
 
   // 지시는 active·passive 모두 받는다. 맡지 못한 지시도 다시 시도하지 않고 지운다(오류는 state에 남는다).
   for (const instruction of await instructions(root, worker.id)) {
@@ -161,7 +154,7 @@ export async function runResidentWorker(root, worker, deps, { intervalMs = 15_00
   const log = deps.log ?? (line => console.log(`[${new Date().toLocaleTimeString()}] ${line}`));
   log(`상주 워커 ${worker.id} 시작 (설정 모드 ${worker.mode})`);
   while (!signal?.aborted) {
-    try { await deps.flushReports?.(); await residentTick(root, worker, { ...deps, log, skip }); }
+    try { await residentTick(root, worker, { ...deps, log, skip }); }
     catch (error) { log(`확인 실패: ${error.message}`); }
     await new Promise(resolve => {
       const timer = setTimeout(resolve, intervalMs);

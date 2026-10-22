@@ -211,8 +211,9 @@ test('Telegram retry does not repeat the server report or manager receipt', asyn
   assert.equal(JSON.parse(await readFile(path.join(f.root, '.s8-runtime/runs', claim.runId, 'outbox.json'), 'utf8')).telegramDelivered, true);
 });
 
-test('finish reports a stopped run as failed even without a local claim record, and refuses unsafe cases', async t => {
+for (const messaging of [false, true]) test(`finish requires explicit stopped confirmation and the current run independently of messaging (${messaging})`, async t => {
   const f = await workFixture(t);
+  if (messaging) await writeFile(path.join(f.root, 's8-config.yml'), 'communication:\n  enabled: true\n  nodeId: manager-host\n  credentialsFile: /fixture/secrets.json\n  server: {}\n');
   // 다른 장비의 워커가 claim하고 멈춘 상황: 이 장비에는 claim 기록이 없다.
   const runId = randomUUID();
   await f.client.workflow('task1', { action: 'claim', requestId: randomUUID(), expectedRevision: 2, runId, workerId: 'remote' });
@@ -240,42 +241,9 @@ test('finish marks a local claim reported for resident scheduling', async t => {
   assert.equal((await claimWork({ root: f.root, client: f.client, uid: 'task1' })).claim.reported, true);
 });
 
-test('temporary research exposes the same tools and relies on Manager instructions', async t => {
-  const f = await fixture(t);
-  const tools = new Map(), handlers = {}, enabled = [];
-  let flag;
-  worker({ registerTool: tool => tools.set(tool.name, tool), registerFlag() {}, getFlag: () => flag, on: (name, handler) => { handlers[name] = handler; }, setActiveTools: names => enabled.push(...names) }, { root: f.root, client: f.client, workerId: 'a' });
-  flag = 'research-1'; // The actual CLI applies extension flags after loading.
-  handlers.session_start();
-  assert.equal(enabled.includes('agent_message'), true);
-  assert.equal(enabled.includes('projectman'), true);
-  for (const name of ['read', 'bash', 'agent_message']) assert.equal(await handlers.tool_call?.({ toolName: name }), undefined);
-  for (const name of ['edit', 'write', 'projectman']) assert.equal(await handlers.tool_call?.({ toolName: name }), undefined);
-  assert.ok(tools.has('projectman'));
-});
-
-test('distributed finish refuses a Manager with no local owner evidence', async t => {
-  const f = await fixture(t);
-  await writeFile(path.join(f.root, 's8-config.yml'), 'communication:\n  enabled: true\n  nodeId: manager-host\n  credentialsFile: /fixture/secrets.json\n  managerUrl: ws://127.0.0.1:8090\n');
-  await assert.rejects(finishStoppedRun({ root: f.root, client: f.client, uid: 'task1', runId: randomUUID(), confirmed: true, run: async () => { throw new Error('Must not use local tmux as remote proof'); } }), /소유 장비/);
-});
-
-test('temporary research is launched in a distinct tmux window and session directory', async t => {
-  const { startResearch, existingResearch } = await import('../lib/communication/research.mjs');
-  const f = await workFixture(t);
-  const input = { requestId: 'research-123' };
-  const launched = await startResearch(`${f.root}/`, 'a', input, { run: f.run });
-  await until(async () => readFile(path.join(f.root, 'launches'), 'utf8').then(text => text.includes('--request research-123'), () => false));
-  assert.equal(launched.target, 's8-workers:research-a-research-123');
-  const command = await readFile(path.join(f.root, 'launches'), 'utf8');
-  assert.match(command, /--session-dir .*\.pi-runtime\/research\/a\/research-123/);
-  assert.doesNotMatch(command, /--uid/);
-  assert.equal((await existingResearch(f.root, 'a', { run: f.run }))[0].requestId, input.requestId);
-});
-
 for (const distributed of [false, true]) test(`launcher resumes a lost claim response without a second claim (distributed=${distributed})`, async t => {
   const f = await workFixture(t);
-  if (distributed) await writeFile(path.join(f.root, 's8-config.yml'), `communication:\n  enabled: true\n  nodeId: owner-host\n  managerUrl: ws://127.0.0.1:8090\n  credentialsFile: /fixture/communication-secrets.json\n  repositories:\n    ${f.repo}:\n      path: ${f.repo}\n      remote: origin\n`);
+  if (distributed) await writeFile(path.join(f.root, 's8-config.yml'), `communication:\n  enabled: true\n  nodeId: owner-host\n  managerUrl: ws://127.0.0.1:8090\n  credentialsFile: /fixture/communication-secrets.json\n`);
   const first = await f.start();
   f.client.loseNext = true;
   await assert.rejects(claimWork({ root: f.root, client: f.client, uid: 'task1', workerId: 'w1' }), /timeout/);

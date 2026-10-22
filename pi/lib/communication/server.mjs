@@ -3,20 +3,15 @@ import { WebSocketServer } from 'ws';
 import { MAX_BYTES, VERSION } from './protocol.mjs';
 import { readCredentials, tokenMatches } from './credentials.mjs';
 import { connectPeer } from './peer.mjs';
-import { blobHandler } from './blobs.mjs';
 
-export async function startCommunicationServer(config, { onMessage = async () => ({ state: 'unavailable', reason: 'Manager Pi is not connected' }), timeoutMs, artifactDirectory, onEvent } = {}) {
+export async function startCommunicationServer(config, { onMessage = async () => ({ state: 'unavailable', reason: 'Manager Pi is not connected' }), timeoutMs, onEvent } = {}) {
   const credentials = await readCredentials(config.credentialsFile);
   const workers = new Map();
   const authorize = req => {
     const id = req.headers['x-s8-worker'];
     return typeof id === 'string' && Object.hasOwn(credentials, id) && tokenMatches(req.headers.authorization, `Bearer ${credentials[id]}`);
   };
-  const handleBlob = artifactDirectory && blobHandler(artifactDirectory, authorize);
-  const server = http.createServer((req, res) => {
-    if (handleBlob) void handleBlob(req, res);
-    else { res.writeHead(404); res.end(); }
-  });
+  const server = http.createServer((_req, res) => { res.writeHead(404); res.end(); });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: MAX_BYTES, perMessageDeflate: false });
   server.on('upgrade', (req, socket, head) => {
     const id = req.headers['x-s8-worker'], nodeId = req.headers['x-s8-node'];
@@ -29,14 +24,10 @@ export async function startCommunicationServer(config, { onMessage = async () =>
     }
     sockets.handleUpgrade(req, socket, head, ws => {
       ws.s8Alive = true;
-      const state = { id, nodeId, connected: true, connectedAt: new Date().toISOString(), lastSeen: Date.now(), status: null, peer: null };
+      const state = { id, nodeId, connected: true, connectedAt: new Date().toISOString(), lastSeen: Date.now(), peer: null };
       workers.set(id, state);
       state.peer = connectPeer(ws, 'manager', id, async input => {
         state.lastSeen = Date.now();
-        if (input.type === 'worker.heartbeat' || input.type === 'worker.status') {
-          state.status = input.payload;
-          return { state: 'accepted' };
-        }
         return onMessage(input);
       }, { timeoutMs, onEvent: event => onEvent?.({ ...event, nodeId: config.nodeId, remoteNodeId: nodeId }) });
       ws.on('pong', () => { state.lastSeen = Date.now(); ws.s8Alive = true; });
@@ -56,9 +47,8 @@ export async function startCommunicationServer(config, { onMessage = async () =>
   } catch (error) { clearInterval(heartbeat); sockets.close(); throw error; }
   return {
     address: server.address(),
-    workers: () => [...workers.values()].map(({ peer, lastSeen, ...state }) => ({
-      mode: 'passive', configMode: 'passive', overridden: false, current: null, queue: [], lastError: null,
-      ...state.status, ...state, metrics: peer?.metrics ?? state.metrics ?? null, running: state.connected, heartbeatAt: new Date(lastSeen).toISOString(),
+    peers: () => [...workers.values()].map(({ peer, lastSeen, ...state }) => ({
+      ...state, metrics: peer?.metrics ?? state.metrics ?? null, lastSeenAt: new Date(lastSeen).toISOString(),
     })),
     request: (id, type, payload, context) => workers.get(id)?.peer?.request(type, payload, context) ?? Promise.resolve({ state: 'unavailable', reason: 'Worker is not connected' }),
     async close() {

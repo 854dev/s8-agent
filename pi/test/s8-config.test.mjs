@@ -24,7 +24,7 @@ test('a missing file uses defaults, the file is the only source, and environment
     projectman: { apiUrl: null, startCommand: null },
     network: { bindIp: '127.0.0.1', httpPort: 80 },
     workers: [],
-    communication: { enabled: false, nodeId: null, server: null, managerUrl: null, credentialsFile: null, repositories: {} },
+    communication: { enabled: false, nodeId: null, server: null, managerUrl: null, credentialsFile: null },
     telegram: { allowedUserIds: [], allowedGroupIds: [], scheduleChatId: null },
     publicUrl: null,
   });
@@ -50,7 +50,7 @@ publicUrl: https://s8.example.invalid/s8/
     projectman: { apiUrl: 'http://127.0.0.1:8000/api/v2', startCommand: 'cd ../ph-cms && pnpm dev' },
     network: { bindIp: '100.64.0.1', httpPort: 8080 },
     workers: [{ id: 'dev-a', mode: 'active' }, { id: 'dev-b', mode: 'passive' }],
-    communication: { enabled: false, nodeId: null, server: null, managerUrl: null, credentialsFile: null, repositories: {} },
+    communication: { enabled: false, nodeId: null, server: null, managerUrl: null, credentialsFile: null },
     telegram: { allowedUserIds: ['789'], allowedGroupIds: ['-987'], scheduleChatId: '-987' },
     publicUrl: 'https://s8.example.invalid/s8/',
   });
@@ -158,7 +158,7 @@ test('communication supports a Manager with local Workers and a remote Worker-on
   const shared = 'communication:\n  enabled: true\n  nodeId: host-a\n  credentialsFile: credentials.json\n  managerUrl: ws://127.0.0.1:8090\n';
   await writeFile(file, shared + '  server:\n    bindIp: 127.0.0.1\n    port: 8090\nworkers:\n  - id: a\n  - id: b\n');
   const manager = loadS8Config(root);
-  assert.deepEqual(manager.communication, { enabled: true, nodeId: 'host-a', credentialsFile: path.join(root, 'credentials.json'), managerUrl: 'ws://127.0.0.1:8090/', server: { bindIp: '127.0.0.1', port: 8090 }, repositories: {} });
+  assert.deepEqual(manager.communication, { enabled: true, nodeId: 'host-a', credentialsFile: path.join(root, 'credentials.json'), managerUrl: 'ws://127.0.0.1:8090/', server: { bindIp: '127.0.0.1', port: 8090 } });
   assert.equal(manager.workers.length, 2);
   await writeFile(file, shared + 'workers:\n  - id: c\n');
   assert.equal(loadS8Config(root).communication.server, null);
@@ -181,22 +181,17 @@ test('communication rejects invalid settings without exposing configuration cont
   }
 });
 
-test('communication repository mappings distinguish Git and report-only work without exposing values', async t => {
-  const root = await tempRoot(t, 's8-repository-config-');
-  const file = path.join(root, 's8-config.yml');
-  await writeFile(file, 'communication:\n  repositories:\n    /approved/repo:\n      path: ./clone\n      remote: origin\n    /approved/reports:\n      path: ./reports\n      kind: files\n');
-  assert.deepEqual(loadS8Config(root).communication.repositories, {
-    '/approved/repo': { path: path.join(root, 'clone'), kind: 'git', remote: 'origin' },
-    '/approved/reports': { path: path.join(root, 'reports'), kind: 'files', remote: null },
-  });
-  for (const mapping of ['relative: { path: clone, remote: origin }', '/repo: { path: clone, remote: --upload-pack }', '/repo: { path: clone, remote: "fixture-secret@host" }', '/repo: { path: clone, kind: files, remote: origin }']) {
-    await writeFile(file, `communication:\n  repositories:\n    ${mapping}\n`);
-    assert.throws(() => loadS8Config(root), error => !error.message.includes('fixture-secret'));
-  }
+test('removed repository mapping settings are rejected', async t => {
+  const root = await tempRoot(t, 's8-message-config-');
+  await writeFile(path.join(root, 's8-config.yml'), 'communication:\n  repositories: {}\n');
+  assert.throws(() => loadS8Config(root), /unknown communication keys: repositories/);
 });
 
-test('repository mapping needs only a local path and no Git remote', async t => {
-  const root = await tempRoot(t, 's8-path-only-');
-  await writeFile(path.join(root, 's8-config.yml'), 'communication:\n  repositories:\n    /project: { path: ./local }\n');
-  assert.equal(loadS8Config(root).communication.repositories['/project'].remote, null);
+test('a message server needs no client URL or Projectman configuration', async t => {
+  const root = await tempRoot(t, 's8-server-config-');
+  await writeFile(path.join(root, 's8-config.yml'), 'communication:\n  enabled: true\n  nodeId: manager-host\n  credentialsFile: credentials.json\n  server: {}\n');
+  const config = loadS8Config(root);
+  assert.equal(config.communication.managerUrl, null);
+  assert.equal(config.projectman.apiUrl, null);
+  assert.deepEqual(config.workers, []);
 });

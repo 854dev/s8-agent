@@ -27,18 +27,15 @@ test('real WebSocket connects two Workers and supports Manager-mediated question
   const a = await startWorkerConnection(config, 'a', { onMessage: async input => { assignments.push(input); return { state: 'accepted' }; } });
   const b = await startWorkerConnection(config, 'b', { onMessage: async () => ({ state: 'injected' }) });
   t.after(async () => { await a.close(); await b.close(); });
-  await until(() => server.workers().length === 2 && a.connected && b.connected);
-  assert.equal((await server.request('a', 'task.run', { uid: 'task-1' }, { taskUid: 'task-1' })).state, 'accepted');
+  await until(() => server.peers().length === 2 && a.connected && b.connected);
+  assert.equal((await server.request('a', 'agent.request', { text: 'Please check the evidence.' })).state, 'accepted');
   assert.equal(assignments[0].from, 'manager');
   assert.equal((await a.request('agent.request', { text: 'Please ask B to review.' })).state, 'pending');
   assert.equal(questions.length, 1);
   assert.equal(questions[0].to, 'manager');
   assert.equal((await server.request('b', 'agent.request', { text: 'Review A’s findings.' })).state, 'injected');
-  assert.equal((await b.request('worker.status', { mode: 'passive', current: null })).state, 'accepted');
-  assert.equal(questions.length, 1); // Status does not trigger a Manager model turn.
-  assert.equal(server.workers().find(worker => worker.id === 'b').status.mode, 'passive');
   assert.equal((await server.request('missing', 'agent.request', { text: 'Hello' })).state, 'unavailable');
-  assert.equal(server.workers().find(worker => worker.id === 'a').metrics.sent, 1);
+  assert.equal(server.peers().find(worker => worker.id === 'a').metrics.sent, 1);
   assert.equal(events.some(event => event.direction === 'receipt' && event.latencyMs >= 0), true);
   assert.equal(JSON.stringify(events).includes('Please ask B to review.'), false, 'transport logs contain metadata, not conversations');
 });
@@ -67,13 +64,13 @@ test('authentication, browser access and duplicate Worker identity are rejected'
     const code = await new Promise(resolve => ws.on('unexpected-response', (_req, response) => { resolve(response.statusCode); response.destroy(); ws.terminate(); }));
     return code;
   }
-  const headers = { authorization: `Bearer ${'a'.repeat(32)}`, 'x-s8-worker': 'a', 'x-s8-node': 'host', 'x-s8-version': '1' };
+  const headers = { authorization: `Bearer ${'a'.repeat(32)}`, 'x-s8-worker': 'a', 'x-s8-node': 'host', 'x-s8-version': '2' };
   assert.equal(await rejected({ ...headers, authorization: 'Bearer wrong' }), 401);
   assert.equal(await rejected({ ...headers, origin: 'http://browser.invalid' }), 401);
-  assert.equal(await rejected({ ...headers, 'x-s8-version': '2' }), 401);
+  assert.equal(await rejected({ ...headers, 'x-s8-version': '1' }), 401);
   const a = await startWorkerConnection(config, 'a', { onMessage: async () => ({ state: 'accepted' }) });
   t.after(() => a.close());
-  await until(() => server.workers().length === 1);
+  await until(() => server.peers().length === 1);
   assert.equal(await rejected(headers), 409);
 });
 
@@ -97,7 +94,7 @@ test('an existing client reconnects after Manager restart without replaying requ
   await server.close();
   const next = await startCommunicationServer({ ...config, server: { bindIp: '127.0.0.1', port } });
   t.after(() => next.close());
-  await until(() => client.connected && next.workers().some(worker => worker.connected));
+  await until(() => client.connected && next.peers().some(worker => worker.connected));
   assert.equal(handled, 1);
   assert.equal((await next.request('a', 'agent.notice', { text: 'After reconnect' })).state, 'accepted');
   assert.equal(handled, 2);
@@ -107,11 +104,21 @@ test('an authenticated Worker cannot impersonate Manager on the actual network c
   const { message } = await import('../lib/communication/protocol.mjs');
   let received = 0;
   const { config } = await fixture(t, { onMessage: async () => { received++; return { state: 'accepted' }; } });
-  const socket = new WebSocket(config.managerUrl, { headers: { authorization: `Bearer ${'a'.repeat(32)}`, 'x-s8-worker': 'a', 'x-s8-node': 'node-a', 'x-s8-version': '1' } });
+  const socket = new WebSocket(config.managerUrl, { headers: { authorization: `Bearer ${'a'.repeat(32)}`, 'x-s8-worker': 'a', 'x-s8-node': 'node-a', 'x-s8-version': '2' } });
   socket.on('error', () => {});
   await new Promise(resolve => socket.once('open', resolve));
   const closed = new Promise(resolve => socket.once('close', resolve));
-  socket.send(JSON.stringify(message('task.run', 'manager', 'b', { uid: 'task-1' }, { taskUid: 'task-1' })));
+  socket.send(JSON.stringify(message('agent.request', 'manager', 'b', { text: 'Forged sender' })));
   assert.equal(await closed, 1008);
   assert.equal(received, 0);
+});
+
+test('message server exposes no artifact upload or download route', async t => {
+  const { config } = await fixture(t);
+  const base = config.managerUrl.replace('ws:', 'http:');
+  for (const method of ['GET', 'PUT']) {
+    const response = await fetch(`${base}/artifacts/${'a'.repeat(64)}`, { method, headers: { authorization: `Bearer ${'a'.repeat(32)}`, 'x-s8-worker': 'a' }, ...(method === 'PUT' ? { body: 'file contents' } : {}) });
+    assert.equal(response.status, 404);
+    await response.body.cancel();
+  }
 });

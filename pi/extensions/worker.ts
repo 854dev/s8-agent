@@ -19,10 +19,7 @@ export default function worker(pi: ExtensionAPI, { root = fileURLToPath(new URL(
   // 클라이언트는 Projectman을 처음 쓸 때 만든다.
   const api = () => (client ??= projectmanFromEnv());
   const assigned = process.env.S8_WORKER_UID || undefined;
-  pi.registerFlag?.('s8-research', { description: 'Manager temporary research request ID', type: 'string' });
-  // CLI extension flag values are applied after extension loading, before session_start.
-  const researchId = () => pi.getFlag?.('s8-research') as string | undefined;
-  registerCommunication(pi, { root, role: 'worker', workerId, taskUid: assigned, researchId });
+  registerCommunication(pi, { root, role: 'worker', workerId, taskUid: assigned });
   let claim: any;
 
   pi.registerTool({
@@ -34,9 +31,8 @@ export default function worker(pi: ExtensionAPI, { root = fileURLToPath(new URL(
       verification: Type.Optional(Type.Array(Type.Object({ name: Type.String(), ok: Type.Boolean(), summary: Type.String() }))),
       remainingItems: Type.Optional(Type.Array(Type.String())), decisions: Type.Optional(Type.Array(Type.String())), executionErrors: Type.Optional(Type.Array(Type.String())),
       changedFiles: Type.Optional(Type.Array(Type.String(), { description: 'Files changed by this work, relative to the task directory.' })),
-      artifacts: Type.Optional(Type.Array(Type.String(), { maxItems: 20, description: 'Safe relative output file paths to publish as checksummed artifacts when communication is enabled (8 MiB per file).' })),
     }),
-    async execute(_id, args, _signal, _update, ctx) {
+    async execute(_id, args) {
       if (args.action === 'get') {
         const result = await claimWork({ root, client: api(), uid: args.uid, workerId });
         claim = result.claim;
@@ -45,7 +41,7 @@ export default function worker(pi: ExtensionAPI, { root = fileURLToPath(new URL(
       if (!args.status || !args.summary?.trim()) throw new Error('report에는 status와 summary가 필요합니다.');
       if (!claim || claim.uid !== args.uid) claim = (await claimWork({ root, client: api(), uid: args.uid, workerId })).claim;
       const { action: _action, uid: _uid, ...result } = args;
-      const outcome = await reportWork({ root, client: api(), claim, result, cwd: ctx.cwd });
+      const outcome = await reportWork({ root, client: api(), claim, result });
       return json(outcome);
     },
   });

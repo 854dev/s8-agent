@@ -39,23 +39,14 @@ async function runResident(args) {
   const controller = new AbortController();
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.once(signal, () => controller.abort());
   // Projectman 연결 설정이 없으면 지시도 ready 작업도 다룰 수 없으므로 시작하지 않는다.
-  let communication;
   try {
     const client = projectmanFromEnv();
-    const { flushDevelopmentOutbox } = await import('../lib/development/outbox.mjs');
-    if (config.communication.enabled) {
-      const { connectResident } = await import('../lib/communication/service.mjs');
-      communication = await connectResident(root, config.communication, worker);
-    }
     await resident.runResidentWorker(root, worker, {
       client,
-      nextInstruction: () => communication?.nextInstruction() ?? null,
-      externalBusy: () => communication?.busy ?? false,
-      flushReports: config.communication.enabled ? () => flushDevelopmentOutbox({ root, client }) : undefined,
       start: uid => startWork(root, uid, { client, workerId: worker.id }),
       taskAlive: async uid => (await windows(runTmux, WORK_SESSION).catch(() => [])).some(window => window.name === uid && !window.dead),
     }, { signal: controller.signal });
-  } finally { await communication?.close(); await release(); }
+  } finally { await release(); }
 }
 
 async function runCommunicator(args) {

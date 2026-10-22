@@ -28,7 +28,7 @@ description: S8 매니저가 Projectman 작업을 조회·등록·계획·위임
 - `workflow_get`으로 revision을 읽고 `delegate(uid, expectedRevision, spec)`로 계획을 기록한다. spec에는 `repoPath`, `plan`, `decisionRefs`, `completionCriteria`, 필요시 `commandNames`·`dependsOn`·`assignee`를 넣는다. 사용자 결정의 실제 참조를 남긴다.
 - `preflight_review(uid, expectedRevision, message)`에 확정 요구사항·결정 근거·워커 재량·검증 방법을 기록한다. 쓰기 응답 또는 재조회에서 갱신된 revision을 사용한다.
 - 현재 서버의 최종 계획 확정은 사용자가 콘솔에서 한다. 매니저의 검토나 예약을 사람의 `authorize`로 간주하지 않는다. 계획을 개정하면 현재 버전에 대한 확정이 필요하다.
-- `run_worker {uid, workerId}`로 특정 상주 워커에게 지시한다. `workerId`를 생략하면 이 장비에서 작업 Pi를 시작한다. 상주 모드는 `set_worker_mode action=list`로 확인한다. `active`는 ready 작업을 찾고, `passive`는 지시를 기다리며, `paused`는 새 작업을 받지 않는다. 모드 변경은 사용자 요청에 따른다.
+- `run_worker {uid, workerId}`로 이 장비에 설정된 특정 상주 워커에게 지시한다. 원격 메시지 접속자는 이 실행 대상에 포함되지 않는다. `workerId`를 생략하면 이 장비에서 작업 Pi를 시작한다. 상주 모드는 `set_worker_mode action=list`로 확인한다. `active`는 ready 작업을 찾고, `passive`는 지시를 기다리며, `paused`는 새 작업을 받지 않는다. 모드 변경은 사용자 요청에 따른다.
 - 같은 claim UID를 여러 워커에게 동시에 실행시키지 않는다. 같은 디렉터리의 동시 수정은 배정을 조정하거나 필요한 경우 worktree 사용을 지시한다. 선행 결과가 다른 장비에 있으면 전달·반영 방법을 함께 준다.
 
 예를 들어 위임할 계획은 다음처럼 전달한다. revision과 결정 참조는 실제 조회·대화의 값으로 바꾼다.
@@ -39,7 +39,7 @@ description: S8 매니저가 Projectman 작업을 조회·등록·계획·위임
 
 ## 질문·병렬 조사·결과 검토
 
-- 작업 중인 워커에게는 `agent_message {action: "request", workerIds: ["a"], taskUid, text}`로 질문한다. 대기 중 워커의 별도 조사에는 `taskUid`를 생략한다. 여러 `workerIds`를 지정하면 워커별 requestId와 공통 groupId로 결과를 취합한다. 같은 UID의 중복 claim 대신 이 방식으로 관점을 나눈다.
+- 작업 중인 워커에게는 `agent_message {action: "request", workerIds: ["a"], taskUid, text}`로 질문한다. UID 없이 실행 중인 워커에게는 `taskUid`를 생략한다. 먼저 `agent_message {action: "list"}`로 연결된 세션을 확인한다. 메시지는 새 세션이나 작업을 자동 실행하지 않는다. 여러 `workerIds`를 지정하면 워커별 requestId와 공통 groupId로 결과를 취합한다. 같은 UID의 중복 claim 대신 이 방식으로 관점을 나눈다.
 - 답변은 대상 워커 하나, 원래 `requestId`, 수신 메시지 ID인 `replyTo`를 사용한다. 근거가 부족하면 재현 조건·확인한 코드·검증 결과를 역질문한다. 시간 초과·부분 결과를 숨기지 않는다.
 - 결과 수신 후 `workflow_get`으로 실제 보고와 검증 근거를 확인하고 `review_result(uid, expectedRevision, message)`에 검토 의견을 남긴다. `review`는 사용자 최종 완료 전이며, 사용자가 콘솔에서 완료하면 `done`이다.
 - 보고 뒤에도 질문·필요한 수정을 지시할 수 있다. 이미 전달한 실행 보고는 덮어쓰지 않는다. 실패 작업의 재실행은 서버가 제공하는 콘솔의 retry 흐름을 확인하고, 계획·범위가 달라지거나 완료 작업의 후속 구현이면 새 work를 준비한다. 임의 상태 변경이나 무조건 새 실행을 반복하지 않는다.

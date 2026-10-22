@@ -7,8 +7,7 @@ export function connectPeer(socket, identity, remote, handle, { timeoutMs = REQU
   const observe = (direction, input, state, latencyMs) => {
     if (['rejected', 'unknown', 'unavailable', 'invalid'].includes(state)) { metrics.failures++; metrics.lastError = state; }
     if (latencyMs != null) metrics.lastLatencyMs = latencyMs;
-    if (input && ['worker.status', 'worker.heartbeat'].includes(input.type)) return;
-    try { onEvent({ at: new Date().toISOString(), direction, local: identity, peer: remote, from: input?.from, to: input?.to, type: input?.type, id: input?.id, requestId: input?.requestId, taskUid: input?.taskUid, runId: input?.runId, state, latencyMs }); } catch { /* Observability cannot break delivery. */ }
+    try { onEvent({ at: new Date().toISOString(), direction, local: identity, peer: remote, from: input?.from, to: input?.to, type: input?.type, id: input?.id, requestId: input?.requestId, taskUid: input?.taskUid, state, latencyMs }); } catch { /* Observability cannot break delivery. */ }
   };
   let inflight = 0, rate = 0, windowAt = Date.now();
   const send = value => { if (socket.readyState !== 1) throw new Error('Communication: unavailable'); socket.send(JSON.stringify(value)); };

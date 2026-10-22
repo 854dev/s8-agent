@@ -28,6 +28,7 @@ dev_854/
 - [상태 점검과 장애 분리](#상태-점검과-장애-분리)
 - [보안과 변경 규칙](#보안과-변경-규칙)
 - [코드 위치](#코드-위치)
+- [에이전트 메시지 통신](#에이전트-메시지-통신)
 - [다른 장비에서 재현](#다른-장비에서-재현)
 - [검증](#검증)
 
@@ -64,13 +65,13 @@ Pi 창이 열리면 `/login`으로 이 장비의 모델 인증을 설정한다. 
 
 | 파일 | 내용 | LLM 접근 |
 | --- | --- | --- |
-| `.env` | `PHCMS_ACCESS_TOKEN`(Projectman 에이전트 서비스 키), `TELEGRAM_BOT_TOKEN` | 읽기 차단, 에이전트 bash에 넘기지 않음 |
+| `.env` | `PHCMS_ACCESS_TOKEN`(Projectman 에이전트 서비스 키), `TELEGRAM_BOT_TOKEN`, `CLINE_API_KEY` | 읽기 차단, 에이전트 bash에 넘기지 않음 |
 | `s8-config.yml` | `kbRoot`, `projectman.apiUrl`·`startCommand`, `network.bindIp`·`httpPort`, `workers`, `telegram` ID, `publicUrl` | 읽을 수 있음 |
 
 - 항목의 의미와 기본값은 [`.env.example`](.env.example)과 [`s8-config.example.yml`](s8-config.example.yml)의 주석에 있다. `node pi/bin/s8-config.mjs show`로 검증한 값을 확인한다.
 - `s8-config.yml`에 모르는 키가 있으면 시작하지 않는다. 예전 `.env`의 `S8_KB_ROOT`·`PHCMS_API_URL`·`NGINX_*`·`PHCMS_START_COMMAND`·`S8_WORKER_ID`·Telegram ID 변수와 예전 `worker-entries`·`worker-communicator` 키는 읽지 않으므로 직접 옮기거나 지운다.
 - `kbRoot`의 상대 경로는 이 저장소 기준이고 앞의 `~/`는 홈 디렉터리다.
-- 실행기는 시작할 때 `.env`를 읽고(범용 모드는 제외) `s8-config.yml` 값을 하위 프로세스에 넘긴다. 같은 이름의 환경변수가 셸에 있어도 설정 파일이 우선한다.
+- 모든 모드의 실행기는 시작할 때 `.env`를 읽고 `s8-config.yml` 값을 하위 프로세스에 넘긴다. 같은 이름의 환경변수가 셸에 있어도 설정 파일이 우선한다.
 - 설정을 바꾸면 해당 프로세스(매니저, 스케줄러, `start-infra.sh`)를 다시 시작해야 반영된다.
 
 ### 80번 포트 허용 (리눅스)
@@ -144,7 +145,7 @@ sysctl net.ipv4.ip_unprivileged_port_start   # 80이면 적용됨
 | 워커 | 작업 디렉터리 | projectman, read, bash, edit, write, grep, find, ls | 범용 스킬 + `projectman-worker` |
 
 - Projectman 사용법은 [공통](pi/skills/projectman/SKILL.md)·[매니저](pi/skills/projectman-manager/SKILL.md)·[워커](pi/skills/projectman-worker/SKILL.md) 스킬로 관리한다. 시스템 프롬프트는 역할·자율성·협업 원칙을 정하고 도구 사용법은 해당 스킬을 참고한다. 범용은 공통, 매니저와 워커는 공통·역할별 스킬을 프로필에서 로드한다. 스킬을 제공해도 범용에 Projectman 도구·인증이 추가되지는 않는다. 변경한 스킬·시스템 프롬프트는 해당 Pi 프로세스를 재시작하면 적용된다.
-- 범용 모드는 Projectman 없이 쓰는 즉석 개발용이다. `.env`를 읽지 않는다. `s8-self-review`는 사용자에게 완료를 알리기 전 자기 검토로 쓴다.
+- 범용 모드는 Projectman 없이 쓰는 즉석 개발용이다. 모델 API 키를 공유하도록 `.env`를 읽는다. `s8-self-review`는 사용자에게 완료를 알리기 전 자기 검토로 쓴다.
 - 매니저는 일반 대화·글쓰기·파일·Bash 작업을 직접 처리하고, 개발 요청은 Projectman 작업으로 만들어 워커에게 맡긴다. 이 구분은 시스템 지침에 따른 규칙이며 실행 격리 경계가 아니다.
 - 워커는 task·subtask UID 하나를 claim하고 결과를 보고한다. 파일·명령 도구는 claim 전·보고 후에도 사용할 수 있다. 작업 순서와 범위는 시스템 프롬프트와 매니저 지시로 조정한다. `--uid` 없이 실행하면 "uid xxx 의 업무를 수행해라"처럼 대화로 지시한다.
 - 모든 모드의 bash에는 토큰·비밀번호 환경변수를 넘기지 않는다. 같은 사용자 권한으로 실행되므로 완전한 격리는 아니다.
@@ -156,7 +157,7 @@ sysctl net.ipv4.ip_unprivileged_port_start   # 80이면 적용됨
 1. 등록: 사용자가 요청하면 매니저가 기존 워크스페이스·프로젝트를 조회해 task·subtask를 만든다. 신규 작업은 `todo`(일 시작 전)다.
 2. 사전 검토: 매니저가 원문·코드·지침을 보고 요구 충돌·누락·검증 계획을 사용자와 확인한다. 확정 내용을 `delegate`로 계획(spec)에 쓰고 `preflight_review`로 작업의 `s8Preflight`에 기록한다. 콘솔은 이 기록이 현재 작업·spec과 일치해야 승인을 허용한다.
 3. 승인: 사람이 콘솔에서 최종 계획 버전을 확인하고 `최종 계획 확정 · 실행`을 누른다. 매니저가 서비스 키로 대신 확정하지 않는다.
-4. 실행: 상주 워커·매니저의 `run_worker`·`./s8.sh work <UID>`가 작업의 `repoPath` 디렉터리에서 직접 워커를 시작한다. 선택적 장비별 경로 매핑을 적용하며, 없는 디렉터리는 만든다. Git 초기화·저장소 최상위 경로·worktree·커밋·원격 저장소는 요구하지 않는다. 같은 실행은 원래 claim 요청으로 재개한다.
+4. 실행: 상주 워커·매니저의 `run_worker`·`./s8.sh work <UID>`가 작업의 `repoPath` 디렉터리에서 직접 워커를 시작한다. 없는 디렉터리는 만든다. Git 초기화·저장소 최상위 경로·worktree·커밋·원격 저장소는 요구하지 않는다. 같은 실행은 원래 claim 요청으로 재개한다.
 5. 수행: 작업 범위·파일·명령·Git 사용·의존 결과 반영·검증·완료 여부는 워커가 시스템 프롬프트와 매니저 지시에 따라 판단한다. claim 전·보고 후·임시 조사에서도 파일·명령 도구를 차단하지 않는다. Projectman 서버의 claim·report 상태 규칙은 그대로 적용된다. 서버는 `completed` 보고의 실패한 검증·미완료 항목·실행 오류를 허용하지 않으며 이 저장소의 변경만으로 그 서버 규칙은 바뀌지 않는다.
 6. 보고: 보고는 `.s8-runtime/runs/<runId>/outbox.json`에 먼저 남긴 뒤 Projectman(review 상태), 매니저 수신함, Telegram으로 전달한다. 전달 실패분은 매니저가 15초마다 다시 보낸다. claim·보고 요청은 요청 ID를 고정해 재시도해도 한 번만 반영된다.
 7. 검토와 완료: 매니저가 결과와 검증 근거를 보고 `review_result`를 남긴다. 사용자는 Telegram 링크나 콘솔에서 결과를 보고 선택적으로 검토의견을 적어 `검토의견 제출 · 작업 완료`를 누른다. 작업은 done이 되고 의존 작업이 실행 가능해진다.
@@ -392,7 +393,7 @@ s8-agent/
 | --- | --- | --- |
 | 모드·실행 인자·재시작 | [agent/launch.mjs](pi/lib/agent/launch.mjs), [agent/profile.mjs](pi/lib/agent/profile.mjs) | `start-*-agent.sh` → `pi/bin/agent.mjs` |
 | 워커 claim·보고 | [agent/worker-run.mjs](pi/lib/agent/worker-run.mjs), [extensions/worker.ts](pi/extensions/worker.ts) | `start-worker-agent.sh` |
-| 작업 실행(디렉터리·창) | [agent/work.mjs](pi/lib/agent/work.mjs), [development/workspace.mjs](pi/lib/development/workspace.mjs) | `s8.sh work`, `run_worker` |
+| 작업 실행(디렉터리·창) | [agent/work.mjs](pi/lib/agent/work.mjs) | `s8.sh work`, `run_worker` |
 | 상주 워커 | [agent/resident.mjs](pi/lib/agent/resident.mjs), [runtime/services.mjs](pi/lib/runtime/services.mjs) | `s8.sh service worker`, 콘솔, `set_worker_mode` |
 | 보고 전달 | [development/outbox.mjs](pi/lib/development/outbox.mjs) | 워커 보고, 매니저 polling |
 | 완료·검토의견 수신 | [manager/inbox.mjs](pi/lib/manager/inbox.mjs), [extensions/manager.ts](pi/extensions/manager.ts) | 매니저 polling |
@@ -404,17 +405,15 @@ s8-agent/
 
 개발 흐름은 `agent/work → extensions/worker → agent/worker-run → development/outbox` 순서로 읽는다.
 
-## 매니저와 원격 워커 실행
+## 에이전트 메시지 통신
 
-매니저 통신 서버와 상주 워커가 양방향 WebSocket으로 연결된다. 로컬 워커도 같은 방식으로 연결하며, 워커 간 대화는 항상 매니저가 중개한다. 작업 상태는 Projectman, 전달된 대화는 Pi 세션에 남긴다. 오프라인 전달과 재시작 후 임시 요청 재전송은 보장하지 않는다. 통신을 생략하거나 `enabled: false`로 설정하면 기존 로컬 방식으로 실행한다.
+실행 중인 매니저·워커 Pi 세션이 텍스트를 주고받는다. 워커 간 대화는 매니저가 중개한다. 원격 작업 실행·워커 모드 변경·파일 전송·저장소 경로 매핑·에이전트 자동 생성은 지원하지 않는다. 로컬 Projectman 작업과 상주 워커 관리는 기존 실행기로 처리한다.
 
-통신·질문·병렬 조사·선택적 경로 매핑과 파일 공유를 지원한다. 실제 Pi CLI와 격리된 매니저 1개·워커 3개로 로컬 통합 검증을 수행한다. 실제 별도 장비의 네트워크·인증·Git 접근은 배포 환경에서 추가 검증해야 한다. 전체 진행 상태는 [분산 실행 계획](docs/distributed-multi-agent-plan.md)에 기록한다.
+### 인증과 설정
 
-### 공통 준비와 인증
+각 장비에서 `npm ci --ignore-scripts --prefix pi`로 의존성을 설치하고 모델 인증을 준비한다. 메시지 전용 워커에는 Projectman·KB·Telegram·상주 workers 설정이 필요 없다. 메시지 서버와 매니저는 같은 체크아웃에서 실행한다.
 
-각 장비에 같은 버전의 저장소, Node.js, Git, tmux와 `npm ci --ignore-scripts --prefix pi`가 필요하다. 각 장비에서 Pi 모델 인증과 Projectman 접근을 준비한다. `.env`·모델 인증·런타임·작업 디렉터리는 원격 장비와 공유하지 않는다. Projectman 주소는 모든 장비가 접근 가능한 HTTPS 주소를 사용한다.
-
-운영자가 비밀값 전용 인증 파일을 준비한다. 아래 토큰 자리는 각각 독립적으로 생성한 충분히 긴 무작위 값으로 바꾼다. 토큰은 32–256자의 영문·숫자·`_`·`-`를 허용한다. 파일과 부모 디렉터리는 서비스 실행 사용자만 접근할 수 있게 하고 파일 권한은 `600`으로 설정한다. 실제 파일을 Git에 넣거나 에이전트에게 조회시키지 않는다.
+운영자가 아래 형식의 인증 파일을 준비한다. 토큰은 워커마다 독립적인 32–256자의 영문·숫자·`_`·`-` 값으로 바꾸고 파일 권한을 `600`으로 설정한다. 매니저에는 모든 워커 항목, 워커에는 자신의 항목만 둔다. 실제 인증 파일은 Git에 넣거나 에이전트에게 조회시키지 않는다.
 
 ```json
 {
@@ -425,11 +424,7 @@ s8-agent/
 }
 ```
 
-매니저의 인증 파일에는 허용할 모든 워커를 등록한다. 원격 워커에는 자신의 항목만 담은 별도 파일을 준비한다. 인증 파일 변경은 통신 서버와 해당 워커 루프를 재시작한 뒤 적용된다. 사설망에서만 연결을 허용하고, 암호화된 사설망이나 TLS 프록시의 WSS를 사용한다. 내장 서버는 WS를 제공하며 TLS 종료는 프록시가 담당한다.
-
-### 매니저 전용 장비
-
-`s8-config.yml`에 기존 KB·Telegram 설정과 함께 다음을 설정한다. 아래 IP는 설명용이며 실제 매니저의 사설망 IP로 바꾼다.
+서버 장비의 `s8-config.yml`:
 
 ```yaml
 communication:
@@ -439,117 +434,44 @@ communication:
   server:
     bindIp: 10.0.0.10
     port: 8090
-  managerUrl: ws://10.0.0.10:8090
-workers: []
-projectman:
-  apiUrl: https://projectman.internal.example/api/v2
 ```
 
-```bash
-./start-infra.sh
-./s8.sh --mode project --telegram take
-```
-
-`s8-main`의 `pi`·`scheduler`·`communicator` 창이 각각 매니저 에이전트·예약·통신 서버를 담당한다. 매니저와 통신 서버는 별도 프로세스다. 원격 워커가 연결되면 도구와 콘솔에서 목록을 확인할 수 있다. 매니저의 `workers`에는 원격 워커를 적지 않는다.
-
-매니저와 워커를 같은 WireGuard/Tailscale 등 사설망에 연결한 뒤 워커에서 매니저의 TCP 8090과 Projectman HTTPS API, 승인된 Git 원격에 접근할 수 있게 한다. 워커의 수신 포트는 열지 않는다. 웹 UI의 `network.bindIp/httpPort`와 통신 서버의 주소/포트는 별개다. TLS 프록시를 사용하면 같은 원점의 `/` WebSocket과 `/artifacts/` HTTP 경로를 함께 전달하고, 8 MiB 업로드와 WebSocket upgrade를 허용한다. `managerUrl`은 경로 없는 WS/WSS 원점이어야 한다. 인증서 검증을 끄지 않는다. 배포된 Projectman API가 `commit`·`baseCommit`·`checkpoint` 보고 필드를 지원하는지도 활성화 전에 확인한다.
-
-### 워커 전용 장비
+워커 장비의 `s8-config.yml`:
 
 ```yaml
 communication:
   enabled: true
-  nodeId: worker-host-a
+  nodeId: worker-host
   credentialsFile: /home/user/.config/s8/communication-secrets.json
   managerUrl: ws://10.0.0.10:8090
-workers:
-  - id: a
-    mode: passive
-projectman:
-  apiUrl: https://projectman.internal.example/api/v2
 ```
+
+서버 전용 장비에는 `managerUrl`이 필요 없다. 같은 장비에서 워커도 연결하면 `managerUrl`을 함께 지정한다. `server.bindIp`는 실제 사설망 IP 또는 루프백이며 `0.0.0.0`·`::`는 허용하지 않는다. 암호화된 사설망이나 TLS 프록시의 WSS를 사용한다. 내장 서버는 WS를 제공한다. 워커는 서버로 연결하므로 수신 포트가 필요 없다. 웹 UI의 `network` 설정과는 별개다.
+
+### 실행과 대화
+
+매니저 장비에서는 통신 서버와 매니저 에이전트를 각각 실행한다. 통합 런타임은 서버 설정이 있으면 communicator를 함께 시작한다.
 
 ```bash
-./s8.sh workers                  # 이 장비의 설정된 상주 워커를 tmux에 실행
-./s8.sh service worker a         # 대신 전경에서 워커 하나를 진단할 때 사용
+# 첫 번째 터미널
+./s8.sh service communicator
+# 두 번째 터미널
+./start-manager-agent.sh
 ```
 
-두 명령으로 같은 워커를 중복 실행하지 않는다. PID 잠금이 중복 실행을 거부한다. 워커 장비에는 매니저·Telegram·스케줄러·웹 앱을 띄울 필요가 없다. 작업 대상 저장소와 빌드 도구는 해당 워커에 준비한다. `communication.repositories`는 다른 장비 경로로 연결할 때만 지정한다. 매핑이 없으면 작업의 `repoPath`를 사용한다. 워커 ID는 모든 장비에서 유일해야 하며 `manager`는 예약 이름이다.
-
-### 한 장비에서 매니저와 여러 워커 실행
-
-매니저 설정의 `workers`에 로컬 워커만 추가하고 `./s8.sh --mode project`를 실행한다.
-
-```yaml
-workers:
-  - id: a
-    mode: passive
-  - id: b
-    mode: passive
-```
-
-로컬 전용이라면 `server.bindIp: 127.0.0.1`, `managerUrl: ws://127.0.0.1:8090`으로 설정한다. 원격 워커도 받을 때는 서버를 사설망 IP에 바인딩하고 로컬 클라이언트도 그 주소로 연결한다. 로컬 a·b와 원격 c를 함께 사용하는 혼합 구성이 가능하다.
-
-### 저장소 경로와 산출물 공유
-
-다른 장비에서 작업 경로가 다를 때만 매핑한다. 경로만 지정할 수 있으며 `kind`·`remote`는 실행 조건이 아니다.
-
-```yaml
-communication:
-  # enabled/nodeId/credentialsFile/managerUrl 등은 앞의 설정을 유지한다.
-  repositories:
-    /manager/projects/app:       # Projectman spec.repoPath의 값
-      path: /srv/projects/app   # 이 장비의 작업 디렉터리
-    /manager/reports:
-      path: /srv/s8-reports
-      kind: files               # Git 없는 보고·파일 작업
-```
-
-실행기는 Git 결과를 자동 게시하거나 선행 결과를 가져오지 않는다. 필요한 Git·파일 전달·충돌 해결·worktree 사용은 매니저와 워커가 판단한다. 같은 장비에서는 직접 수정한 결과가 작업 디렉터리에 남고, 다른 장비에는 매니저가 전달 방법을 지시한다. 기존 `.s8-runtime/worktrees`의 변경은 자동 이동하지 않으므로 사용 중인 결과가 있으면 매니저와 확인해 반영한다.
-
-공유할 일반 파일은 `projectman report`의 `artifacts`에 상대 경로를 지정할 수 있다. 파일당 8 MiB, 보고당 20개이며 인증된 산출물 저장소로 업로드한다. 이 선택적 전송의 경로·체크섬·크기·링크 검사는 유지하며 비밀 파일은 공유하지 않는다. 업로드 실패는 `decisions`에 기록하고 워커가 판단한 완료 상태는 바꾸지 않는다. 파일 전송과 무관한 보고는 Git·원격·산출물 서버를 요구하지 않는다. 보고의 `changedFiles`·검증·완료 여부는 워커가 기록한다.
-
-저장소는 파일 4096개·총 256 MiB를 상한으로 사용하며 자동으로 이전 산출물을 지우지 않는다. 한도에 도달하면 새 업로드가 실패하므로, 더 이상 의존하지 않는 산출물을 운영자가 확인해 정리한다. 노드 인증을 통과한 워커들은 알고 있는 체크섬의 파일을 조회할 수 있다. 프로젝트별 별도 격리가 필요한 경우 인증·저장소 경계를 추가해야 한다.
-
-### 역할별 단독 에이전트와 대화
-
-- 매니저: `./start-manager-agent.sh`. 에이전트만 실행하므로 통신을 사용하려면 별도로 `./s8.sh service communicator`가 실행 중이어야 한다. 같은 체크아웃의 매니저 통신 수신 세션은 하나만 사용한다.
-- 작업 워커: `./start-worker-agent.sh --uid <UID> --cwd <경로>`. 지정한 디렉터리에서 직접 실행한다. 매니저와 대화하려면 동일 ID의 상주 워커가 실행 중이고 해당 작업의 워커 ID가 일치해야 한다. 단독 워커의 기본 ID는 `s8-developer`이며 이름을 지정할 때는 `S8_WORKER_ID=a ./start-worker-agent.sh --uid <UID> --cwd <경로>`처럼 해당 프로세스에만 지정한다. `.env`에는 이 내부 변수를 등록하지 않는다. 보통은 `run_worker`나 콘솔을 통한 관리 실행을 사용한다.
-- 임시 조사 워커: 매니저의 `agent_message` 요청으로 자동 생성한다. 내부 실행기는 `--request <ID>`를 사용한다. Projectman을 claim하지 않고 별도 디렉터리·Pi 세션에서 조사하며, 도구는 일반 워커와 같으며 조사 범위와 후속 변경은 매니저 지시에 따른다.
-- 범용 에이전트: `./start-general-agent.sh` 또는 `./s8.sh --mode general`. 기존 동작을 유지하며 매니저 통신에 참여하지 않는다.
-
-매니저는 `agent_message`의 `workerIds`로 질문·추가 확인을 보내고, 워커는 매니저에게만 질문·발견·막힘·협업 제안을 보낸다. 기존 작업의 질문에는 `taskUid`, 임시 조사 후속 대화에는 원래 `requestId`를 지정한다. `reply`에는 원문 메시지의 `replyTo`를 연결한다. 여러 `workerIds`에 보낸 요청은 공통 `groupId`와 워커별 요청 ID를 반환하며 매니저가 결과를 취합한다. 임시 조사 결과는 워커의 `result`로 보낸다. `request`의 `timeoutSeconds`는 기본 300초, 최대 3600초의 응답 기한이다. 조사 기한을 넘기면 매니저에게 알리고 상태에 표시하지만 실행을 자동 취소하거나 다른 워커에게 다시 맡기지는 않는다. 이 기한은 30초의 통신 응답 대기/메시지 만료와 별개다. `status`는 요청 ID로 주입 상태를 조회한다. 병렬 상태 조회는 워커별 원래 요청 ID로 각각 수행한다.
-
-`pending`은 Pi 전달 대기, `injected`는 Pi 세션 이력에서 주입이 관찰된 상태다. 읽음·작업 완료나 디스크 동기화 보장이 아니다. 새 Pi 세션은 첫 일반 사용자/어시스턴트 메시지 전까지 파일 기록을 미룰 수 있다. Projectman 작업은 별도의 claim과 report로 실행·완료를 확인한다. 새 요청이 대기 중일 때 같은 UID의 과거 완료·실패를 현재 요청의 결과로 표시하지 않으며, 명시적으로 재개한 미완료 run은 원래 claim과 연결한다. 응답 유실 시 `unknown`, 연결되지 않은 대상은 `unavailable`로 표시한다. 불명확한 요청을 자동 재전송하지 말고 Projectman 또는 요청 상태를 먼저 확인한다.
-
-### tmux 확인·종료·재시작
-
-```text
-매니저 장비
-  s8-infra: router / phcms / kb-browser / frontend / projectman-console / terminal-gateway
-  s8-main: shell / pi / scheduler / communicator
-  s8-workers: shell / worker-a / worker-b / <TASK-UID> / research-a-<REQUEST-ID>
-워커 전용 장비
-  s8-workers: shell / worker-c / <TASK-UID> / research-c-<REQUEST-ID>
-```
+워커 장비에서는 인증 파일에 등록한 ID로 기존 Pi 세션을 직접 실행한다.
 
 ```bash
-tmux list-sessions
-tmux list-windows -t s8-main
-tmux list-windows -t s8-workers
-tmux attach-session -t s8-main
-./s8.sh service communicator     # 관리 창 밖에서 통신 서버만 전경 실행·진단
+S8_WORKER_ID=a ./start-worker-agent.sh --cwd /srv/projects/app
 ```
 
-종료는 해당 서비스 창에 Ctrl-C를 보내거나 전경 터미널에서 Ctrl-C를 누른다. 통신 서버의 관리 창이 정상 종료된 뒤 `tmux respawn-window -t s8-main:communicator`로 같은 명령을 다시 실행할 수 있다. 워커 루프는 `./s8.sh workers`로 다시 시작한다. 이 명령은 작업 Pi 창을 종료하지 않지만 루프의 메모리 대기 요청은 유실될 수 있다. 연결은 자동 복구되고 불명확한 요청은 자동 재전송하지 않는다.
+UID 없이도 메시지를 받는다. 한 워커 ID에는 한 번에 한 세션만 연결할 수 있으며 중복 연결은 거부된다. 여러 세션을 동시에 사용하려면 ID와 인증 항목을 각각 준비한다. 이전 작업 창이 남아 있다면 해당 연결을 종료한 뒤 같은 ID를 재사용한다. `workers` 목록과 `./s8.sh workers`는 로컬 Projectman 작업 루프 전용이며 메시지 연결을 만들지 않는다.
 
-작업 창과 `research-...` 창은 결과 확인용으로 남는다. 조사 세션은 `result`를 보낸 후 워커의 새 작업을 허용한다. 워커마다 닫히지 않은 조사 세션을 20개까지 유지하며 한도에 도달하면 완료 창을 정리해야 한다. 루프를 재시작했을 때 남아 있는 조사 세션은 결과를 다시 확인하거나 해당 창을 닫기 전까지 새 작업을 받지 않는다.  더 이상 대화하지 않을 창은 `tmux kill-window -t s8-workers:<창이름>`으로 정리한다. 실행 중인 조사·작업 창을 닫으면 중단되므로 상태를 먼저 확인한다. `./s8.sh --mode project`의 전체 런타임 시작은 기존 tmux 세션을 종료하는 동작이 있으므로 워커 하나나 통신 서버를 재시작하는 용도로 사용하지 않는다.
+매니저는 `agent_message {action: "list"}`로 연결 상태를 확인한다. `request`·`reply`·`notice`·`proposal`·`result`는 텍스트를 전달하고, `status`는 전달 상태를 조회한다. 매니저는 `workerIds`로 대상을 고르며 여러 대상에는 공통 `groupId`와 개별 `requestId`가 부여된다. 워커는 매니저에게만 보낸다. 답변은 원래 `requestId`와 수신 메시지 ID인 `replyTo`를 사용한다. `taskUid`와 `sessionId`는 기존 수신 세션을 확인하는 선택적 맥락이며 작업을 시작하지 않는다.
 
-통신 연결이 끊겨도 claim된 작업이 자동 취소되지는 않는다. Projectman 접근 실패가 길어져도 파일·명령 도구를 차단하지 않는다. 워커가 매니저에게 상황을 알리고 계속할 수 있는 작업을 판단한다. 보고 재전송은 작업을 실행한 장비의 상주 루프가 수행한다. 매니저는 Projectman을 조회해 최종 상태를 확인한다. 원격 작업의 수동 마무리는 매니저의 로컬 tmux 부재만으로 허용하지 않으며, 실행 소유 장비의 claim과 종료 여부를 확인해야 한다. 다른 워커로 자동 재배정하지 않는다.
+수신 메시지는 현재 모델·도구 실행이 끝난 뒤 세션에 추가되어 후속 응답을 시작한다. `pending`은 수신함 대기, `injected`는 세션 기록에 추가됨을 뜻하며 답변·작업 완료를 보장하지 않는다. 연결되지 않은 대상에는 `unavailable`, 전달 여부를 확인하지 못한 경우에는 `unknown`을 반환한다. 오프라인 보관과 연결 복구 후 자동 재전송은 없다.
 
-통신 서버 로그는 요청/메시지/작업/실행/노드 ID와 전달 상태·응답 지연을 기록하며 대화 내용과 인증 헤더는 기록하지 않는다. 콘솔의 워커 상태와 연결별 카운터로 오류를 확인하고, 모델 사용량은 해당 Pi 세션 기록에서 확인한다. 워커 루프의 `task-... 시작 실패`와 Pi 창의 오류를 구분한다. `unknown` 요청은 먼저 상태를 확인하고, 임시 조사를 다시 요청하려면 중복 실행 가능성을 확인한 뒤 새 요청으로 보낸다.
-
-운영 백업에는 Projectman 데이터, 작업 장비별 실행/claim/outbox 상태, Git 실행 참조, 매니저의 `.s8-runtime/artifacts`를 함께 포함한다. 복구 시 새 배정을 막고 동일 버전·노드 ID·저장소 매핑으로 복원한 뒤 기존 실행 상태를 Projectman과 대조한다. 인증 파일은 별도로 안전하게 관리하고 내용은 로그·작업 보고에 넣지 않는다. 자격증명을 교체하면 매니저 통신 서버와 해당 워커를 재시작한다. 롤백은 활성 실행·미확정 요청을 확인한 후 통신을 비활성화하며, 연결 해제를 작업 종료로 간주하지 않는다.
+통신 프로토콜은 메시지 전용 v2이며 서버·워커를 같은 버전으로 업데이트해야 한다. 연결은 자동 재시도하며 heartbeat·크기 제한·중복 방지·전달 확인을 유지한다. 프로세스 재시작 시 미확정 요청은 복원하지 않는다. 인증 파일 변경은 서버와 해당 워커 세션을 재시작한 뒤 반영된다. 로그는 연결·요청 ID·전달 상태·지연만 기록하며 대화와 인증 토큰은 기록하지 않는다. 상세 구조는 [메시지 통신 구조](docs/distributed-multi-agent-plan.md)를 참고한다.
 
 ## 다른 장비에서 재현
 
@@ -564,6 +486,18 @@ npm ci --ignore-scripts --prefix pi
 
 - Pi `1.3.0`을 쓰며 `pi/package-lock.json`으로 같은 버전을 설치한다. `pi/`의 설정, extension, skill, 시스템 지침은 모든 장비가 공유한다.
 - `.pi-runtime/`(인증, 세션, 캐시, 설치 패키지), `.env`, `s8-config.yml`, 로그, 업로드는 장비마다 따로 둔다.
+
+[pi-clinepass-provider](https://github.com/jellydn/pi-clinepass-provider) `1.6.0`은 `pi/package-lock.json`에 고정된 공통 의존성이며 `npm ci --ignore-scripts --prefix pi`로 함께 설치된다. 실행기는 자동 발견을 꺼도 이 provider를 명시적으로 로드하므로 범용·매니저·워커와 tmux의 관리 세션에서 모두 사용할 수 있다.
+
+발급받은 ClinePass API 키는 이 장비의 루트 `.env`에 `CLINE_API_KEY`로 직접 설정한다([예시](.env.example)). 실행 중인 에이전트를 다시 시작한 뒤 `/model`에서 `clinepass` 모델을 선택하거나 실행할 때 지정한다. 기존 기본 provider·model은 유지된다.
+
+```bash
+./start-general-agent.sh --provider clinepass --model cline-pass/glm-5.3 --thinking high
+./start-manager-agent.sh --provider clinepass --model cline-pass/glm-5.3 --thinking high
+./start-worker-agent.sh --provider clinepass --model cline-pass/deepseek-v4.1-flash --thinking high
+```
+
+키는 모델 통신에 사용되며 에이전트의 bash 도구 환경에서는 제거된다. 다른 장비에서는 각 장비에 키를 따로 설정한다.
 
 선택 Pi 패키지는 아래처럼 설치한다. 자동 발견을 끄므로 설치해도 도구가 자동으로 늘지 않는다. MCP를 쓰려면 구현 하나를 골라 프로필의 확장과 도구 목록을 함께 고친다.
 

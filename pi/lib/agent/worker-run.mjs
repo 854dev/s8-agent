@@ -8,8 +8,6 @@ import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { saveJson } from '../storage/json-file.mjs';
 import { reportForServer, flushDevelopmentOutbox } from '../development/outbox.mjs';
-import { loadS8Config } from '../config/s8-config.mjs';
-import { artifactCheckpoint, publishArtifacts } from '../development/artifacts.mjs';
 
 const WORK_TYPES = ['task', 'subtask'];
 const readJson = async file => { try { return JSON.parse(await readFile(file, 'utf8')); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };
@@ -26,11 +24,10 @@ export async function markReported(root, claim) {
 }
 
 /** 실행기(work.mjs)가 준비한 claim 요청을 워커에게 넘긴다. 같은 UID의 이전 기록은 대체한다. */
-export async function dispatchClaim(root, { uid, operation, inputTree, baseCommit, dependencyArtifacts = [] }) {
+export async function dispatchClaim(root, { uid, operation }) {
   const file = claimFile(root, uid);
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  const communication = loadS8Config(root).communication;
-  await saveJson(file, { uid, runId: operation.runId, operation, inputTree, baseCommit, dependencyArtifacts, ...(communication.enabled ? { nodeId: communication.nodeId } : {}) });
+  await saveJson(file, { uid, runId: operation.runId, operation });
 }
 
 /**
@@ -48,8 +45,7 @@ export async function claimWork({ root, client, uid, workerId = 's8-developer' }
     if (!saved) {
       const runId = randomUUID();
       await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-      const communication = loadS8Config(root).communication;
-      saved = { uid, runId, operation: { action: 'claim', expectedRevision: task.workflow.revision, requestId: randomUUID(), runId, workerId }, ...(communication.enabled ? { nodeId: communication.nodeId } : {}) };
+      saved = { uid, runId, operation: { action: 'claim', expectedRevision: task.workflow.revision, requestId: randomUUID(), runId, workerId } };
       await saveJson(file, saved);
     }
     // 저장된 요청을 그대로 보내므로 응답 유실 후 재시도도 한 번만 반영된다.
@@ -62,27 +58,20 @@ export async function claimWork({ root, client, uid, workerId = 's8-developer' }
     await saveJson(path.join(runDirectory, 'request.json'), { task: { uid }, run: { runId: saved.runId } });
     task = await client.getWorkflow(uid);
   }
-  return { claim: saved, work: { ...task, title: item.title ?? task.title, text: item.detail?.text, runId: saved.runId, dependencyArtifacts: saved.dependencyArtifacts ?? [] } };
+  return { claim: saved, work: { ...task, title: item.title ?? task.title, text: item.detail?.text, runId: saved.runId } };
 }
 
 /**
  * 에이전트가 판단한 결과를 보고한다. Git 작업과 필수 검증명 검사는 하지 않는다.
  * 보고는 outbox에 먼저 남기고 전달하므로, 전달이 실패해도 다음 전달 시도가 같은 요청으로 다시 보낸다.
  */
-export async function reportWork({ root, client, claim, result, cwd }) {
+export async function reportWork({ root, client, claim, result }) {
   const directory = path.join(root, '.s8-runtime/runs', claim.runId), outbox = path.join(directory, 'outbox.json');
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const task = { ...await client.getWorkflow(claim.uid), uid: claim.uid };
-  const communication = loadS8Config(root).communication;
   const changedFiles = result.changedFiles ?? [];
   if (!await readJson(outbox)) {
-    if (communication.enabled && result.artifacts?.length) {
-      try {
-        const artifact = await publishArtifacts({ root, config: communication, claim, task, cwd, files: result.artifacts ?? [], workerId: claim.operation.workerId, code: false });
-        result = { ...result, checkpoint: artifactCheckpoint(result.checkpoint, artifact), ...(artifact.commitSha ? { commit: artifact.commitSha, baseCommit: artifact.baseCommit } : {}) };
-      } catch (error) { result = { ...result, decisions: [...(result.decisions ?? []), `산출물 전달 실패: ${error.message}`] }; }
-    }
-    const report = reportForServer({ ...result, changedFiles, ...(claim.baseCommit ? { baseCommit: claim.baseCommit } : {}) });
+    const report = reportForServer({ ...result, changedFiles });
     await saveJson(outbox, { version: 2, uid: claim.uid, title: task.title ?? claim.uid, runId: claim.runId, report, operation: { action: 'report', requestId: randomUUID(), expectedRevision: claim.revision, runId: claim.runId, report } });
   }
   await markReported(root, claim);

@@ -14,7 +14,6 @@ import { loadS8Config, WORKER_MODES } from '../lib/config/s8-config.mjs';
 import { modeOverride, queueInstruction, setWorkerMode, workerStatuses } from '../lib/agent/resident.mjs';
 import { flushDevelopmentOutbox } from '../lib/development/outbox.mjs';
 import { registerSecretFreeBash } from './secret-free-bash.ts';
-import { localRequest } from '../lib/communication/local.mjs';
 import { registerCommunication } from './communication.mjs';
 
 export const MANAGER_TOOLS: string[] = loadProfile('manager').tools;
@@ -58,10 +57,6 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
     parameters: Type.Object({ uid: Type.String(), workerId: Type.Optional(Type.String()) }),
     async execute(_id, args) {
       if (args.workerId) {
-        if (loadS8Config(agentRoot).communication.enabled) {
-          const result = await localRequest(agentRoot, 'communicator', { action: 'send', workerId: args.workerId, type: 'task.run', payload: { uid: args.uid }, context: { taskUid: args.uid } });
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: undefined };
-        }
         const worker = residentWorker(args.workerId);
         await queueInstruction(agentRoot, worker.id, args.uid, 'manager');
         const [status] = await workerStatuses(agentRoot, [worker]);
@@ -76,12 +71,6 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
     description: 'List resident workers (action list) or change one worker mode at runtime: active polls ready tasks, passive waits for run_worker with workerId or the console, paused takes no new work. mode default reverts to the s8-config.yml value. Change modes only when the user asks.',
     parameters: Type.Object({ action: Type.Union([Type.Literal('list'), Type.Literal('set')]), workerId: Type.Optional(Type.String()), mode: Type.Optional(Type.Union([...WORKER_MODES.map(mode => Type.Literal(mode)), Type.Literal('default')])) }),
     async execute(_id, args) {
-      if (loadS8Config(agentRoot).communication.enabled) {
-        const result = args.action === 'list'
-          ? await localRequest(agentRoot, 'communicator', { action: 'workers' })
-          : await localRequest(agentRoot, 'communicator', { action: 'send', workerId: args.workerId, type: 'worker.mode.set', payload: { mode: args.mode } });
-        return { content: [{ type: 'text', text: JSON.stringify(result) }], details: undefined };
-      }
       const workers = loadS8Config(agentRoot).workers;
       if (args.action === 'set') {
         if (!args.workerId || !args.mode) throw new Error('set에는 workerId와 mode가 필요합니다.');
