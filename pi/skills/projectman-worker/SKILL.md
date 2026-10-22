@@ -18,7 +18,7 @@ description: S8 워커가 지정된 Projectman 작업을 조회·claim하고 자
 
 `agent_message`는 실행 중인 세션에서 매니저에게만 보낸다. `to`는 생략한다(comm-center가 매니저에게 전달한다). UID·Projectman 없이도 메시지를 주고받을 수 있다. 관련 작업 UID는 text에 적는다.
 
-매니저가 메시지로 UID를 지시하면 작업 내용과 승인 범위를 확인한 뒤 `projectman get`으로 claim해 수행한다. `report` 후에는 `result`로 결과 요약과 UID를 매니저에게 보낸다. 메시지 전달 실패는 보고 실패가 아니며, 보고는 Projectman에 남는다.
+매니저가 메시지로 UID를 지시하면 작업 내용과 승인 범위를 확인한 뒤 `projectman get`으로 claim해 수행한다. `report`한 결과는 Projectman을 거쳐 매니저에게 자동으로 전달되므로 같은 내용을 `result`로 다시 보내지 않는다. 보고에 담지 못한 설명이나 후속 지시에 대한 답만 메시지로 보낸다.
 
 - `request`: 필요한 판단을 묻는다. 확인한 사실·시도·결정이 필요한 부분을 text에 적는다.
 - `notice`·`proposal`: 진행 상황·막힘·다른 워커의 검토 제안을 보낸다.

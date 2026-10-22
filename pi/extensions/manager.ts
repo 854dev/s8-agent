@@ -13,6 +13,7 @@ import { startWork } from '../lib/agent/work.mjs';
 import { loadS8Config, WORKER_MODES } from '../lib/config/s8-config.mjs';
 import { modeOverride, queueInstruction, setWorkerMode, workerStatuses } from '../lib/agent/resident.mjs';
 import { flushDevelopmentOutbox } from '../lib/development/outbox.mjs';
+import { recordFinishedRuns } from '../lib/manager/run-results.mjs';
 import { registerSecretFreeBash } from './secret-free-bash.ts';
 import { registerCommunication } from './communication.mjs';
 
@@ -93,16 +94,18 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
       try {
         const root = fileURLToPath(new URL('../..', import.meta.url));
         const client = process.env.PHCMS_ACCESS_TOKEN ? projectmanFromEnv() : null;
+        const tasks = client ? [...await client.list('task'), ...await client.list('subtask')] : [];
         if (client) {
           await recoverCompletionReviews(root, client);
-          // 워커 보고 중 전달에 실패한 것을 다시 보낸다(매니저 inbox·Telegram 포함).
+          // 이 장비 워커의 보고 중 전달에 실패한 것을 다시 보낸다(매니저 inbox·Telegram 포함).
           await flushDevelopmentOutbox({ root, client });
+          // 원격 워커의 보고는 Projectman에서 찾아 inbox에 넣는다.
+          await recordFinishedRuns({ root, items: tasks });
         }
         await drainManagerInbox(root, report => {
           pi.sendMessage(managerInboxMessage(report), { triggerTurn: true, deliverAs: 'followUp' });
         });
         if (!client) return;
-        const tasks = [...await client.list('task'), ...await client.list('subtask')];
         // active 상주 워커가 있으면 ready 작업은 워커가 직접 맡으므로 매니저에게 알리지 않는다.
         const residentActive = (await Promise.all(loadS8Config(root).workers.map(async worker => (await modeOverride(root, worker.id) ?? worker.mode) === 'active'))).some(Boolean);
         for (const item of tasks) {

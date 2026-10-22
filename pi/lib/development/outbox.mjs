@@ -2,7 +2,7 @@
 // 전달이 실패하면 다음 flush가 같은 요청 ID로 재시도하므로 보고가 중복 반영되지 않는다. 워커 보고(worker-run.mjs)와 매니저 polling이 함께 쓴다.
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { enqueueManagerMessage } from '../manager/inbox.mjs';
+import { enqueueManagerMessage, readManagerMessage } from '../manager/inbox.mjs';
 import { saveJson } from '../storage/json-file.mjs';
 import { loadS8Config } from '../config/s8-config.mjs';
 import { sendTelegram } from '../telegram/notify.mjs';
@@ -27,6 +27,14 @@ export function workLink(publicUrl, uid, runId) {
   url.searchParams.set('task', uid);
   url.searchParams.set('run', runId);
   return url.href;
+}
+
+/** Telegram text for a finished run, or null without a public link. Shared with the manager-side run watcher. */
+export function runNotice({ title, uid, runId, report }, publicUrl) {
+  const link = workLink(publicUrl, uid, runId);
+  if (!link) return null;
+  const checks = (report.verification ?? []).map(check => `${check.ok ? '통과' : '실패'}: ${check.name}`).join(', ');
+  return `${report.status === 'completed' ? '✅ 개발 완료 · 최종 확인 대기' : '⚠️ 작업 실패'}: ${title ?? uid}\n${String(report.summary ?? '').slice(0, 1800)}\n검증: ${checks.slice(0, 500) || '기록 없음'}\n${link}`;
 }
 
 const flushing = new Map();
@@ -59,17 +67,17 @@ async function flushOutbox({ root, client, notify = sendTelegram, settings = loa
         outcomes.push({ runId, delivered: true });
       }
       if (!pending.managerDelivered) {
-        await enqueueManagerMessage(root, runId, { uid: pending.uid, runId, state: pending.state, summary: pending.report.summary });
+        // A manager that saw the finished run in Projectman first owns its Telegram notice (lib/manager/run-results.mjs).
+        const created = await enqueueManagerMessage(root, runId, { uid: pending.uid, runId, state: pending.state, summary: pending.report.summary });
+        if (!created && (await readManagerMessage(root, runId))?.source === 'projectman') { pending.telegramDelivered = true; pending.notificationStatus = 'manager'; }
         pending.managerDelivered = true;
         await saveJson(file, pending);
       }
       if (pending.version && !pending.telegramDelivered) {
-        const link = workLink(settings.publicUrl, pending.uid, runId);
-        if (!link || !settings.telegram.scheduleChatId) {
+        const message = runNotice({ title: pending.title, uid: pending.uid, runId, report: pending.report }, settings.publicUrl);
+        if (!message || !settings.telegram.scheduleChatId) {
           pending.notificationStatus = 'not_configured';
         } else {
-          const checks = (pending.report.verification ?? []).map(check => `${check.ok ? '통과' : '실패'}: ${check.name}`).join(', ');
-          const message = `${pending.report.status === 'completed' ? '✅ 개발 완료 · 최종 확인 대기' : '⚠️ 작업 실패'}: ${pending.title ?? pending.uid}\n${pending.report.summary.slice(0, 1800)}\n검증: ${checks.slice(0, 500) || '기록 없음'}\n${link}`;
           pending.telegramDelivered = await notify(message, process.env, fetch, settings.telegram);
           pending.notificationStatus = pending.telegramDelivered ? 'sent' : 'not_configured';
         }

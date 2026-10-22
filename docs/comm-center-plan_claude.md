@@ -220,7 +220,7 @@
 - [ ] **원본 체크아웃의 사본 정리.** `/home/sangbong/s8-agent`에 미추적 상태의 `apps/comm-center/`와 `docs/comm-center-plan_claude.md`(1단계 시점 사본)가 남아 있다. 브랜치를 반영하기 전에 지워야 충돌이 없다.
 - [ ] **실제 원격 환경 확인.** 다른 장비 사이 연결과 TLS 프록시(WSS) 구성.
 - [ ] **운영 규칙 적용.** 워커 장비마다 UID 없이 실행한 상시 세션을 둔다. 같은 토큰으로 두 세션이 연결되지 않게 하고, 상주 루프 작업 세션이 통신을 쓰려면 `S8_COMM_TOKEN_FILE`로 토큰을 나눈다.
-- [ ] **(보류) 원격 보고 경로.** 원격 워커의 보고가 매니저 inbox에 닿지 않는 문제(`pi/lib/development/outbox.mjs:62`)가 있다. 지금은 워커 스킬이 `report` 후 `result` 메시지를 보내도록 안내한다.
+- [x] **원격 보고 경로.** 원격 워커의 보고가 매니저 inbox에 닿지 않던 문제를 고쳤다. 매니저 poll이 Projectman에서 끝난 실행을 찾아 inbox에 넣는다(`pi/lib/manager/run-results.mjs`). 같은 장비 워커와의 중복은 같은 runId 키로 막는다. inbox에 먼저 넣은 쪽이 Telegram을 보낸다. 통신(comm-center)에 의존하지 않는다.
 - [ ] **(보류) 나머지 결합 축소.** `run_worker`·`set_worker_mode` 제거, `repoPath`를 워커 설정으로 옮기기, 역할별 설정 로더.
 - [ ] **(보류) comm-center 확장.** 오프라인 보관, 재시작 없는 등록부 재로딩.
 

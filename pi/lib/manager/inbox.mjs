@@ -27,7 +27,7 @@ export async function drainManagerInbox(root, deliver) {
 }
 
 
-/** Publish a complete message atomically; never overwrite a consumer's receipt on retry. */
+/** Publish a complete message atomically; never overwrite a consumer's receipt on retry. Returns false if the key already exists. */
 export async function enqueueManagerMessage(root, key, message) {
   if (!/^(?:completion-)?[a-f0-9-]{36}$/.test(key)) throw new Error('Invalid manager message ID');
   const directory = path.join(root, '.s8-runtime/manager-inbox');
@@ -36,8 +36,15 @@ export async function enqueueManagerMessage(root, key, message) {
   try {
     await saveJson(temporary, message);
     try { await link(temporary, path.join(directory, `${key}.json`)); }
-    catch (error) { if (error.code !== 'EEXIST') throw error; }
+    catch (error) { if (error.code !== 'EEXIST') throw error; return false; }
+    return true;
   } finally { await rm(temporary, { force: true }); }
+}
+
+/** The queued message for key, or null. */
+export async function readManagerMessage(root, key) {
+  try { return JSON.parse(await readFile(path.join(root, '.s8-runtime/manager-inbox', `${key}.json`), 'utf8')); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
 
 export function managerInboxMessage(report) {

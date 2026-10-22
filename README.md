@@ -159,7 +159,7 @@ sysctl net.ipv4.ip_unprivileged_port_start   # 80이면 적용됨
 3. 승인: 사람이 콘솔에서 최종 계획 버전을 확인하고 `최종 계획 확정 · 실행`을 누른다. 매니저가 서비스 키로 대신 확정하지 않는다.
 4. 실행: 상주 워커·매니저의 `run_worker`·`./s8.sh work <UID>`가 작업의 `repoPath` 디렉터리에서 직접 워커를 시작한다. 없는 디렉터리는 만든다. Git 초기화·저장소 최상위 경로·worktree·커밋·원격 저장소는 요구하지 않는다. 같은 실행은 원래 claim 요청으로 재개한다.
 5. 수행: 작업 범위·파일·명령·Git 사용·의존 결과 반영·검증·완료 여부는 워커가 시스템 프롬프트와 매니저 지시에 따라 판단한다. claim 전·보고 후·임시 조사에서도 파일·명령 도구를 차단하지 않는다. Projectman 서버의 claim·report 상태 규칙은 그대로 적용된다. 서버는 `completed` 보고의 실패한 검증·미완료 항목·실행 오류를 허용하지 않으며 이 저장소의 변경만으로 그 서버 규칙은 바뀌지 않는다.
-6. 보고: 보고는 `.s8-runtime/runs/<runId>/outbox.json`에 먼저 남긴 뒤 Projectman(review 상태), 매니저 수신함, Telegram으로 전달한다. 전달 실패분은 매니저가 15초마다 다시 보낸다. claim·보고 요청은 요청 ID를 고정해 재시도해도 한 번만 반영된다.
+6. 보고: 보고는 `.s8-runtime/runs/<runId>/outbox.json`에 먼저 남긴 뒤 Projectman(review 상태), 매니저 수신함, Telegram으로 전달한다. 전달 실패분은 매니저가 15초마다 다시 보낸다. claim·보고 요청은 요청 ID를 고정해 재시도해도 한 번만 반영된다. 다른 장비 워커의 보고는 매니저가 15초마다 Projectman에서 끝난 실행을 찾아 수신함에 넣고 Telegram을 보낸다. 같은 실행은 수신함에 먼저 넣은 쪽만 Telegram을 보낸다. 매니저가 처음 실행되기 전에 끝난 실행은 옮기지 않는다(`.s8-runtime/manager-runs-since.json`). 원격 워커 장비에는 Telegram을 설정하지 않는다.
 7. 검토와 완료: 매니저가 결과와 검증 근거를 보고 `review_result`를 남긴다. 사용자는 Telegram 링크나 콘솔에서 결과를 보고 선택적으로 검토의견을 적어 `검토의견 제출 · 작업 완료`를 누른다. 작업은 done이 되고 의존 작업이 실행 가능해진다.
 8. 후속: 매니저가 검토의견을 보고 추가 조치 없음, 질문, 새 작업 중 하나를 고른다. 새 작업은 원본 UID와 의견 참조를 남기고 원본을 선행 작업으로 지정하고 매니저가 필요한 결과 반영을 지시한다. 새 작업도 별도로 승인받는다. 재작업 상태나 자동 실행은 없다.
 
@@ -397,7 +397,7 @@ s8-agent/
 | 워커 claim·보고 | [agent/worker-run.mjs](pi/lib/agent/worker-run.mjs), [extensions/worker.ts](pi/extensions/worker.ts) | `start-worker-agent.sh` |
 | 작업 실행(디렉터리·창) | [agent/work.mjs](pi/lib/agent/work.mjs) | `s8.sh work`, `run_worker` |
 | 상주 워커 | [agent/resident.mjs](pi/lib/agent/resident.mjs), [runtime/services.mjs](pi/lib/runtime/services.mjs) | `s8.sh service worker`, 콘솔, `set_worker_mode` |
-| 보고 전달 | [development/outbox.mjs](pi/lib/development/outbox.mjs) | 워커 보고, 매니저 polling |
+| 보고 전달 | [development/outbox.mjs](pi/lib/development/outbox.mjs), [manager/run-results.mjs](pi/lib/manager/run-results.mjs) | 워커 보고, 매니저 polling |
 | 완료·검토의견 수신 | [manager/inbox.mjs](pi/lib/manager/inbox.mjs), [extensions/manager.ts](pi/extensions/manager.ts) | 매니저 polling |
 | Projectman API·콘솔 | [projectman/client.ts](pi/lib/projectman/client.ts), [projectman/console.mjs](pi/lib/projectman/console.mjs) | `pi/extensions/projectman.ts`, `pi/bin/projectman-console.mjs` |
 | tmux 런타임 | [runtime/](pi/lib/runtime/) | `s8.sh` → `pi/bin/s8.mjs` |
