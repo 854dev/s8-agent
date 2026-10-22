@@ -60,11 +60,3 @@ test('a second start replaces service processes in their existing windows', asyn
   }
   assert.equal((await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').length, 2);
 });
-
-test('communication server has its own managed tmux window even when scheduler is excluded', async t => {
-  const f = await fixture(t);
-  await writeFile(path.join(f.root, 's8-config.yml'), 'communication:\n  enabled: true\n  nodeId: manager-host\n  credentialsFile: /fixture/communication-secrets.json\n  managerUrl: ws://127.0.0.1:8090\n  server: {}\n');
-  await startPiServices(f.root, { scheduler: false, run: f.run });
-  assert.equal((await readFile(path.join(f.root, 'starts'), 'utf8')).trim(), 'communicator');
-  assert.deepEqual((await f.run(['list-windows', '-t', 's8-main', '-F', '#W'])).stdout.trim().split('\n').sort(), ['communicator', 'shell']);
-});

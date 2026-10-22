@@ -26,7 +26,7 @@ const residentWorker = (id: string) => {
   return worker;
 };
 export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
-  registerCommunication(pi, { root: agentRoot, role: 'manager' });
+  registerCommunication(pi, { root: agentRoot });
   const libraries = new Map<string, ReturnType<typeof managerKb>>();
   // Development runs go to a worker (run_worker); general shell work uses bash.
   projectman(pi);

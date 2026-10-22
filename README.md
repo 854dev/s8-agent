@@ -69,7 +69,7 @@ Pi 창이 열리면 `/login`으로 이 장비의 모델 인증을 설정한다. 
 | `s8-config.yml` | `kbRoot`, `projectman.apiUrl`·`startCommand`, `network.bindIp`·`httpPort`, `workers`, `telegram` ID, `publicUrl` | 읽을 수 있음 |
 
 - 항목의 의미와 기본값은 [`.env.example`](.env.example)과 [`s8-config.example.yml`](s8-config.example.yml)의 주석에 있다. `node pi/bin/s8-config.mjs show`로 검증한 값을 확인한다.
-- `s8-config.yml`에 모르는 키가 있으면 시작하지 않는다. 예전 `.env`의 `S8_KB_ROOT`·`PHCMS_API_URL`·`NGINX_*`·`PHCMS_START_COMMAND`·`S8_WORKER_ID`·Telegram ID 변수와 예전 `worker-entries`·`worker-communicator` 키는 읽지 않으므로 직접 옮기거나 지운다.
+- `s8-config.yml`에 모르는 키가 있으면 시작하지 않는다. 예전 `.env`의 `S8_KB_ROOT`·`PHCMS_API_URL`·`NGINX_*`·`PHCMS_START_COMMAND`·`S8_WORKER_ID`·Telegram ID 변수와 예전 `worker-entries`·`worker-communicator` 키, 이전 통신 서버의 `communication.server`·`nodeId`·`credentialsFile`·`managerUrl`은 읽지 않으므로 직접 옮기거나 지운다.
 - `kbRoot`의 상대 경로는 이 저장소 기준이고 앞의 `~/`는 홈 디렉터리다.
 - 모든 모드의 실행기는 시작할 때 `.env`를 읽고 `s8-config.yml` 값을 하위 프로세스에 넘긴다. 같은 이름의 환경변수가 셸에 있어도 설정 파일이 우선한다.
 - 설정을 바꾸면 해당 프로세스(매니저, 스케줄러, `start-infra.sh`)를 다시 시작해야 반영된다.
@@ -209,6 +209,7 @@ workers:
 | `frontend` | Vite 개발 서버 | `127.0.0.1:4178` |
 | `projectman-console` | 콘솔 API `pi/bin/projectman-console.mjs` | `127.0.0.1:8791` |
 | `terminal-gateway` | 웹 터미널 backend | `127.0.0.1:8790` |
+| `comm-center` | 에이전트 통신 중계 `apps/comm-center`(`apps/comm-center/.env`가 있는 경우만) | `COMM_CENTER_HOST:PORT`, 기본 `127.0.0.1:8090` |
 | `phcms` | `projectman.startCommand`(설정한 경우만) | PH-CMS `127.0.0.1:8000` |
 
 - Docker는 쓰지 않는다. 리눅스에서는 먼저 [80번 포트 허용](#80번-포트-허용-리눅스)을 한 번 적용한다.
@@ -366,6 +367,7 @@ s8-agent/
 │   ├── kb-browser/          # 지식베이스·업로드 API
 │   ├── terminal-gateway/    # 호스트 PTY·tmux 웹 터미널
 │   ├── telegram-gateway/    # Telegram 명령·알림
+│   ├── comm-center/         # 에이전트 통신 중계
 │   └── mcp-hub/             # MCP 허브
 ├── frontend/                # 웹 콘솔(Projectman, 지식베이스, 업로드, 터미널)
 ├── infra/router/            # 경로별 proxy(Node)
@@ -407,71 +409,57 @@ s8-agent/
 
 ## 에이전트 메시지 통신
 
-실행 중인 매니저·워커 Pi 세션이 텍스트를 주고받는다. 워커 간 대화는 매니저가 중개한다. 원격 작업 실행·워커 모드 변경·파일 전송·저장소 경로 매핑·에이전트 자동 생성은 지원하지 않는다. 로컬 Projectman 작업과 상주 워커 관리는 기존 실행기로 처리한다.
+실행 중인 매니저·워커 Pi 세션이 `apps/comm-center`를 거쳐 텍스트를 주고받는다. 매니저와 워커는 같은 클라이언트이고, 정체성과 역할은 comm-center 등록부가 토큰으로 정한다. 워커 간 대화는 매니저가 중개한다. 원격 작업 실행·워커 모드 변경·파일 전송·에이전트 자동 생성은 지원하지 않는다. 로컬 Projectman 작업과 상주 워커 관리는 기존 실행기로 처리한다.
 
-### 인증과 설정
-
-각 장비에서 `npm ci --ignore-scripts --prefix pi`로 의존성을 설치하고 모델 인증을 준비한다. 메시지 전용 워커에는 Projectman·KB·Telegram·상주 workers 설정이 필요 없다. 메시지 서버와 매니저는 같은 체크아웃에서 실행한다.
-
-운영자가 아래 형식의 인증 파일을 준비한다. 토큰은 워커마다 독립적인 32–256자의 영문·숫자·`_`·`-` 값으로 바꾸고 파일 권한을 `600`으로 설정한다. 매니저에는 모든 워커 항목, 워커에는 자신의 항목만 둔다. 실제 인증 파일은 Git에 넣거나 에이전트에게 조회시키지 않는다.
-
-```json
-{
-  "workers": {
-    "a": "REPLACE_WITH_A_RANDOM_TOKEN_FOR_WORKER_A",
-    "b": "REPLACE_WITH_A_RANDOM_TOKEN_FOR_WORKER_B"
-  }
-}
+```text
+매니저 Pi ─┐
+워커 Pi  ──┼─ WebSocket ─ apps/comm-center
+워커 Pi  ──┘
 ```
 
-서버 장비의 `s8-config.yml`:
+### comm-center 준비
+
+comm-center는 한 장비에서만 실행한다. 설치·등록·보안은 [apps/comm-center/README.md](apps/comm-center/README.md)에 있다.
+
+```bash
+npm ci --prefix apps/comm-center
+cp apps/comm-center/.env.example apps/comm-center/.env   # 등록부 경로·바인딩 IP·포트
+npm run issue --prefix apps/comm-center -- ~/.config/s8/comm-center-agents.json manager manager ~/.config/s8/comm-manager.json
+npm run issue --prefix apps/comm-center -- ~/.config/s8/comm-center-agents.json a worker ~/.config/s8/comm-a.json
+npm start --prefix apps/comm-center   # start-infra.sh는 .env가 있으면 comm-center 창에서 실행한다
+```
+
+등록부에는 토큰 해시만 저장한다. 토큰 파일(권한 600)을 해당 에이전트의 장비로 옮기고, 등록부를 바꾼 뒤에는 comm-center를 재시작한다. 실제 토큰 파일은 Git에 넣거나 에이전트에게 조회시키지 않는다.
+
+### 에이전트 장비 설정
+
+각 장비의 `s8-config.yml`에는 주소와 토큰 파일만 둔다. 매니저와 워커가 같은 형식이다.
 
 ```yaml
 communication:
   enabled: true
-  nodeId: manager-host
-  credentialsFile: /home/user/.config/s8/communication-secrets.json
-  server:
-    bindIp: 10.0.0.10
-    port: 8090
+  url: ws://10.0.0.10:8090
+  tokenFile: ~/.config/s8/comm-a.json
 ```
 
-워커 장비의 `s8-config.yml`:
-
-```yaml
-communication:
-  enabled: true
-  nodeId: worker-host
-  credentialsFile: /home/user/.config/s8/communication-secrets.json
-  managerUrl: ws://10.0.0.10:8090
-```
-
-서버 전용 장비에는 `managerUrl`이 필요 없다. 같은 장비에서 워커도 연결하면 `managerUrl`을 함께 지정한다. `server.bindIp`는 실제 사설망 IP 또는 루프백이며 `0.0.0.0`·`::`는 허용하지 않는다. 암호화된 사설망이나 TLS 프록시의 WSS를 사용한다. 내장 서버는 WS를 제공한다. 워커는 서버로 연결하므로 수신 포트가 필요 없다. 웹 UI의 `network` 설정과는 별개다.
+Pi는 `apps/comm-center/client.mjs`를 경로로 불러오며 Node 내장 WebSocket만 쓰므로, 에이전트 장비에서는 comm-center 의존성을 설치하지 않아도 된다. comm-center는 WS만 제공한다. 장비 사이에는 암호화된 사설망이나 TLS 프록시의 WSS를 사용한다. 에이전트 장비에는 수신 포트가 필요 없다.
 
 ### 실행과 대화
 
-매니저 장비에서는 통신 서버와 매니저 에이전트를 각각 실행한다. 통합 런타임은 서버 설정이 있으면 communicator를 함께 시작한다.
+설정이 있으면 매니저·워커 에이전트가 시작할 때 연결한다.
 
 ```bash
-# 첫 번째 터미널
-./s8.sh service communicator
-# 두 번째 터미널
 ./start-manager-agent.sh
+./start-worker-agent.sh --cwd /srv/projects/app
 ```
 
-워커 장비에서는 인증 파일에 등록한 ID로 기존 Pi 세션을 직접 실행한다.
+UID 없이도 메시지를 받는다. 한 토큰에는 한 번에 한 세션만 연결할 수 있으며, 같은 토큰의 두 번째 세션은 연결이 거부되고 경고를 표시한다. 한 체크아웃에서 여러 세션을 동시에 쓰려면 세션마다 토큰을 따로 발급하고 실행 명령 앞에 `S8_COMM_TOKEN_FILE=경로`를 지정한다. `workers` 목록과 `./s8.sh workers`는 로컬 Projectman 작업 루프 전용이며 통신 정체성과 별개다.
 
-```bash
-S8_WORKER_ID=a ./start-worker-agent.sh --cwd /srv/projects/app
-```
+매니저는 `agent_message {action: "list"}`로 등록된 에이전트와 연결 상태를 확인한다. `request`·`reply`·`notice`·`proposal`·`result`는 텍스트를 전달하고, `status {messageId}`는 전달 상태를 조회한다. 매니저는 `to`로 대상을 고르고, 여러 대상에는 대상마다 메시지 ID와 공통 `groupId`가 붙는다. 워커는 `to`를 생략하면 매니저에게 보낸다. 워커끼리는 보낼 수 없다. 답변에는 받은 메시지 ID를 `replyTo`로 넣는다.
 
-UID 없이도 메시지를 받는다. 한 워커 ID에는 한 번에 한 세션만 연결할 수 있으며 중복 연결은 거부된다. 여러 세션을 동시에 사용하려면 ID와 인증 항목을 각각 준비한다. 이전 작업 창이 남아 있다면 해당 연결을 종료한 뒤 같은 ID를 재사용한다. `workers` 목록과 `./s8.sh workers`는 로컬 Projectman 작업 루프 전용이며 메시지 연결을 만들지 않는다.
+수신 메시지는 현재 모델·도구 실행이 끝난 뒤 세션에 추가되어 후속 응답을 시작한다. 워커는 매니저의 지시를 기존 도구와 승인 범위 안에서 판단해 수행할 수 있으며, 메시지가 새 권한을 주지는 않는다. `pending`은 수신 세션 대기, `injected`는 세션 기록에 추가됨을 뜻하며 답변·작업 완료를 보장하지 않는다. 연결되지 않은 대상에는 `unavailable`, 전달 여부를 확인하지 못한 경우에는 `unknown`을 반환한다. 오프라인 보관과 자동 재전송은 없다.
 
-매니저는 `agent_message {action: "list"}`로 연결 상태를 확인한다. `request`·`reply`·`notice`·`proposal`·`result`는 텍스트를 전달하고, `status`는 전달 상태를 조회한다. 매니저는 `workerIds`로 대상을 고르며 여러 대상에는 공통 `groupId`와 개별 `requestId`가 부여된다. 워커는 매니저에게만 보낸다. 답변은 원래 `requestId`와 수신 메시지 ID인 `replyTo`를 사용한다. `taskUid`와 `sessionId`는 기존 수신 세션을 확인하는 선택적 맥락이며 작업을 시작하지 않는다.
-
-수신 메시지는 현재 모델·도구 실행이 끝난 뒤 세션에 추가되어 후속 응답을 시작한다. `pending`은 수신함 대기, `injected`는 세션 기록에 추가됨을 뜻하며 답변·작업 완료를 보장하지 않는다. 연결되지 않은 대상에는 `unavailable`, 전달 여부를 확인하지 못한 경우에는 `unknown`을 반환한다. 오프라인 보관과 연결 복구 후 자동 재전송은 없다.
-
-통신 프로토콜은 메시지 전용 v2이며 서버·워커를 같은 버전으로 업데이트해야 한다. 연결은 자동 재시도하며 heartbeat·크기 제한·중복 방지·전달 확인을 유지한다. 프로세스 재시작 시 미확정 요청은 복원하지 않는다. 인증 파일 변경은 서버와 해당 워커 세션을 재시작한 뒤 반영된다. 로그는 연결·요청 ID·전달 상태·지연만 기록하며 대화와 인증 토큰은 기록하지 않는다. 상세 구조는 [메시지 통신 구조](docs/distributed-multi-agent-plan.md)를 참고한다.
+comm-center 프로토콜은 v1이며 comm-center와 에이전트 체크아웃을 같은 버전으로 업데이트한다. 연결은 자동 재시도하며 heartbeat·크기 제한·중복 방지·전달 확인을 유지한다. 로그는 연결·메시지 ID·전달 상태·지연만 기록하며 대화와 토큰은 기록하지 않는다. 상세 구조는 [메시지 통신 구조](docs/distributed-multi-agent-plan.md)를 참고한다.
 
 ## 다른 장비에서 재현
 
@@ -513,6 +501,7 @@ npm ci --ignore-scripts --prefix pi
 
 ```bash
 node --test pi/test/*.test.mjs apps/telegram-gateway/gateway.test.mjs
+npm test --prefix apps/comm-center
 npm test --prefix apps/terminal-gateway
 npm test --prefix apps/kb-browser
 npm run test:run --prefix frontend

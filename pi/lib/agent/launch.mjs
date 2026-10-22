@@ -141,7 +141,6 @@ export async function runAgent(root, { mode, cwd = process.cwd(), telegram = fal
   await linkSharedSettings(agentDir, configRoot);
   if (sessionDir && path.relative(agentDir, path.resolve(sessionDir)).startsWith('..')) throw usageError('--session-dir는 .pi-runtime 아래여야 합니다.');
   Object.assign(process.env, { PI_TELEMETRY: '0', S8_PI_RESTART_DIR: agentDir, S8_AGENT_MODE: resolved });
-  if (uid) process.env.S8_WORKER_UID = uid;
   process.chdir(workDir);
   // 패키지 관리 명령은 Pi CLI에 그대로 전달한다.
   if (isPackageCommand(args[0])) return startChild(binary, args).exited;

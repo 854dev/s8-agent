@@ -2,7 +2,6 @@
 // - projectman get: claim(이미 claim했으면 이어감) 후 작업 내용 반환.
 // - projectman report: 에이전트가 판단한 결과 보고.
 // - 작업 순서와 범위는 프롬프트로 안내한다. bash에는 비밀정보 환경변수를 넘기지 않는다.
-// S8_WORKER_UID는 초기 작업과 통신 컨텍스트로 사용한다.
 import { fileURLToPath } from 'node:url';
 import { Type } from 'typebox';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
@@ -18,8 +17,7 @@ const json = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSO
 export default function worker(pi: ExtensionAPI, { root = fileURLToPath(new URL('../..', import.meta.url)), client = undefined as any, workerId = process.env.S8_WORKER_ID || 's8-developer' } = {}) {
   // 클라이언트는 Projectman을 처음 쓸 때 만든다.
   const api = () => (client ??= projectmanFromEnv());
-  const assigned = process.env.S8_WORKER_UID || undefined;
-  registerCommunication(pi, { root, role: 'worker', workerId, taskUid: assigned });
+  registerCommunication(pi, { root });
   let claim: any;
 
   pi.registerTool({

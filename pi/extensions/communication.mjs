@@ -1,70 +1,68 @@
 import { Type } from 'typebox';
 import { randomUUID } from 'node:crypto';
 import { loadS8Config } from '../lib/config/s8-config.mjs';
-import { localRequest, listenLocal } from '../lib/communication/local.mjs';
-import { startWorkerConnection } from '../lib/communication/client.mjs';
 import { sessionInbox } from '../lib/communication/session.mjs';
+// Imported by path so Pi needs no extra install; the client uses only Node built-ins.
+import { connectCommCenter } from '../../apps/comm-center/client.mjs';
+import { readTokenFile } from '../../apps/comm-center/registry.mjs';
 
-/** Existing Pi sessions receive messages directly; this never creates an agent or starts a task. */
-export function registerCommunication(pi, { root, role, workerId, taskUid }) {
-  let close, inbox, connection;
+const ALERTS = { UNAUTHORIZED: 'comm-center rejected this token', VERSION_MISMATCH: 'comm-center protocol version differs; update both sides', DUPLICATE_AGENT: 'another session is already connected with this token' };
+const json = value => ({ content: [{ type: 'text', text: JSON.stringify(value) }], details: undefined });
+
+/** Connect this session to comm-center. Identity and role come from the token; this never creates agents or starts tasks. */
+export function registerCommunication(pi, { root }) {
+  let inbox, client;
   const shutdown = async () => {
     inbox?.close(); inbox = null;
-    await close?.(); close = null;
-    await connection?.close(); connection = null;
+    await client?.close(); client = null;
   };
   pi.on('session_start', async (_event, ctx) => {
     await shutdown();
     const config = loadS8Config(root).communication;
     if (!config.enabled) return;
-    inbox = sessionInbox(pi, ctx, { role, taskUid });
-    try {
-      if (role === 'manager') close = await listenLocal(root, 'pi:manager', input => inbox.receive(input));
-      else {
-        if (!config.managerUrl) throw new Error('Worker messaging requires communication.managerUrl');
-        connection = await startWorkerConnection(config, workerId, { onMessage: input => inbox.receive(input) });
-      }
-    } catch (error) { await shutdown(); throw error; }
+    let token;
+    // S8_COMM_TOKEN_FILE lets several sessions in one checkout use separate identities.
+    try { token = await readTokenFile(process.env.S8_COMM_TOKEN_FILE || config.tokenFile); }
+    catch (error) { if (ctx.hasUI) ctx.ui.notify(error.message, 'error'); return; }
+    let alerted;
+    inbox = sessionInbox(pi, ctx, {
+      onInjected: message => client?.ack(message, 'injected'),
+      onExpired: message => client?.ack(message, { state: 'rejected', reason: 'Expired before the session became idle' }),
+    });
+    client = connectCommCenter({
+      url: config.url, token,
+      onMessage: message => inbox.receive(message),
+      onState: (connected, error) => {
+        if (connected) { alerted = null; return; }
+        if (ALERTS[error] && alerted !== error && ctx.hasUI) ctx.ui.notify(`Communication: ${ALERTS[error]}`, 'warning');
+        alerted = error;
+      },
+    });
   });
   pi.on('session_shutdown', shutdown);
   pi.registerTool({
     name: 'agent_message', label: 'Agent message',
-    description: 'Exchange text with existing connected sessions through Manager. Manager can list peers and send to Workers; Workers address Manager only. Messages never start agents or Projectman tasks, change worker modes or transfer files. Pending means queued, injected means added to session history; neither means completed. No offline delivery. Reply requires replyTo.',
+    description: 'Exchange text with connected agents through comm-center. Managers list peers and address Workers with to; Workers reach the Manager and may omit to. Messages never start agents, change worker modes or transfer files; a Worker may carry out Manager instructions with its existing tools and approvals. pending means queued in the recipient session, injected means added to its history; neither means completed. No offline delivery. reply requires replyTo (the received message id); status takes messageId.',
     parameters: Type.Object({
       action: Type.Union(['list', 'request', 'reply', 'notice', 'proposal', 'result', 'status'].map(value => Type.Literal(value))),
-      workerIds: Type.Optional(Type.Array(Type.String(), { minItems: 1, maxItems: 20 })),
+      to: Type.Optional(Type.Array(Type.String(), { minItems: 1, maxItems: 20 })),
       text: Type.Optional(Type.String({ maxLength: 16000 })),
-      requestId: Type.Optional(Type.String()), replyTo: Type.Optional(Type.String()),
-      groupId: Type.Optional(Type.String()),
-      taskUid: Type.Optional(Type.String()), sessionId: Type.Optional(Type.String()),
+      replyTo: Type.Optional(Type.String()), groupId: Type.Optional(Type.String()), messageId: Type.Optional(Type.String()),
     }),
-    async execute(_id, args, _signal, _update, ctx) {
-      if (!loadS8Config(root).communication.enabled) throw new Error('communication is disabled');
-      if (args.action === 'list') {
-        if (role !== 'manager') throw new Error('Only Manager can list peers');
-        const result = await localRequest(root, 'communicator', { action: 'peers' });
-        return { content: [{ type: 'text', text: JSON.stringify(result) }], details: undefined };
+    async execute(_id, args) {
+      if (!client) throw new Error('Communication is disabled or its token file is unavailable');
+      const unavailable = result => result.state === 'unavailable' && client.lastError ? { ...result, connection: client.lastError } : result;
+      if (args.action === 'list') return json(unavailable(await client.peers()));
+      if (args.action === 'status') {
+        if (!args.messageId) throw new Error('status requires messageId');
+        return json(unavailable(await client.status(args.messageId)));
       }
-      if (role === 'worker' && args.workerIds) throw new Error('Workers can address Manager only');
-      if (role === 'worker' && args.taskUid && args.taskUid !== taskUid) throw new Error('Worker messages cannot impersonate another task');
-      const targets = role === 'manager' ? [...new Set(args.workerIds ?? [])] : ['manager'];
-      if (!targets.length) throw new Error('Manager must specify workerIds');
-      if (['status', 'reply'].includes(args.action) && targets.length !== 1) throw new Error('Reply and status require one specific recipient');
-      if (args.action === 'status' && !args.requestId) throw new Error('status requires requestId');
-      if (args.action !== 'status' && !args.text?.trim()) throw new Error('message text required');
-      const requestId = args.requestId ?? randomUUID();
-      const groupId = args.groupId ?? (targets.length > 1 ? requestId : undefined);
-      const results = await Promise.all(targets.map(async target => {
-        const targetRequestId = targets.length > 1 ? randomUUID() : requestId;
-        const context = { requestId: targetRequestId, ...(groupId ? { groupId } : {}), ...(args.replyTo ? { replyTo: args.replyTo } : {}), ...(args.taskUid ?? taskUid ? { taskUid: args.taskUid ?? taskUid } : {}), ...(args.sessionId ? { sessionId: args.sessionId } : {}) };
-        const type = args.action === 'status' ? 'request.status' : `agent.${args.action}`;
-        const payload = args.action === 'status' ? { requestId: targetRequestId } : { text: args.text, sourceSessionId: ctx.sessionManager.getSessionId() };
-        const result = role === 'manager'
-          ? await localRequest(root, 'communicator', { action: 'send', workerId: target, type, payload, context }, { timeoutMs: 32_000 })
-          : await connection?.request(type, payload, context) ?? { state: 'unavailable' };
-        return { workerId: target, requestId: targetRequestId, ...result };
-      }));
-      return { content: [{ type: 'text', text: JSON.stringify({ requestId, ...(groupId ? { groupId } : {}), results }) }], details: undefined };
+      if (!args.text?.trim()) throw new Error('message text required');
+      const targets = args.to ? [...new Set(args.to)] : [undefined];
+      if (args.action === 'reply' && (!args.replyTo || targets.length !== 1)) throw new Error('reply requires replyTo and one recipient');
+      const groupId = args.groupId ?? (targets.length > 1 ? randomUUID() : undefined);
+      const results = await Promise.all(targets.map(async to => unavailable(await client.send({ to, type: args.action, text: args.text, replyTo: args.replyTo, groupId }))));
+      return json({ ...(groupId ? { groupId } : {}), results });
     },
   });
 }

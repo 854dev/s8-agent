@@ -48,6 +48,7 @@ tmux new-window -d -t "=$SESSION:" -n kb-browser -c "$AGENT_ROOT"
 tmux new-window -d -t "=$SESSION:" -n frontend -c "$AGENT_ROOT"
 tmux new-window -d -t "=$SESSION:" -n projectman-console -c "$AGENT_ROOT"
 tmux new-window -d -t "=$SESSION:" -n terminal-gateway -c "$AGENT_ROOT"
+tmux new-window -d -t "=$SESSION:" -n comm-center -c "$AGENT_ROOT"
 
 # router 창: 공개 주소를 받아 경로별로 로컬 서비스에 전달. kb-browser 창: 지식베이스 API(localhost 전용).
 mkdir -p .s8-runtime/data/uploads
@@ -63,6 +64,12 @@ tmux send-keys -t "=$SESSION:projectman-console" \
     'node pi/bin/projectman-console.mjs' C-m
 tmux send-keys -t "=$SESSION:terminal-gateway" \
     'npm start --prefix apps/terminal-gateway' C-m
+# comm-center 창: 에이전트 통신 중계. 설정(apps/comm-center/.env)이 있는 장비에서만 실행한다.
+comm_center_ready=false
+if [[ -f apps/comm-center/.env && -d apps/comm-center/node_modules ]]; then
+    comm_center_ready=true
+    tmux send-keys -t "=$SESSION:comm-center" 'npm start --prefix apps/comm-center' C-m
+fi
 tmux send-keys -t "=$SESSION:frontend" \
     'eval "$(node pi/bin/s8-config.mjs shell-env)"; npm run dev --prefix frontend -- --host 127.0.0.1 --port 4178 --strictPort' C-m
 
@@ -71,5 +78,10 @@ if [[ -n "$phcms_start_command" ]]; then
     printf '%s\n' 's8-config.yml의 projectman.startCommand를 phcms 창에서 실행했습니다.'
 else
     printf '%s\n' 's8-config.yml에 projectman.startCommand가 없어 phcms 창은 비워 두었습니다.'
+fi
+if [[ "$comm_center_ready" == true ]]; then
+    printf '%s\n' 'comm-center 창에서 에이전트 통신 중계를 시작했습니다.'
+else
+    printf '%s\n' 'apps/comm-center/.env 또는 의존성이 없어 comm-center 창은 비워 두었습니다(통신을 쓰지 않으면 무시).'
 fi
 printf '웹 터미널의 세션 목록에서 %s 을 선택하세요.\n' "$SESSION"

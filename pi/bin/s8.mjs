@@ -49,27 +49,6 @@ async function runResident(args) {
   } finally { await release(); }
 }
 
-async function runCommunicator(args) {
-  if (args.length) throw usageError('사용법: ./s8.sh service communicator');
-  // Credentials live in an explicit private file; this service does not need .env.
-  const [{ loadS8Config }, { runCommunicator }, { acquirePidLock }] = await Promise.all([
-    import('../lib/config/s8-config.mjs'), import('../lib/communication/service.mjs'), import('../lib/runtime/process.mjs'),
-  ]);
-  const config = loadS8Config(root).communication;
-  if (!config.enabled || !config.server) throw usageError('communication.enabled와 server 설정이 필요합니다.');
-  const lock = path.join(root, '.s8-runtime/communication/owner.lock');
-  await mkdir(path.dirname(lock), { recursive: true, mode: 0o700 });
-  const release = await acquirePidLock(lock);
-  const controller = new AbortController();
-  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.once(signal, () => controller.abort());
-  let close;
-  try {
-    close = await runCommunicator(root, config, { log: event => console.log(JSON.stringify(event)) });
-    console.log(`매니저 통신 서버 시작: ${config.server.bindIp}:${config.server.port}`);
-    if (!controller.signal.aborted) await new Promise(resolve => controller.signal.addEventListener('abort', resolve, { once: true }));
-  } finally { await close?.(); await release(); }
-}
-
 async function runWork([uid, ...rest]) {
   if (!uid || rest.length) throw usageError('사용법: ./s8.sh work UID');
   loadEnv(root);
@@ -95,8 +74,7 @@ try {
   else if (command === 'service') {
     if (args[0] === 'scheduler') await runScheduler(args.slice(1));
     else if (args[0] === 'worker') await runResident(args.slice(1));
-    else if (args[0] === 'communicator') await runCommunicator(args.slice(1));
-    else throw usageError('서비스는 scheduler, worker ID, communicator입니다.');
+    else throw usageError('서비스는 scheduler, worker ID입니다.');
   } else if (command === 'workers') {
     if (args.length) throw usageError('사용법: ./s8.sh workers');
     const { startResidentWorkers } = await import('../lib/runtime/services.mjs');

@@ -39,8 +39,9 @@ description: S8 매니저가 Projectman 작업을 조회·등록·계획·위임
 
 ## 질문·병렬 조사·결과 검토
 
-- 작업 중인 워커에게는 `agent_message {action: "request", workerIds: ["a"], taskUid, text}`로 질문한다. UID 없이 실행 중인 워커에게는 `taskUid`를 생략한다. 먼저 `agent_message {action: "list"}`로 연결된 세션을 확인한다. 메시지는 새 세션이나 작업을 자동 실행하지 않는다. 여러 `workerIds`를 지정하면 워커별 requestId와 공통 groupId로 결과를 취합한다. 같은 UID의 중복 claim 대신 이 방식으로 관점을 나눈다.
-- 답변은 대상 워커 하나, 원래 `requestId`, 수신 메시지 ID인 `replyTo`를 사용한다. 근거가 부족하면 재현 조건·확인한 코드·검증 결과를 역질문한다. 시간 초과·부분 결과를 숨기지 않는다.
+- 먼저 `agent_message {action: "list"}`로 연결된 에이전트를 확인한다. 워커에게는 `agent_message {action: "request", to: ["a"], text}`로 질문하거나 지시한다. 관련 작업 UID는 text에 적는다. 메시지는 새 세션이나 작업을 자동 실행하지 않으며, 연결된 워커가 자기 권한으로 판단해 수행한다.
+- 작업을 맡길 때는 워커마다 다른 UID로 `request`를 따로 보낸다. 같은 UID를 두 워커에 보내지 않는다. 여러 `to`를 한 번에 지정하는 fan-out은 같은 질문·검토를 여러 워커에 보낼 때 쓰며, 메시지별 ID와 공통 groupId로 결과를 취합한다. 같은 UID의 중복 claim 대신 이 방식으로 관점을 나눈다.
+- 답변은 대상 워커 하나와 수신 메시지 ID인 `replyTo`를 사용한다. 근거가 부족하면 재현 조건·확인한 코드·검증 결과를 역질문한다. 시간 초과·부분 결과를 숨기지 않는다.
 - 결과 수신 후 `workflow_get`으로 실제 보고와 검증 근거를 확인하고 `review_result(uid, expectedRevision, message)`에 검토 의견을 남긴다. `review`는 사용자 최종 완료 전이며, 사용자가 콘솔에서 완료하면 `done`이다.
 - 보고 뒤에도 질문·필요한 수정을 지시할 수 있다. 이미 전달한 실행 보고는 덮어쓰지 않는다. 실패 작업의 재실행은 서버가 제공하는 콘솔의 retry 흐름을 확인하고, 계획·범위가 달라지거나 완료 작업의 후속 구현이면 새 work를 준비한다. 임의 상태 변경이나 무조건 새 실행을 반복하지 않는다.
 - `completion_review` 수신 시 원본 결과와 사용자 의견을 확인한다. 단순 수락이면 추가 작업을 만들지 않는다. 명확한 수정 요청이면 생성 승인을 반복해서 묻지 않고 후속 work를 준비하되, 현재 서버의 실행 확정 절차를 따른다. 본문과 `decisionRefs`에 원본 UID·`completion-review:<uid>:<requestId>`를 남기고 같은 참조의 작업이 있는지 확인한다.

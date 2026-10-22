@@ -43,7 +43,7 @@ export async function startPiRuntime(root, { session = 's8-main', mode = 'projec
   // 같은 체크아웃의 재시작과 Telegram 이전을 직렬화한다.
   return withTmuxLock(run, lockName('s8-runtime-root-', root), async () => {
     // 무엇이든 중지하기 전에 다시 띄울 창이 모두 이 저장소 소유인지 확인한다.
-    const managed = mode === 'project' ? ['pi', 'scheduler', 'communicator'] : ['pi'];
+    const managed = mode === 'project' ? ['pi', 'scheduler'] : ['pi'];
     for (const window of await windows(run, session)) {
       if (managed.includes(window.name) && window.root !== root) throw new Error(`${session}:${window.name}은 S8이 관리하는 창이 아닙니다.`);
     }

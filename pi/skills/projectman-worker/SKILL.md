@@ -16,13 +16,15 @@ description: S8 워커가 지정된 Projectman 작업을 조회·claim하고 자
 
 ## 질문과 조사 결과
 
-`agent_message`는 실행 중인 세션에서 매니저에게만 보낸다. UID·Projectman 없이도 메시지를 주고받을 수 있다. `workerIds`는 넣지 않는다. 작업 세션의 초기 UID는 자동 연결되므로 다른 작업의 식별자를 넣어 가장하지 않는다.
+`agent_message`는 실행 중인 세션에서 매니저에게만 보낸다. `to`는 생략한다(comm-center가 매니저에게 전달한다). UID·Projectman 없이도 메시지를 주고받을 수 있다. 관련 작업 UID는 text에 적는다.
+
+매니저가 메시지로 UID를 지시하면 작업 내용과 승인 범위를 확인한 뒤 `projectman get`으로 claim해 수행한다. `report` 후에는 `result`로 결과 요약과 UID를 매니저에게 보낸다. 메시지 전달 실패는 보고 실패가 아니며, 보고는 Projectman에 남는다.
 
 - `request`: 필요한 판단을 묻는다. 확인한 사실·시도·결정이 필요한 부분을 text에 적는다.
 - `notice`·`proposal`: 진행 상황·막힘·다른 워커의 검토 제안을 보낸다.
-- `reply`: 수신 메시지의 `requestId`와 메시지 ID인 `replyTo`를 연결해 답한다.
+- `reply`: 수신 메시지 ID를 `replyTo`에 넣어 답한다.
 - `result`: 결론·근거·불확실성을 텍스트로 전달한다. 조사 결과 전송 자체는 Projectman 완료보고가 아니다.
-- `status`: 같은 requestId로 전달 상태를 확인한다. 매니저 답변이 없어도 독립적으로 가능한 일은 진행한다.
+- `status`: 보낸 메시지 ID(`messageId`)로 전달 상태를 확인한다. 매니저 답변이 없어도 독립적으로 가능한 일은 진행한다.
 
 예를 들어 매니저에게 확인할 질문은 다음처럼 보낸다.
 

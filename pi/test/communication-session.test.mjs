@@ -6,8 +6,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { sessionInbox } from '../lib/communication/session.mjs';
-import { message } from '../lib/communication/protocol.mjs';
-import { localRequest, listenLocal } from '../lib/communication/local.mjs';
+
+const message = (type, from, text, extra = {}) => ({ id: `${type}-${Math.random().toString(36).slice(2)}`, from, to: 'a', type, text, sentAt: new Date().toISOString(), ...extra });
 
 const until = async check => { for (let i = 0; i < 200; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 10)); } assert.fail('condition timeout'); };
 
@@ -31,9 +31,10 @@ test('installed Pi SDK waits for the active turn, then persists one correlated c
   const runtime = await ModelRuntime.create({ authPath: path.join(root, 'auth.json'), modelsPath: path.join(root, 'models.json'), refreshOnCreate: false });
   runtime.registerProvider('fixture', { api: 'openai-completions', apiKey: 'fixture-key', baseUrl: `http://127.0.0.1:${provider.address().port}`, models: [{ id: 'fixture', name: 'Fixture', reasoning: false, input: ['text'], contextWindow: 32768, maxTokens: 1024, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }] });
   let inbox;
+  const injected = [];
   const settingsManager = SettingsManager.inMemory({ packages: [], retry: { enabled: false }, compaction: { enabled: false } });
   const loader = new DefaultResourceLoader({ cwd: root, agentDir: root, settingsManager, noExtensions: true, noSkills: true, noPromptTemplates: true, noContextFiles: true, noThemes: true, extensionFactories: [pi => {
-    pi.on('session_start', (_event, ctx) => { inbox = sessionInbox(pi, ctx, { role: 'worker', taskUid: 'task-1', intervalMs: 10 }); });
+    pi.on('session_start', (_event, ctx) => { inbox = sessionInbox(pi, ctx, { intervalMs: 10, onInjected: input => injected.push(input) }); });
   }] });
   await loader.reload();
   const sessionManager = SessionManager.create(root, path.join(root, 'sessions'));
@@ -42,43 +43,34 @@ test('installed Pi SDK waits for the active turn, then persists one correlated c
   t.after(async () => { inbox.close(); await session.abort(); session.dispose(); });
   const firstTurn = session.prompt('Inspect the task.');
   await until(() => calls === 1);
-  const input = message('agent.request', 'manager', 'a', { text: 'What evidence supports your conclusion?' }, { taskUid: 'task-1', sessionId: sessionManager.getSessionId() });
-  assert.equal(inbox.receive(input).state, 'pending');
-  assert.equal(inbox.receive(input).state, 'pending');
+  const input = message('request', 'manager', 'What evidence supports your conclusion?');
+  assert.equal(inbox.receive(input), 'pending');
+  assert.equal(inbox.receive(input), 'pending');
   assert.equal(sessionManager.getEntries().filter(entry => entry.type === 'custom_message').length, 0);
   release();
   await firstTurn;
   await until(() => calls === 2 && sessionManager.getEntries().some(entry => entry.type === 'custom_message'));
-  const query = message('request.status', 'manager', 'a', { requestId: input.requestId }, { taskUid: 'task-1' });
-  await until(() => inbox.receive(query).state === 'injected');
-  assert.equal(inbox.receive(input).state, 'injected');
+  await until(() => injected.length === 1);
+  assert.equal(injected[0].id, input.id);
+  assert.equal(inbox.receive(input), 'injected');
   const records = (await readFile(sessionManager.getSessionFile(), 'utf8')).trim().split('\n').map(JSON.parse);
   const custom = records.filter(entry => entry.type === 'custom_message');
   assert.equal(custom.length, 1);
   assert.equal(custom[0].details.communication.id, input.id);
   assert.equal(records.findIndex(entry => entry.type === 'message' && entry.message.role === 'assistant') < records.findIndex(entry => entry.type === 'custom_message'), true);
-  assert.equal(inbox.receive({ ...input, id: 'different', sessionId: 'stale-session' }).state, 'rejected');
+  // The same ID from another sender is a different message.
+  assert.equal(inbox.receive({ ...input, from: 'other-manager' }), 'pending');
 });
 
-test('local IPC returns unavailable, protects active endpoints and exchanges bounded JSON', async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 's8-ipc-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  assert.equal((await localRequest(root, 'missing', {})).state, 'unavailable');
-  const close = await listenLocal(root, 'test', async input => ({ state: 'finished', value: input.value }));
-  t.after(close);
-  assert.deepEqual(await localRequest(root, 'test', { value: 42 }), { state: 'finished', value: 42 });
-  await assert.rejects(listenLocal(root, 'test', () => ({})), /already running/);
-});
-
-test('a busy session expires pending requests and rejects an unbounded inbox', async t => {
+test('a busy session expires pending messages and rejects an unbounded inbox', async t => {
   const sessionManager = SessionManager.inMemory();
-  const inbox = sessionInbox({ sendMessage() { assert.fail('busy session must not be interrupted'); } }, { sessionManager, isIdle: () => false }, { role: 'worker', taskUid: 'task-1', intervalMs: 5 });
+  const expired = [];
+  const inbox = sessionInbox({ sendMessage() { assert.fail('busy session must not be interrupted'); } }, { sessionManager, isIdle: () => false }, { intervalMs: 5, ttlMs: 20, onExpired: input => expired.push(input) });
   t.after(() => inbox.close());
-  const first = message('agent.request', 'manager', 'a', { text: 'Clarify' }, { taskUid: 'task-1', expiresAt: new Date(Date.now() + 20).toISOString() });
-  assert.equal(inbox.receive(first).state, 'pending');
-  for (let i = 0; i < 99; i++) assert.equal(inbox.receive(message('agent.notice', 'manager', 'a', { text: `Notice ${i}` }, { taskUid: 'task-1' })).state, 'pending');
-  assert.equal(inbox.receive(message('agent.notice', 'manager', 'a', { text: 'Overflow' }, { taskUid: 'task-1' })).state, 'rejected');
-  await new Promise(resolve => setTimeout(resolve, 30));
-  const status = message('request.status', 'manager', 'a', { requestId: first.requestId }, { taskUid: 'task-1' });
-  assert.equal(inbox.receive(status).state, 'timeout');
+  const first = message('request', 'manager', 'Clarify');
+  assert.equal(inbox.receive(first), 'pending');
+  for (let i = 0; i < 99; i++) assert.equal(inbox.receive(message('notice', 'manager', `Notice ${i}`)), 'pending');
+  assert.equal(inbox.receive(message('notice', 'manager', 'Overflow')).state, 'rejected');
+  await until(() => expired.length === 100);
+  assert.equal(expired[0].id, first.id);
 });

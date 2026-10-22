@@ -70,30 +70,22 @@ function httpUrl(value, name) {
   } catch { throw new Error(`s8-config.yml: ${name} must be an HTTP(S) URL without credentials, query or fragment`); }
 }
 
+// comm-center 접속 설정. 정체성과 역할은 토큰으로 comm-center가 정한다.
 function normalizeCommunication(value, root) {
-  const config = fields(value, ['enabled', 'nodeId', 'server', 'managerUrl', 'credentialsFile'], 'communication');
+  const config = fields(value, ['enabled', 'url', 'tokenFile'], 'communication');
   const enabled = config.enabled ?? false;
   if (typeof enabled !== 'boolean') throw new Error('s8-config.yml: communication.enabled must be boolean');
-  const nodeId = config.nodeId == null ? null : text(config.nodeId, 'communication.nodeId', WORKER_ID);
-  const credentialsFile = config.credentialsFile == null ? null : path.resolve(root, expandHome(text(config.credentialsFile, 'communication.credentialsFile')));
-  let server = null, managerUrl = null;
-  if (config.server != null) {
-    const input = fields(config.server, ['bindIp', 'port'], 'communication.server');
-    const bindIp = input.bindIp ?? '127.0.0.1', port = input.port ?? 8090;
-    if (typeof bindIp !== 'string' || !isIP(bindIp) || ['0.0.0.0', '::'].includes(bindIp)) throw new Error('s8-config.yml: communication.server.bindIp must be a specific IP address');
-    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('s8-config.yml: communication.server.port must be a port number');
-    server = { bindIp, port };
-  }
-  if (config.managerUrl != null) {
+  let url = null;
+  if (config.url != null) {
     try {
-      const url = new URL(config.managerUrl);
-      if (typeof config.managerUrl !== 'string' || !['ws:', 'wss:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error();
-      managerUrl = url.href;
-    } catch { throw new Error('s8-config.yml: communication.managerUrl must be a WS(S) origin without credentials, query or fragment'); }
+      const parsed = new URL(config.url);
+      if (typeof config.url !== 'string' || !['ws:', 'wss:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') throw new Error();
+      url = parsed.href;
+    } catch { throw new Error('s8-config.yml: communication.url must be a WS(S) origin without credentials, query or fragment'); }
   }
-  if (enabled && (!nodeId || !credentialsFile)) throw new Error('s8-config.yml: enabled communication requires nodeId and credentialsFile');
-  if (enabled && !server && !managerUrl) throw new Error('s8-config.yml: enabled communication requires server or managerUrl');
-  return { enabled, nodeId, server, managerUrl, credentialsFile };
+  const tokenFile = config.tokenFile == null ? null : path.resolve(root, expandHome(text(config.tokenFile, 'communication.tokenFile')));
+  if (enabled && (!url || !tokenFile)) throw new Error('s8-config.yml: enabled communication requires url and tokenFile');
+  return { enabled, url, tokenFile };
 }
 
 function readConfigFile(file) {
