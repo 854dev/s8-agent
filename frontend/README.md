@@ -44,8 +44,8 @@ npm run dev --prefix frontend -- --host 127.0.0.1 --port 4178
 - 지식베이스·업로드: `apps/kb-browser`와 라우터 필요
 - 터미널: `apps/terminal-gateway`와 tmux 필요
 - Projectman: PH-CMS와 `node pi/bin/projectman-console.mjs` 필요. [실행 안내](../README.md) 참고.
-- Vite dev/preview는 `/api/projectman`을 `127.0.0.1:8791`로, `/api/terminal`을 `127.0.0.1:8790`으로, 나머지 `/api`를 라우터로 proxy한다. 라우터 주소는 `S8_BIND_IP`·`S8_HTTP_PORT` 환경변수로 받는다. `./start-infra.sh`가 `s8-config.yml`의 `network`에서 넘기며, 직접 실행할 때는 먼저 `eval "$(node pi/bin/s8-config.mjs shell-env)"`를 실행한다. 기본값은 `127.0.0.1:80`이다. 설정 변경 시 frontend도 재시작한다. 이 설정은 브라우저 번들에 포함하지 않는다.
-- `./start-infra.sh`는 라우터·KB Browser·frontend·Projectman 콘솔 API·터미널 게이트웨이를 함께 시작한다. 사전에 `pi`, `frontend`, `apps/terminal-gateway`, `apps/kb-browser`의 npm 의존성을 설치한다. 콘솔과 게이트웨이는 `s8-infra`의 `projectman-console`·`terminal-gateway` 창에서 실행된다. PH-CMS는 `s8-config.yml`의 `projectman.startCommand`를 설정한 경우에만 스크립트에서 시작한다. 서비스 기동 중 연결이 실패하면 Projectman·지식베이스의 `연결 다시 시도`, 업로드의 `다시 시도`로 복구한다.
+- Vite dev/preview는 `/api/projectman`을 `127.0.0.1:8791`로, `/api/terminal`을 `127.0.0.1:8790`으로, 나머지 `/api`를 라우터로 proxy한다. 라우터 주소는 `S8_BIND_IP`·`S8_HTTP_PORT` 환경변수로 받는다. `./start-infra.sh`가 `config.yml`의 `network`에서 넘기며, 직접 실행할 때는 먼저 `eval "$(node pi/bin/s8-config.mjs shell-env)"`를 실행한다. 기본값은 `127.0.0.1:80`이다. 설정 변경 시 frontend도 재시작한다. 이 설정은 브라우저 번들에 포함하지 않는다.
+- `./start-infra.sh`는 라우터·KB Browser·frontend·Projectman 콘솔 API·터미널 게이트웨이를 함께 시작한다. 사전에 `pi`, `frontend`, `apps/terminal-gateway`, `apps/kb-browser`의 npm 의존성을 설치한다. 콘솔과 게이트웨이는 `s8-infra`의 `projectman-console`·`terminal-gateway` 창에서 실행된다. PH-CMS는 `config.yml`의 `projectman.startCommand`를 설정한 경우에만 스크립트에서 시작한다. 서비스 기동 중 연결이 실패하면 Projectman·지식베이스의 `연결 다시 시도`, 업로드의 `다시 시도`로 복구한다.
 - 라우터의 `/s8/`는 Vite 개발 서버의 HMR WebSocket도 전달한다. Tailscale의 HTTP 접속에서도 결정 요청 ID를 생성할 수 있다.
 - backend 실행·접근 제한·복구는 [웹 터미널 운영 문서](../apps/terminal-gateway/README.md)를 참고한다.
 

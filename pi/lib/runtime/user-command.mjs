@@ -19,7 +19,7 @@ const HELP = `사용법: ./s8.sh [--mode project|general] [--cwd 경로] [Pi 옵
   work UID         승인된 작업의 워커를 s8-workers 세션에 실행 (start-worker-agent.sh)
   finish UID --run-id UUID --confirm-stopped  멈춘 실행을 실패로 보고해 마무리
   service scheduler  예약 데몬 전경 실행
-  service worker ID  상주 워커 루프 전경 실행 (s8-config.yml의 workers)
+  service worker ID  상주 워커 루프 전경 실행 (config.yml의 workers)
   workers          매니저 없이 설정된 상주 워커를 s8-workers tmux에 실행
   --telegram take  이 세션으로 Telegram 연결 이전 (단독 --telegram도 호환)
   --telegram off   이 세션의 Telegram 연결 비활성 (--no-telegram도 호환)
@@ -32,7 +32,7 @@ const HELP = `사용법: ./s8.sh [--mode project|general] [--cwd 경로] [Pi 옵
   Pi 옵션: --continue, --no-session, --model, --provider, --thinking
   에이전트 하나만 이 터미널에서 실행하려면 ./start-general-agent.sh, ./start-manager-agent.sh, ./start-worker-agent.sh를 사용한다.
   비밀값(.env): PHCMS_ACCESS_TOKEN, TELEGRAM_BOT_TOKEN, CLINE_API_KEY
-  설정(s8-config.yml): KB 경로(kbRoot, 기본값 ../854_md), Projectman 주소, 바인딩 IP·포트, Telegram ID·알림 대상`;
+  설정(config.yml): KB 경로(kbRoot, 기본값 ../854_md), Projectman 주소, 바인딩 IP·포트, Telegram ID·알림 대상`;
 
 /** 런타임 옵션은 소비하고 나머지는 Pi 인자(args)로 넘긴다. 옵션 위치는 자유롭다. */
 function parseOptions(input) {

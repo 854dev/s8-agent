@@ -49,7 +49,7 @@ npm ci --prefix frontend
 npm ci --prefix apps/terminal-gateway
 npm ci --prefix apps/kb-browser
 cp -n .env.example .env
-cp -n s8-config.example.yml s8-config.yml   # kbRoot 등을 이 장비에 맞게 고친다
+cp -n config.example.yml config.yml   # kbRoot 등을 이 장비에 맞게 고친다
 ./start-infra.sh                            # 라우터·KB Browser·frontend·콘솔 API·웹 터미널
 ./s8.sh --mode project                      # 매니저·스케줄러·상주 워커
 tmux attach-session -t s8-main
@@ -66,12 +66,12 @@ Pi 창이 열리면 `/login`으로 이 장비의 모델 인증을 설정한다. 
 | 파일 | 내용 | LLM 접근 |
 | --- | --- | --- |
 | `.env` | `PHCMS_ACCESS_TOKEN`(Projectman 에이전트 서비스 키), `TELEGRAM_BOT_TOKEN`, `CLINE_API_KEY` | 읽기 차단, 에이전트 bash에 넘기지 않음 |
-| `s8-config.yml` | `kbRoot`, `projectman.apiUrl`·`startCommand`, `network.bindIp`·`httpPort`, `workers`, `telegram` ID, `publicUrl` | 읽을 수 있음 |
+| `config.yml` | `kbRoot`, `projectman.apiUrl`·`startCommand`, `network.bindIp`·`httpPort`, `workers`, `telegram` ID, `publicUrl` | 읽을 수 있음 |
 
-- 항목의 의미와 기본값은 [`.env.example`](.env.example)과 [`s8-config.example.yml`](s8-config.example.yml)의 주석에 있다. `node pi/bin/s8-config.mjs show`로 검증한 값을 확인한다.
-- `s8-config.yml`에 모르는 키가 있으면 시작하지 않는다. 예전 `.env`의 `S8_KB_ROOT`·`PHCMS_API_URL`·`NGINX_*`·`PHCMS_START_COMMAND`·`S8_WORKER_ID`·Telegram ID 변수와 예전 `worker-entries`·`worker-communicator` 키, 이전 통신 서버의 `communication.server`·`nodeId`·`credentialsFile`·`managerUrl`은 읽지 않으므로 직접 옮기거나 지운다.
+- 항목의 의미와 기본값은 [`.env.example`](.env.example)과 [`config.example.yml`](config.example.yml)의 주석에 있다. `node pi/bin/s8-config.mjs show`로 검증한 값을 확인한다.
+- `config.yml`에 모르는 키가 있으면 시작하지 않는다. 예전 `.env`의 `S8_KB_ROOT`·`PHCMS_API_URL`·`NGINX_*`·`PHCMS_START_COMMAND`·`S8_WORKER_ID`·Telegram ID 변수와 예전 `worker-entries`·`worker-communicator` 키, 이전 통신 서버의 `communication.server`·`nodeId`·`credentialsFile`·`managerUrl`은 읽지 않으므로 직접 옮기거나 지운다.
 - `kbRoot`의 상대 경로는 이 저장소 기준이고 앞의 `~/`는 홈 디렉터리다.
-- 모든 모드의 실행기는 시작할 때 `.env`를 읽고 `s8-config.yml` 값을 하위 프로세스에 넘긴다. 같은 이름의 환경변수가 셸에 있어도 설정 파일이 우선한다.
+- 모든 모드의 실행기는 시작할 때 `.env`를 읽고 `config.yml` 값을 하위 프로세스에 넘긴다. 같은 이름의 환경변수가 셸에 있어도 설정 파일이 우선한다.
 - 설정을 바꾸면 해당 프로세스(매니저, 스케줄러, `start-infra.sh`)를 다시 시작해야 반영된다.
 
 ### 80번 포트 허용 (리눅스)
@@ -172,7 +172,7 @@ sysctl net.ipv4.ip_unprivileged_port_start   # 80이면 적용됨
 
 ## 상주 워커
 
-`s8-config.yml`의 `workers`에 워커를 적으면 `./s8.sh`(project 모드)가 항목마다 `s8-workers:worker-<id>` 창에 워커 루프를 띄운다. 루프는 모델을 호출하지 않는 Node 프로세스다. 작업을 맡으면 `s8-workers:<UID>` 창에 워커 에이전트를 띄우고, 보고가 끝나면 다음 작업으로 넘어간다. 한 워커는 한 번에 작업 하나만 한다.
+`config.yml`의 `workers`에 워커를 적으면 `./s8.sh`(project 모드)가 항목마다 `s8-workers:worker-<id>` 창에 워커 루프를 띄운다. 루프는 모델을 호출하지 않는 Node 프로세스다. 작업을 맡으면 `s8-workers:<UID>` 창에 워커 에이전트를 띄우고, 보고가 끝나면 다음 작업으로 넘어간다. 한 워커는 한 번에 작업 하나만 한다.
 
 ```yaml
 workers:
@@ -200,7 +200,7 @@ workers:
 
 ### start-infra.sh
 
-`./start-infra.sh`는 `s8-infra` 세션의 모든 창을 종료하고 아래 창을 새로 만든다. 실행 중이던 창 프로세스도 종료되므로 필요한 작업은 먼저 저장한다. `s8-config.yml`의 `kbRoot`·`network`는 비밀값 없는 환경변수(`S8_KB_ROOT`, `S8_BIND_IP`, `S8_HTTP_PORT`)로 넘긴다.
+`./start-infra.sh`는 `s8-infra` 세션의 모든 창을 종료하고 아래 창을 새로 만든다. 실행 중이던 창 프로세스도 종료되므로 필요한 작업은 먼저 저장한다. `config.yml`의 `kbRoot`·`network`는 비밀값 없는 환경변수(`S8_KB_ROOT`, `S8_BIND_IP`, `S8_HTTP_PORT`)로 넘긴다.
 
 | 창 | 프로세스 | 주소 |
 | --- | --- | --- |
@@ -259,7 +259,7 @@ KB Browser는 일반 Markdown 문서만 제공한다. `.pi/`, `.pi-runtime/`, `.
 
 ## Telegram
 
-봇 토큰은 `.env`의 `TELEGRAM_BOT_TOKEN`, 사용자·그룹 ID와 알림 대상은 `s8-config.yml`의 `telegram`에 둔다. 예전 `~/.pi/agent/telegram.json`과 ID 환경변수(`TELEGRAM_ALLOWED_*`, `S8_SCHEDULE_TELEGRAM_CHAT_ID`)는 읽지 않는다.
+봇 토큰은 `.env`의 `TELEGRAM_BOT_TOKEN`, 사용자·그룹 ID와 알림 대상은 `config.yml`의 `telegram`에 둔다. 예전 `~/.pi/agent/telegram.json`과 ID 환경변수(`TELEGRAM_ALLOWED_*`, `S8_SCHEDULE_TELEGRAM_CHAT_ID`)는 읽지 않는다.
 
 ```yaml
 telegram:
@@ -321,7 +321,7 @@ publicUrl: https://<호스트>/s8/
 
 ## PH-CMS 연결
 
-- S8은 비관리자 agent 서비스 키를 `.env`의 `PHCMS_ACCESS_TOKEN`에 둔다. Projectman 도구는 `s8-config.yml`의 `projectman.apiUrl`(HTTPS 또는 루프백 HTTP)을 직접 쓴다. 에이전트는 키 원문이나 환경 파일을 조회하지 않는다.
+- S8은 비관리자 agent 서비스 키를 `.env`의 `PHCMS_ACCESS_TOKEN`에 둔다. Projectman 도구는 `config.yml`의 `projectman.apiUrl`(HTTPS 또는 루프백 HTTP)을 직접 쓴다. 에이전트는 키 원문이나 환경 파일을 조회하지 않는다.
 - 신규 채널은 PH-CMS 루트에서 `pnpm db:setup:projectman <ownerUid> [agentUid]`로 초기화한다.
 - PH-CMS는 `127.0.0.1:8000`에서 따로 실행하거나 `projectman.startCommand`로 `s8-infra:phcms` 창에서 실행한다. 라우터의 `/api/v2/`는 원래 URI 그대로 PH-CMS API·관리자 UI로 전달한다.
 - 관리자 로그인은 `http://<Tailscale IP>/api/v2/admin/login`이다. 관리자 UI의 API URL은 같은 origin, prefix는 `/api/v2`로 둔다. 원격 장치에서 `localhost:8000`을 쓰지 않는다. 라우터는 별도 인증을 주지 않으며 PH-CMS의 인증·권한 검사를 그대로 쓴다.
@@ -354,7 +354,7 @@ curl -fsS http://127.0.0.1:4178/s8/
 - 사용자 승인 없이 외부 전송, 배포, 삭제, 중요한 방향 확정을 하지 않는다. 공개 바인딩, 포트, 인증 정책 변경도 승인을 받는다.
 - `s8-infra` 세션 종료와 `start-infra.sh` 재실행은 서비스를 멈추므로 명시적 요청이나 승인 후에 한다.
 - Pi extension은 전체 시스템 권한으로 실행되므로 검토한 코드만 쓴다. 외부 package와 extension은 실행 전 소스와 권한을 검토한다.
-- 패키지 버전은 정확히 고정하고 잠금 파일을 커밋한다. Git에는 Pi 버전, 잠금 파일, `pi/`의 설정·extension·skill을 넣고 `.pi-runtime/`, `.s8-runtime/`, `.env`, `s8-config.yml`, 로그, 업로드는 넣지 않는다.
+- 패키지 버전은 정확히 고정하고 잠금 파일을 커밋한다. Git에는 Pi 버전, 잠금 파일, `pi/`의 설정·extension·skill을 넣고 `.pi-runtime/`, `.s8-runtime/`, `.env`, `config.yml`, 로그, 업로드는 넣지 않는다.
 - 작업 메모 폴더와 진행 이력 Markdown은 만들지 않는다. 작업 맥락은 Pi 세션에 두고, Projectman 상태와 작업 로그는 PH-CMS가 관리한다.
 - 환경변수를 바꾸면 같은 작업에서 `.env.example`도 갱신한다. 인프라를 바꾸면 셸 문법과 관련 테스트를 검증한다.
 
@@ -376,7 +376,7 @@ s8-agent/
 │   ├── extensions/          # Pi 도구·이벤트 연결
 │   ├── skills/              # S8 스킬과 vendor 스킬
 │   ├── lib/
-│   │   ├── config/          # s8-config.yml 읽기·검증
+│   │   ├── config/          # config.yml 읽기·검증
 │   │   ├── agent/           # 모드 프로필·실행기, 워커 claim·보고, 작업 실행, 상주 워커
 │   │   ├── development/     # worktree·패치, 보고 outbox
 │   │   ├── manager/         # KB 접근, 보고 수신함
@@ -433,7 +433,7 @@ npm start --prefix apps/comm-center   # start-infra.sh는 .env가 있으면 comm
 
 ### 에이전트 장비 설정
 
-각 장비의 `s8-config.yml`에는 주소와 토큰 파일만 둔다. 매니저와 워커가 같은 형식이다.
+각 장비의 `config.yml`에는 주소와 토큰 파일만 둔다. 매니저와 워커가 같은 형식이다.
 
 ```yaml
 communication:
@@ -473,7 +473,7 @@ npm ci --ignore-scripts --prefix pi
 이후는 [빠른 시작](#빠른-시작)과 같다.
 
 - Pi `1.3.0`을 쓰며 `pi/package-lock.json`으로 같은 버전을 설치한다. `pi/`의 설정, extension, skill, 시스템 지침은 모든 장비가 공유한다.
-- `.pi-runtime/`(인증, 세션, 캐시, 설치 패키지), `.env`, `s8-config.yml`, 로그, 업로드는 장비마다 따로 둔다.
+- `.pi-runtime/`(인증, 세션, 캐시, 설치 패키지), `.env`, `config.yml`, 로그, 업로드는 장비마다 따로 둔다.
 
 [pi-clinepass-provider](https://github.com/jellydn/pi-clinepass-provider) `1.6.0`은 `pi/package-lock.json`에 고정된 공통 의존성이며 `npm ci --ignore-scripts --prefix pi`로 함께 설치된다. 실행기는 자동 발견을 꺼도 이 provider를 명시적으로 로드하므로 범용·매니저·워커와 tmux의 관리 세션에서 모두 사용할 수 있다.
 

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { runAgent, usageError } from '../lib/agent/launch.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
-const COMMON = `  --telegram       Telegram 연결 (TELEGRAM_BOT_TOKEN, s8-config.yml 필요)
+const COMMON = `  --telegram       Telegram 연결 (TELEGRAM_BOT_TOKEN, config.yml 필요)
   --help, -h       이 도움말 표시
   Pi 옵션: --continue, --print, --no-session, --version, --model, --provider, --thinking
   Pi 패키지 명령: install, remove, uninstall, update, list, config (모든 에이전트가 공유)

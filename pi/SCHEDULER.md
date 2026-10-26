@@ -64,7 +64,7 @@ set -euo pipefail
   'ph-projectman을 읽고 오늘 할 일을 우선순위와 함께 한국어로 요약해줘. 상태는 변경하지 마.'
 ```
 
-스크립트 stdout/stderr 결과는 Telegram 대상이 설정되어 있으면 알림으로 전송한다. 봇 토큰은 환경변수 `TELEGRAM_BOT_TOKEN`에 유지하고, 저장소 루트 `s8-config.yml`의 `telegram.allowedUserIds`·`allowedGroupIds`·`scheduleChatId`로 허용 목록과 알림 대상을 지정한다. 대상 chat ID는 허용 목록 중 하나와 일치해야 한다. 파일이 없을 때만 기존 ID 환경변수를 사용하며, 파일이 있으면 누락된 값도 환경변수로 보충하지 않는다. 잘못된 파일은 시작 오류로 처리한다. 알림 대상을 지정하지 않으면 일반 예약 결과는 stdout에만 출력되며 부재중 운영 명령은 시작을 거부한다.
+스크립트 stdout/stderr 결과는 Telegram 대상이 설정되어 있으면 알림으로 전송한다. 봇 토큰은 환경변수 `TELEGRAM_BOT_TOKEN`에 유지하고, 저장소 루트 `config.yml`의 `telegram.allowedUserIds`·`allowedGroupIds`·`scheduleChatId`로 허용 목록과 알림 대상을 지정한다. 대상 chat ID는 허용 목록 중 하나와 일치해야 한다. 파일이 없을 때만 기존 ID 환경변수를 사용하며, 파일이 있으면 누락된 값도 환경변수로 보충하지 않는다. 잘못된 파일은 시작 오류로 처리한다. 알림 대상을 지정하지 않으면 일반 예약 결과는 stdout에만 출력되며 부재중 운영 명령은 시작을 거부한다.
 
 - 일시적 연결 오류·HTTP 429·5xx는 메시지 조각당 최대 3회 시도한다. 영구 오류는 재시도하지 않는다. 응답 유실 시 같은 알림이 중복 도착할 수 있다.
 - 실행 결과와 알림 전송 상태는 별개다. `/jobs`는 `실행 success/failed`와 `알림 pending/sent/failed/not_configured`를 구분한다. 기존 기록은 `알림 미기록`으로 표시한다.

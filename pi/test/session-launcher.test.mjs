@@ -19,7 +19,7 @@ async function copyLauncher(dir) {
   await mkdir(path.join(dir, 'pi/node_modules/.bin'), { recursive: true });
   await symlink(new URL('../node_modules/yaml', import.meta.url).pathname, path.join(dir, 'pi/node_modules/yaml'));
   // KB는 임시 저장소 자신으로 둔다.
-  await writeFile(path.join(dir, 's8-config.yml'), 'kbRoot: .\n');
+  await writeFile(path.join(dir, 'config.yml'), 'kbRoot: .\n');
   return { general: path.join(dir, 'start-general-agent.sh'), manager: path.join(dir, 'start-manager-agent.sh'), worker: path.join(dir, 'start-worker-agent.sh'), s8: path.join(dir, 's8.sh') };
 }
 
@@ -127,9 +127,9 @@ fs.appendFileSync(runs, JSON.stringify({ args: process.argv.slice(2), url: proce
 if (process.argv.includes('fixture-wait')) setInterval(() => {}, 1000);
 else if (fs.readFileSync(runs, 'utf8').trim().split('\\n').length === 1) fs.writeFileSync(path.join(process.env.S8_PI_RESTART_DIR, 'restart-' + process.ppid), 'restart');
 `, { mode: 0o755 });
-  // .env는 셸 문법(변수 확장, export)을 그대로 지원해야 한다. 연결 주소는 .env가 아니라 s8-config.yml이 정한다.
+  // .env는 셸 문법(변수 확장, export)을 그대로 지원해야 한다. 연결 주소는 .env가 아니라 config.yml이 정한다.
   await writeFile(path.join(dir, '.env'), 'BASE=fixture\nexport PHCMS_ACCESS_TOKEN="$BASE-key"\nPHCMS_API_URL=http://ignored.invalid\n');
-  await writeFile(path.join(dir, 's8-config.yml'), 'kbRoot: .\nprojectman:\n  apiUrl: http://127.0.0.1:8000/api/v2\n');
+  await writeFile(path.join(dir, 'config.yml'), 'kbRoot: .\nprojectman:\n  apiUrl: http://127.0.0.1:8000/api/v2\n');
   const env = { ...process.env, PHCMS_API_URL: 'http://inherited.invalid' };
   execFileSync('bash', [agent, '--print'], { encoding: 'utf8', env });
   const runs = (await readFile(path.join(dir, 'runs'), 'utf8')).trim().split('\n').map(JSON.parse);

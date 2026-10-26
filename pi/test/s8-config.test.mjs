@@ -28,7 +28,7 @@ test('a missing file uses defaults, the file is the only source, and environment
     telegram: { allowedUserIds: [], allowedGroupIds: [], scheduleChatId: null },
     publicUrl: null,
   });
-  await writeFile(path.join(root, 's8-config.yml'), `kbRoot: kb
+  await writeFile(path.join(root, 'config.yml'), `kbRoot: kb
 projectman:
   apiUrl: http://127.0.0.1:8000/api/v2/
   startCommand: cd ../ph-cms && pnpm dev
@@ -54,21 +54,21 @@ publicUrl: https://s8.example.invalid/s8/
     telegram: { allowedUserIds: ['789'], allowedGroupIds: ['-987'], scheduleChatId: '-987' },
     publicUrl: 'https://s8.example.invalid/s8/',
   });
-  await writeFile(path.join(root, 's8-config.yml'), 'telegram: {}\n');
+  await writeFile(path.join(root, 'config.yml'), 'telegram: {}\n');
   assert.deepEqual(loadTelegramConfig(root), { allowedUserIds: [], allowedGroupIds: [], scheduleChatId: null });
 });
 
 test('a leading ~ in kbRoot means the home directory', async t => {
   const root = await tempRoot(t, 's8-config-home-');
   for (const [value, expected] of [['~/kb', path.join(os.homedir(), 'kb')], ['~', os.homedir()], ['kb/~x', path.join(root, 'kb/~x')]]) {
-    await writeFile(path.join(root, 's8-config.yml'), `kbRoot: ${JSON.stringify(value)}\n`);
+    await writeFile(path.join(root, 'config.yml'), `kbRoot: ${JSON.stringify(value)}\n`);
     assert.equal(loadS8Config(root).kbRoot, expected);
   }
 });
 
 test('settings reach child processes as internal environment values and unset items are removed', async t => {
   const root = await tempRoot(t, 's8-config-env-');
-  await writeFile(path.join(root, 's8-config.yml'), 'kbRoot: /srv/kb\nprojectman:\n  apiUrl: http://127.0.0.1:8000/api/v2\n');
+  await writeFile(path.join(root, 'config.yml'), 'kbRoot: /srv/kb\nprojectman:\n  apiUrl: http://127.0.0.1:8000/api/v2\n');
   const env = { PHCMS_START_COMMAND: 'stale', PHCMS_ACCESS_TOKEN: 'fixture-secret' };
   applyS8Config(root, env);
   assert.deepEqual(env, { PHCMS_ACCESS_TOKEN: 'fixture-secret', S8_KB_ROOT: '/srv/kb', PHCMS_API_URL: 'http://127.0.0.1:8000/api/v2', S8_BIND_IP: '127.0.0.1', S8_HTTP_PORT: '80' });
@@ -76,7 +76,7 @@ test('settings reach child processes as internal environment values and unset it
 
 test('malformed, unsafe, unknown, linked, or credential-bearing configs fail without showing values', async t => {
   const root = await tempRoot(t, 's8-config-invalid-');
-  const file = path.join(root, 's8-config.yml');
+  const file = path.join(root, 'config.yml');
   for (const yaml of [
     'telegram: [', '[]', 'telegram: []', 'telegram:\n  allowedUserIds: 123',
     'telegram:\n  allowedUserIds: ["9007199254740992"]',
@@ -118,7 +118,7 @@ test('the config command exports shell-safe values for the router and never read
   await copyFile(new URL('../bin/s8-config.mjs', import.meta.url), path.join(root, 'pi/bin/s8-config.mjs'));
   await copyFile(new URL('../lib/config/s8-config.mjs', import.meta.url), path.join(root, 'pi/lib/config/s8-config.mjs'));
   const kb = path.join(root, "it's $HOME `kb`");
-  await writeFile(path.join(root, 's8-config.yml'), `kbRoot: ${JSON.stringify(kb)}\nprojectman:\n  startCommand: pnpm dev\nnetwork:\n  httpPort: 9090\n`);
+  await writeFile(path.join(root, 'config.yml'), `kbRoot: ${JSON.stringify(kb)}\nprojectman:\n  startCommand: pnpm dev\nnetwork:\n  httpPort: 9090\n`);
   await writeFile(path.join(root, '.env'), 'PHCMS_ACCESS_TOKEN=fixture-secret-not-exported\n');
   const cli = path.join(root, 'pi/bin/s8-config.mjs');
   const exported = execFileSync(process.execPath, [cli, 'shell-env'], { encoding: 'utf8' });
@@ -134,7 +134,7 @@ test('scheduler delivery uses the shared YAML target and invalid config leaves n
   const agent = await tempRoot(t, 's8-config-scheduler-');
   const root = path.join(agent, '.s8-runtime/scheduler');
   await mkdir(path.join(root, 'scripts'), { recursive: true });
-  await writeFile(path.join(agent, 's8-config.yml'), 'telegram:\n  allowedUserIds: ["789"]\n  scheduleChatId: "789"');
+  await writeFile(path.join(agent, 'config.yml'), 'telegram:\n  allowedUserIds: ["789"]\n  scheduleChatId: "789"');
   await writeFile(path.join(root, 'scripts/check.sh'), 'echo config-check');
   await writeFile(path.join(root, 'jobs.json'), JSON.stringify({ version: 1, jobs: [{ id: 'check', intervalMinutes: 5, timezone: 'Asia/Seoul', enabled: true }] }));
   const sent = [];
@@ -147,14 +147,14 @@ test('scheduler delivery uses the shared YAML target and invalid config leaves n
   assert.equal(sent.length, 1);
   assert.equal(sent[0].chat_id, '789');
   assert.match(sent[0].text, /config-check/);
-  await writeFile(path.join(agent, 's8-config.yml'), 'telegram: [');
-  await assert.rejects(runScheduler(options), /Invalid s8-config.yml/);
+  await writeFile(path.join(agent, 'config.yml'), 'telegram: [');
+  await assert.rejects(runScheduler(options), /Invalid config.yml/);
   await assert.rejects(readFile(path.join(root, 'owner.lock')), { code: 'ENOENT' });
 });
 
 test('communication needs only the comm-center URL and a token file', async t => {
   const root = await tempRoot(t, 's8-communication-config-');
-  await writeFile(path.join(root, 's8-config.yml'), 'communication:\n  enabled: true\n  url: ws://10.0.0.10:8090\n  tokenFile: token.json\n');
+  await writeFile(path.join(root, 'config.yml'), 'communication:\n  enabled: true\n  url: ws://10.0.0.10:8090\n  tokenFile: token.json\n');
   const config = loadS8Config(root);
   assert.deepEqual(config.communication, { enabled: true, url: 'ws://10.0.0.10:8090/', tokenFile: path.join(root, 'token.json') });
   assert.equal(config.projectman.apiUrl, null);
@@ -168,7 +168,7 @@ test('communication rejects invalid settings without exposing configuration cont
     'url: https://host.invalid', 'url: ws://user:fixture-secret@host.invalid',
     'url: ws://host.invalid/?token=fixture-secret', 'url: ws://host.invalid/path', 'tokenFile: []',
   ]) {
-    await writeFile(path.join(root, 's8-config.yml'), `communication:\n  ${fragment}\n`);
+    await writeFile(path.join(root, 'config.yml'), `communication:\n  ${fragment}\n`);
     assert.throws(() => loadS8Config(root), error => !error.message.includes('fixture-secret'), fragment);
   }
 });
@@ -176,7 +176,7 @@ test('communication rejects invalid settings without exposing configuration cont
 test('removed communicator settings are rejected', async t => {
   const root = await tempRoot(t, 's8-message-config-');
   for (const key of ['repositories: {}', 'server: {}', 'nodeId: host', 'managerUrl: ws://host.invalid', 'credentialsFile: secrets.json']) {
-    await writeFile(path.join(root, 's8-config.yml'), `communication:\n  ${key}\n`);
+    await writeFile(path.join(root, 'config.yml'), `communication:\n  ${key}\n`);
     assert.throws(() => loadS8Config(root), /unknown communication keys/, key);
   }
 });

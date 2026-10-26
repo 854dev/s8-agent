@@ -15,7 +15,7 @@ const PACKAGE_COMMANDS = new Set(['install', 'remove', 'uninstall', 'update', 'l
 export const isPackageCommand = arg => PACKAGE_COMMANDS.has(arg);
 
 /**
- * 루트 .env의 비밀값을 환경변수로 불러오고, s8-config.yml의 설정을 내부 환경변수로 넘긴다(설정 파일이 우선).
+ * 루트 .env의 비밀값을 환경변수로 불러오고, config.yml의 설정을 내부 환경변수로 넘긴다(설정 파일이 우선).
  * .env는 ~·$VAR 확장 등 셸 문법을 그대로 지원하도록 bash로 읽는다.
  * 값은 출력하지 않으며, 읽기 실패 시에도 bash 오류 출력(값 일부가 섞일 수 있음)을 그대로 내보내지 않는다.
  */
@@ -37,13 +37,13 @@ function loadSecrets(file) {
   }
 }
 
-/** KB 저장소 경로(s8-config.yml의 kbRoot, 기본 ../854_md). loadEnv가 S8_KB_ROOT로 넘긴다. */
+/** KB 저장소 경로(config.yml의 kbRoot, 기본 ../854_md). loadEnv가 S8_KB_ROOT로 넘긴다. */
 export async function kbRoot(root) {
   const directory = path.resolve(root, process.env.S8_KB_ROOT || '../854_md');
   try { return await realpath(directory); }
   catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    throw new Error(`KB 저장소를 찾을 수 없습니다: ${directory}. s8-config.yml의 kbRoot를 이 장비의 KB 경로로 설정하세요.`);
+    throw new Error(`KB 저장소를 찾을 수 없습니다: ${directory}. config.yml의 kbRoot를 이 장비의 KB 경로로 설정하세요.`);
   }
 }
 

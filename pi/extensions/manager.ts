@@ -23,7 +23,7 @@ export const MANAGER_EXTENSION_TOOLS = ['projectman', 'kb', 'scheduler', 'run_wo
 const agentRoot = fileURLToPath(new URL('../..', import.meta.url));
 const residentWorker = (id: string) => {
   const worker = loadS8Config(agentRoot).workers.find(item => item.id === id);
-  if (!worker) throw new Error(`s8-config.yml의 workers에 없는 워커입니다: ${id}`);
+  if (!worker) throw new Error(`config.yml의 workers에 없는 워커입니다: ${id}`);
   return worker;
 };
 export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
@@ -54,7 +54,7 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
   });
   pi.registerTool({
     name: 'run_worker', label: 'Run worker',
-    description: 'Start a Projectman task or subtask UID in its task directory. Git and worktree setup are left to the Worker. With workerId, queue it for that resident worker from s8-config.yml (it starts when the worker is free, unless paused). Without workerId, start a one-off worker now, or resume a run this machine already claimed, in tmux window s8-workers:<UID>. The worker claims, implements and reports by itself; its report arrives through the manager inbox.',
+    description: 'Start a Projectman task or subtask UID in its task directory. Git and worktree setup are left to the Worker. With workerId, queue it for that resident worker from config.yml (it starts when the worker is free, unless paused). Without workerId, start a one-off worker now, or resume a run this machine already claimed, in tmux window s8-workers:<UID>. The worker claims, implements and reports by itself; its report arrives through the manager inbox.',
     parameters: Type.Object({ uid: Type.String(), workerId: Type.Optional(Type.String()) }),
     async execute(_id, args) {
       if (args.workerId) {
@@ -69,7 +69,7 @@ export default function manager(pi: ExtensionAPI, { poll = true } = {}) {
   });
   pi.registerTool({
     name: 'set_worker_mode', label: 'Set worker mode',
-    description: 'List resident workers (action list) or change one worker mode at runtime: active polls ready tasks, passive waits for run_worker with workerId or the console, paused takes no new work. mode default reverts to the s8-config.yml value. Change modes only when the user asks.',
+    description: 'List resident workers (action list) or change one worker mode at runtime: active polls ready tasks, passive waits for run_worker with workerId or the console, paused takes no new work. mode default reverts to the config.yml value. Change modes only when the user asks.',
     parameters: Type.Object({ action: Type.Union([Type.Literal('list'), Type.Literal('set')]), workerId: Type.Optional(Type.String()), mode: Type.Optional(Type.Union([...WORKER_MODES.map(mode => Type.Literal(mode)), Type.Literal('default')])) }),
     async execute(_id, args) {
       const workers = loadS8Config(agentRoot).workers;

@@ -21,10 +21,10 @@ npm start --prefix apps/terminal-gateway
 npm ci --ignore-scripts --prefix frontend
 npm run build --prefix frontend
 npm run preview --prefix frontend -- --host 127.0.0.1 --port 4178
-./start-infra.sh   # 라우터 포함. s8-config.yml의 network.bindIp를 Tailscale IPv4로 지정
+./start-infra.sh   # 라우터 포함. config.yml의 network.bindIp를 Tailscale IPv4로 지정
 ```
 
-- 실행 명령은 `s8-agent` 루트 기준이다. 라우터 IP는 `s8-config.yml`의 `network.bindIp`에 실제 장비의 Tailscale IPv4로 지정한다.
+- 실행 명령은 `s8-agent` 루트 기준이다. 라우터 IP는 `config.yml`의 `network.bindIp`에 실제 장비의 Tailscale IPv4로 지정한다.
 - 브라우저 접속: `http://<Tailscale-IP>/s8/terminal`
 - Host 검증 때문에 현재는 Tailscale IP 또는 localhost URL을 사용한다. MagicDNS 이름은 지원하지 않는다.
 - `s8.sh --session 이름`은 해당 Pi와 공유 스케줄러를 재시작하고 창 목록만 출력한다. 기본은 `s8-main`이며 `pi`·`scheduler`·`shell` 창을 가진다. 작업 워커는 `s8-workers` 세션의 UID 창이다. 웹 터미널에서 이 세션을 선택하고 Ctrl+B, W로 창을 전환한다. `--sessions`는 이 관리 Pi 세션만 표시하며, 웹 터미널의 전체 호스트 세션 목록과 별개다.

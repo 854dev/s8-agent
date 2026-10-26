@@ -112,7 +112,7 @@
   - `request`, `reply`, `notice`, `proposal`, `result` → `send()`. 여러 대상이면 대상마다 `send()`하고 공통 `groupId`를 붙인다
   - `status` → `status()`
 - `session.mjs`는 수신 메시지를 대기열에 넣고 `pending`으로 응답한다. 주입을 확인하면 `client.ack(message, 'injected')`를 보낸다.
-- 설정: `s8-config.yml`의 `communication`을 `{ enabled, url, tokenFile }`로 바꾼다.
+- 설정: `config.yml`의 `communication`을 `{ enabled, url, tokenFile }`로 바꾼다.
 - 통신 정체성은 comm-center의 `welcome.agentId`다. Projectman claim의 `workerId`는 바꾸지 않는다(위 "구현 중 바꾼 결정").
 - 완료 확인: 매니저 세션과 워커 세션이 comm-center를 통해 왕복한다. 기존 `communication-service.test.mjs` 시나리오를 새 구조로 옮겨 통과시킨다.
 - 결과: 확장 테스트 4개, 세션 테스트 2개, CLI 통합 테스트 1개 통과. CLI 테스트는 실제 Pi 워커 세션 2개와 `main.mjs`로 띄운 comm-center 프로세스로 왕복과 센터 재시작 후 재접속을 확인한다. Pi 확장 로더가 `pi/` 밖의 `apps/comm-center/client.mjs`를 불러오는 것과 Node 내장 WebSocket이 `Origin`을 보내지 않는 것도 이 테스트로 확인했다.
@@ -126,7 +126,7 @@
 ### 4단계: 실행과 문서 (완료)
 
 - `start-infra.sh`에 `comm-center` 창을 추가한다. `apps/comm-center/.env`나 의존성이 없으면 창을 비워 둔다.
-- README의 에이전트 메시지 통신 절, `s8-config.example.yml`, `docs/distributed-multi-agent-plan.md`를 새 구조로 다시 쓴다.
+- README의 에이전트 메시지 통신 절, `config.example.yml`, `docs/distributed-multi-agent-plan.md`를 새 구조로 다시 쓴다.
 - 환경변수 변경을 루트 `.env.example`과 `apps/comm-center/.env.example`에 반영한다.
 
 ## 삭제할 파일과 코드
@@ -195,7 +195,7 @@
 |---|---|---|
 | `README.md` | 410-470 | 인증 파일 형식, `server`, `managerUrl`, `./s8.sh service communicator`, `S8_WORKER_ID` 실행 예시를 새 구조로 교체 |
 | `README.md` | 72 | 거부하는 이전 키 목록에 `communication.server`, `nodeId`, `credentialsFile`, `managerUrl`을 추가 |
-| `s8-config.example.yml` | 51-73 | `communication` 예시를 `enabled`, `url`, `tokenFile`로 교체 |
+| `config.example.yml` | 51-73 | `communication` 예시를 `enabled`, `url`, `tokenFile`로 교체 |
 | `.env.example` | 마지막 3줄 | `communication.credentialsFile` 설명 삭제. `S8_WORKER_ID` 설명은 2단계 결과에 맞춰 고침 |
 | `docs/distributed-multi-agent-plan.md` | 전체 | 새 구조로 다시 씀 |
 | `agents/manager/SYSTEM.md`, `pi/skills/projectman*/SKILL.md` | `agent_message` 설명 | `taskUid`, `sessionId` 인자 언급 삭제 |

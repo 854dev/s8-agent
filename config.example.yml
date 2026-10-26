@@ -1,5 +1,5 @@
 # S8 장비별 설정. 비밀이 아닌 값만 둔다(서비스 키·봇 토큰은 .env).
-# cp s8-config.example.yml s8-config.yml 후 이 장비에 맞게 고친다. s8-config.yml은 git에 올리지 않는다.
+# cp config.example.yml config.yml 후 이 장비에 맞게 고친다. config.yml은 git에 올리지 않는다.
 # 생략한 항목은 아래 주석의 기본값을 쓴다. 모르는 키가 있으면 시작하지 않는다.
 # 확인: node pi/bin/s8-config.mjs show
 

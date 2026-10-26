@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// s8-config.yml 확인·내보내기. 비밀값(.env)은 읽지 않는다.
+// config.yml 확인·내보내기. 비밀값(.env)은 읽지 않는다.
 //   show            검증한 설정을 JSON으로 출력
 //   shell-env       라우터·frontend 개발 서버용 export 줄 출력. eval "$(node pi/bin/s8-config.mjs shell-env)"로 쓴다
 //   start-command   projectman.startCommand 출력(없으면 빈 출력)

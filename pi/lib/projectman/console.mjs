@@ -103,14 +103,14 @@ export function createProjectmanConsole({ root, baseUrl = process.env.PHCMS_API_
         try { return json(res, 200, await finishStoppedRun({ root, client: agentClientFactory(), uid: finish[1], runId: input.runId, confirmed: true })); }
         catch (error) { if (error.code === 'FINISH_REFUSED') return json(res, 409, { code: error.code, error: error.message }); throw error; }
       }
-      // 상주 워커: 목록·모드 변경·작업 지시. 워커 목록은 s8-config.yml의 workers다.
+      // 상주 워커: 목록·모드 변경·작업 지시. 워커 목록은 config.yml의 workers다.
       if (req.method === 'GET' && url.pathname === '/api/projectman/workers') {
         return json(res, 200, { workers: await listedWorkers(root) });
       }
       const workerAction = /^\/api\/projectman\/workers\/([a-z][a-z0-9-]{0,31})\/(mode|instructions)$/.exec(url.pathname);
       if (req.method === 'POST' && workerAction) {
         const worker = (await listedWorkers(root)).find(item => item.id === workerAction[1]);
-        if (!worker) return json(res, 404, { error: 's8-config.yml에 없는 워커입니다.' });
+        if (!worker) return json(res, 404, { error: 'config.yml에 없는 워커입니다.' });
         const input = await body(req);
         if (workerAction[2] === 'mode') {
           if (Object.keys(input).some(key => key !== 'mode') || !(input.mode === null || WORKER_MODES.includes(input.mode))) return json(res, 400, { error: `모드는 ${WORKER_MODES.join(', ')} 또는 null(설정값)입니다.` });

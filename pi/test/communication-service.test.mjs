@@ -22,7 +22,7 @@ async function fixture(t) {
   const center = await startCommCenter({ agentsFile, port: 0 });
   t.after(() => center.close());
   for (const root of Object.values(roots)) {
-    await writeFile(path.join(root, 's8-config.yml'), `communication:\n  enabled: true\n  url: ws://127.0.0.1:${center.address.port}\n  tokenFile: token.json\n`);
+    await writeFile(path.join(root, 'config.yml'), `communication:\n  enabled: true\n  url: ws://127.0.0.1:${center.address.port}\n  tokenFile: token.json\n`);
   }
   return { roots, center };
 }

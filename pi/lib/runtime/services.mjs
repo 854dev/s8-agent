@@ -62,7 +62,7 @@ export async function startPiServices(root, { session = 's8-main', scheduler = t
 }
 
 /**
- * s8-config.yml의 workers마다 s8-workers 세션에 worker-<id> 창을 띄운다. 실행 중인 루프는 새 프로세스로 교체하고,
+ * config.yml의 workers마다 s8-workers 세션에 worker-<id> 창을 띄운다. 실행 중인 루프는 새 프로세스로 교체하고,
  * 설정에서 빠진 워커의 루프는 멈춘다. 워커 에이전트가 작업 중인 UID 창은 건드리지 않는다.
  * 루프가 바로 종료돼도(Projectman 설정 누락 등) 런타임 시작은 계속하고 창 출력만 알린다.
  */

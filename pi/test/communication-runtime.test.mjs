@@ -96,7 +96,7 @@ async function fixture(t) {
     await mkdir(path.join(root, '.pi-runtime'), { recursive: true });
     await writeFile(path.join(root, '.pi-runtime/models.json'), JSON.stringify({ providers: { fixture: { baseUrl: `${apiUrl}/v1`, api: 'openai-completions', apiKey: 'fixture-only', models: ['a', 'b'].map(model => ({ id: model, contextWindow: 32768, maxTokens: 2048 })) } } }));
     await issueToken({ agentsFile, id, role: 'worker', tokenFile: path.join(root, 'comm-token.json') });
-    await writeFile(path.join(root, 's8-config.yml'), `kbRoot: ${root}\ncommunication:\n  enabled: true\n  url: ws://127.0.0.1:${port}\n  tokenFile: comm-token.json\n`);
+    await writeFile(path.join(root, 'config.yml'), `kbRoot: ${root}\ncommunication:\n  enabled: true\n  url: ws://127.0.0.1:${port}\n  tokenFile: comm-token.json\n`);
     const run = await tmux(id, root);
     roots[`${id}Run`] = run;
     roots[`${id}Start`] = () => run(['new-session', '-d', '-s', 's8-main', '-n', 'pi', '-c', root, `exec bash ${quote(path.join(root, 'start-worker-agent.sh'))}`], { CLINE_API_KEY: 'fixture-only', CLINE_API_BASE: apiUrl });

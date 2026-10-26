@@ -1,4 +1,4 @@
-// 상주 워커. s8-config.yml의 workers 항목마다 s8-workers 세션의 worker-<id> 창에서 도는 가벼운 루프다(LLM 아님).
+// 상주 워커. config.yml의 workers 항목마다 s8-workers 세션의 worker-<id> 창에서 도는 가벼운 루프다(LLM 아님).
 // 작업을 맡으면 기존 실행기(work.mjs startWork)로 UID 창에 워커 에이전트를 띄우고, 보고(또는 창 종료)를 확인하면 다음 작업으로 넘어간다.
 // 보고 후에도 에이전트 창은 남겨 결과를 확인하거나 이어서 대화할 수 있게 한다. 정리는 사람이 한다.
 // 한 워커는 한 번에 작업 하나만 맡는다.
@@ -6,7 +6,7 @@
 //   passive  지시(콘솔·매니저)를 받아야 맡는다
 //   paused   새 작업을 맡지 않는다. 진행 중인 작업은 끝까지 기다린다
 // 상태는 쓰는 쪽이 하나인 파일로 나눈다(.s8-runtime/workers/<id>/).
-//   mode.json      실행 중 바꾼 모드. 콘솔·매니저가 쓴다. 없으면 s8-config.yml의 mode
+//   mode.json      실행 중 바꾼 모드. 콘솔·매니저가 쓴다. 없으면 config.yml의 mode
 //   inbox/*.json   지시 하나당 파일 하나. 콘솔·매니저가 만들고 워커가 읽은 뒤 지운다
 //   state.json     현재 작업·최근 오류·heartbeat. 워커만 쓴다
 import { randomUUID } from 'node:crypto';

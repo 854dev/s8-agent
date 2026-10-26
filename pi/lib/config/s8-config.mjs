@@ -7,21 +7,21 @@ import { parseDocument } from 'yaml';
 
 export const agentRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
-// s8-config.yml: 비밀이 아닌 장비별 설정. 비밀값(서비스 키·봇 토큰)은 .env에만 둔다.
+// config.yml: 비밀이 아닌 장비별 설정. 비밀값(서비스 키·봇 토큰)은 .env에만 둔다.
 // 파일이 없거나 항목을 생략하면 아래 기본값을 쓴다.
 const DEFAULTS = { kbRoot: '../854_md', projectman: { apiUrl: null, startCommand: null }, network: { bindIp: '127.0.0.1', httpPort: 80 } };
 
 const plainObject = value => value && typeof value === 'object' && !Array.isArray(value);
 function fields(value, allowed, name) {
   if (value === undefined || value === null) return {};
-  if (!plainObject(value)) throw new Error(`s8-config.yml: ${name} must be a mapping`);
+  if (!plainObject(value)) throw new Error(`config.yml: ${name} must be a mapping`);
   const unknown = Object.keys(value).filter(key => !allowed.includes(key));
-  if (unknown.length) throw new Error(`s8-config.yml: unknown ${name} keys: ${unknown.join(', ')}`);
+  if (unknown.length) throw new Error(`config.yml: unknown ${name} keys: ${unknown.join(', ')}`);
   return value;
 }
 // 값은 오류 메시지에 넣지 않는다(키 이름만 보여 준다).
 const text = (value, name, pattern = /^[^\0\r\n]{1,1000}$/) => {
-  if (typeof value !== 'string' || !pattern.test(value)) throw new Error(`s8-config.yml: ${name} must be a single-line string`);
+  if (typeof value !== 'string' || !pattern.test(value)) throw new Error(`config.yml: ${name} must be a single-line string`);
   return value;
 };
 
@@ -49,15 +49,15 @@ export const WORKER_ID = /^[a-z][a-z0-9-]{0,31}$/;
 
 function normalizeWorkers(workers) {
   if (workers == null) return [];
-  if (!Array.isArray(workers) || workers.length > 20) throw new Error('s8-config.yml: workers must be a list of at most 20 entries');
+  if (!Array.isArray(workers) || workers.length > 20) throw new Error('config.yml: workers must be a list of at most 20 entries');
   const ids = new Set();
   return workers.map(entry => {
     const worker = fields(entry, ['id', 'mode'], 'workers[]');
-    if (typeof worker.id !== 'string' || !WORKER_ID.test(worker.id)) throw new Error('s8-config.yml: workers[].id must be lowercase letters, digits or -, starting with a letter (max 32)');
-    if (ids.has(worker.id)) throw new Error(`s8-config.yml: duplicate worker id: ${worker.id}`);
+    if (typeof worker.id !== 'string' || !WORKER_ID.test(worker.id)) throw new Error('config.yml: workers[].id must be lowercase letters, digits or -, starting with a letter (max 32)');
+    if (ids.has(worker.id)) throw new Error(`config.yml: duplicate worker id: ${worker.id}`);
     ids.add(worker.id);
     const mode = worker.mode ?? 'passive';
-    if (!WORKER_MODES.includes(mode)) throw new Error(`s8-config.yml: workers[].mode must be ${WORKER_MODES.join(', ')}`);
+    if (!WORKER_MODES.includes(mode)) throw new Error(`config.yml: workers[].mode must be ${WORKER_MODES.join(', ')}`);
     return { id: worker.id, mode };
   });
 }
@@ -67,24 +67,24 @@ function httpUrl(value, name) {
     const url = new URL(value);
     if (typeof value !== 'string' || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
     return url.href;
-  } catch { throw new Error(`s8-config.yml: ${name} must be an HTTP(S) URL without credentials, query or fragment`); }
+  } catch { throw new Error(`config.yml: ${name} must be an HTTP(S) URL without credentials, query or fragment`); }
 }
 
 // comm-center 접속 설정. 정체성과 역할은 토큰으로 comm-center가 정한다.
 function normalizeCommunication(value, root) {
   const config = fields(value, ['enabled', 'url', 'tokenFile'], 'communication');
   const enabled = config.enabled ?? false;
-  if (typeof enabled !== 'boolean') throw new Error('s8-config.yml: communication.enabled must be boolean');
+  if (typeof enabled !== 'boolean') throw new Error('config.yml: communication.enabled must be boolean');
   let url = null;
   if (config.url != null) {
     try {
       const parsed = new URL(config.url);
       if (typeof config.url !== 'string' || !['ws:', 'wss:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') throw new Error();
       url = parsed.href;
-    } catch { throw new Error('s8-config.yml: communication.url must be a WS(S) origin without credentials, query or fragment'); }
+    } catch { throw new Error('config.yml: communication.url must be a WS(S) origin without credentials, query or fragment'); }
   }
   const tokenFile = config.tokenFile == null ? null : path.resolve(root, expandHome(text(config.tokenFile, 'communication.tokenFile')));
-  if (enabled && (!url || !tokenFile)) throw new Error('s8-config.yml: enabled communication requires url and tokenFile');
+  if (enabled && (!url || !tokenFile)) throw new Error('config.yml: enabled communication requires url and tokenFile');
   return { enabled, url, tokenFile };
 }
 
@@ -94,10 +94,10 @@ function readConfigFile(file) {
     if (!lstatSync(file).isFile()) throw new Error();
     fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   }
-  catch (error) { if (error.code === 'ENOENT') return {}; throw new Error('Cannot open s8-config.yml as a regular file'); }
+  catch (error) { if (error.code === 'ENOENT') return {}; throw new Error('Cannot open config.yml as a regular file'); }
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || stat.size > 64 * 1024) throw new Error('s8-config.yml must be a regular, unlinked file of at most 64 KB');
+    if (!stat.isFile() || stat.nlink !== 1 || stat.size > 64 * 1024) throw new Error('config.yml must be a regular, unlinked file of at most 64 KB');
     let data;
     try {
       const source = readFileSync(fd, 'utf8');
@@ -105,7 +105,7 @@ function readConfigFile(file) {
       const document = parseDocument(source, { uniqueKeys: true });
       if (document.errors.length) throw new Error();
       data = document.toJS({ maxAliasCount: 0 });
-    } catch { throw new Error('Invalid s8-config.yml YAML; values are not displayed'); }
+    } catch { throw new Error('Invalid config.yml YAML; values are not displayed'); }
     return data ?? {};
   } finally { closeSync(fd); }
 }
@@ -113,15 +113,15 @@ function readConfigFile(file) {
 // 경로 앞의 ~는 홈 디렉터리로 바꾼다(~user 형식은 지원하지 않는다).
 const expandHome = value => value === '~' || value.startsWith('~/') ? path.join(os.homedir(), value.slice(1)) : value;
 
-/** s8-config.yml을 읽어 검증하고 기본값을 채운다. 상대 kbRoot는 저장소 루트 기준 절대 경로로 바꾼다. */
+/** config.yml을 읽어 검증하고 기본값을 채운다. 상대 kbRoot는 저장소 루트 기준 절대 경로로 바꾼다. */
 export function loadS8Config(root = agentRoot) {
-  const data = fields(readConfigFile(path.join(root, 's8-config.yml')), ['kbRoot', 'projectman', 'network', 'workers', 'telegram', 'publicUrl', 'communication'], 'top-level');
+  const data = fields(readConfigFile(path.join(root, 'config.yml')), ['kbRoot', 'projectman', 'network', 'workers', 'telegram', 'publicUrl', 'communication'], 'top-level');
   const projectman = fields(data.projectman, ['apiUrl', 'startCommand'], 'projectman');
   const network = fields(data.network, ['bindIp', 'httpPort'], 'network');
   const bindIp = network.bindIp == null ? DEFAULTS.network.bindIp : text(network.bindIp, 'network.bindIp');
-  if (!isIP(bindIp) || bindIp === '0.0.0.0' || bindIp === '::') throw new Error('s8-config.yml: network.bindIp must be a specific IP address');
+  if (!isIP(bindIp) || bindIp === '0.0.0.0' || bindIp === '::') throw new Error('config.yml: network.bindIp must be a specific IP address');
   const httpPort = network.httpPort ?? DEFAULTS.network.httpPort;
-  if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) throw new Error('s8-config.yml: network.httpPort must be a port number');
+  if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) throw new Error('config.yml: network.httpPort must be a port number');
   const communication = normalizeCommunication(data.communication, root);
   const workers = normalizeWorkers(data.workers);
   return {

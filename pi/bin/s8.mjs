@@ -32,7 +32,7 @@ async function runResident(args) {
   ]);
   const config = loadS8Config(root);
   const worker = config.workers.find(item => item.id === args[0]);
-  if (!worker) throw usageError(`s8-config.yml의 workers에 없는 워커입니다: ${args[0]}`);
+  if (!worker) throw usageError(`config.yml의 workers에 없는 워커입니다: ${args[0]}`);
   const lock = resident.residentLockFile(root, worker.id);
   await mkdir(path.dirname(lock), { recursive: true, mode: 0o700 });
   const release = await acquirePidLock(lock);

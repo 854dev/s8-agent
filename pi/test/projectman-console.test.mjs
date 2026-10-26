@@ -163,7 +163,7 @@ test('console finish fails closed with fixed messages when the agent key is miss
 test('console lists resident workers, switches modes and queues instructions only for ready tasks', async t => {
   let task = { state: 'todo', workflow: { revision: 3 } };
   const { root, base, headers } = await fixture(t, { client: { getWorkflow: async () => task } });
-  await writeFile(path.join(root, 's8-config.yml'), 'workers:\n  - id: dev-a\n    mode: passive\n');
+  await writeFile(path.join(root, 'config.yml'), 'workers:\n  - id: dev-a\n    mode: passive\n');
   const status = async () => (await (await fetch(`${base}/api/projectman/workers`, { headers })).json()).workers;
   assert.deepEqual((await status()).map(({ id, mode, configMode, overridden, queue }) => ({ id, mode, configMode, overridden, queue })), [{ id: 'dev-a', mode: 'passive', configMode: 'passive', overridden: false, queue: [] }]);
   assert.equal((await fetch(`${base}/api/projectman/workers`)).status, 401);
@@ -189,7 +189,7 @@ test('console lists resident workers, switches modes and queues instructions onl
 
 test('communication peers are not exposed as controllable Projectman workers', async t => {
   const f = await fixture(t);
-  await writeFile(path.join(f.root, 's8-config.yml'), 'communication:\n  enabled: true\n  url: ws://127.0.0.1:8090\n  tokenFile: /fixture/token.json\n');
+  await writeFile(path.join(f.root, 'config.yml'), 'communication:\n  enabled: true\n  url: ws://127.0.0.1:8090\n  tokenFile: /fixture/token.json\n');
   const listed = await (await fetch(`${f.base}/api/projectman/workers`, { headers: f.headers })).json();
   assert.deepEqual(listed.workers, []);
   for (const action of ['mode', 'instructions']) {

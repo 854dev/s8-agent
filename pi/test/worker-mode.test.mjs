@@ -213,7 +213,7 @@ test('Telegram retry does not repeat the server report or manager receipt', asyn
 
 for (const messaging of [false, true]) test(`finish requires explicit stopped confirmation and the current run independently of messaging (${messaging})`, async t => {
   const f = await workFixture(t);
-  if (messaging) await writeFile(path.join(f.root, 's8-config.yml'), 'communication:\n  enabled: true\n  url: ws://127.0.0.1:8090\n  tokenFile: /fixture/token.json\n');
+  if (messaging) await writeFile(path.join(f.root, 'config.yml'), 'communication:\n  enabled: true\n  url: ws://127.0.0.1:8090\n  tokenFile: /fixture/token.json\n');
   // 다른 장비의 워커가 claim하고 멈춘 상황: 이 장비에는 claim 기록이 없다.
   const runId = randomUUID();
   await f.client.workflow('task1', { action: 'claim', requestId: randomUUID(), expectedRevision: 2, runId, workerId: 'remote' });
@@ -243,7 +243,7 @@ test('finish marks a local claim reported for resident scheduling', async t => {
 
 for (const distributed of [false, true]) test(`launcher resumes a lost claim response without a second claim (distributed=${distributed})`, async t => {
   const f = await workFixture(t);
-  if (distributed) await writeFile(path.join(f.root, 's8-config.yml'), `communication:\n  enabled: true\n  url: ws://127.0.0.1:8090\n  tokenFile: /fixture/token.json\n`);
+  if (distributed) await writeFile(path.join(f.root, 'config.yml'), `communication:\n  enabled: true\n  url: ws://127.0.0.1:8090\n  tokenFile: /fixture/token.json\n`);
   const first = await f.start();
   f.client.loseNext = true;
   await assert.rejects(claimWork({ root: f.root, client: f.client, uid: 'task1', workerId: 'w1' }), /timeout/);

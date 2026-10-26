@@ -10,7 +10,7 @@ command -v tmux >/dev/null 2>&1 || {
     exit 1
 }
 
-# 설정은 s8-config.yml에서 읽는다. 라우터·KB Browser·frontend 개발 서버에는 비밀값 없는 환경변수로 넘긴다.
+# 설정은 config.yml에서 읽는다. 라우터·KB Browser·frontend 개발 서버에는 비밀값 없는 환경변수로 넘긴다.
 settings_env="$(node pi/bin/s8-config.mjs shell-env)"
 eval "$settings_env"
 phcms_start_command="$(node pi/bin/s8-config.mjs start-command)"
@@ -75,9 +75,9 @@ tmux send-keys -t "=$SESSION:frontend" \
 
 printf '%s\n' "tmux 세션을 새로 시작했습니다: $SESSION"
 if [[ -n "$phcms_start_command" ]]; then
-    printf '%s\n' 's8-config.yml의 projectman.startCommand를 phcms 창에서 실행했습니다.'
+    printf '%s\n' 'config.yml의 projectman.startCommand를 phcms 창에서 실행했습니다.'
 else
-    printf '%s\n' 's8-config.yml에 projectman.startCommand가 없어 phcms 창은 비워 두었습니다.'
+    printf '%s\n' 'config.yml에 projectman.startCommand가 없어 phcms 창은 비워 두었습니다.'
 fi
 if [[ "$comm_center_ready" == true ]]; then
     printf '%s\n' 'comm-center 창에서 에이전트 통신 중계를 시작했습니다.'

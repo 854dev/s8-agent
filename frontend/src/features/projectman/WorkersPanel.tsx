@@ -10,7 +10,7 @@ type Props = {
   onOpenTask: (uid: string) => void
 }
 
-// 상주 워커 목록과 모드 전환. 워커는 s8-config.yml의 workers로 정하고, 여기서 바꾼 모드는 설정값으로 되돌릴 수 있다.
+// 상주 워커 목록과 모드 전환. 워커는 config.yml의 workers로 정하고, 여기서 바꾼 모드는 설정값으로 되돌릴 수 있다.
 export default function WorkersPanel({ workers, busy, onMode, onOpenTask }: Props) {
   return <section className="pm-workers" aria-label="상주 워커">
     <h2>상주 워커</h2>

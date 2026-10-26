@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // S8 라우터. 공개 주소 하나로 받은 요청을 경로별로 로컬 서비스(frontend·KB Browser·터미널·콘솔·PH-CMS)에 전달한다.
-// 의존성 없이 Node 표준 라이브러리만 쓴다. 바인딩 주소는 s8-config.yml의 network(S8_BIND_IP·S8_HTTP_PORT)를 따른다.
+// 의존성 없이 Node 표준 라이브러리만 쓴다. 바인딩 주소는 config.yml의 network(S8_BIND_IP·S8_HTTP_PORT)를 따른다.
 import http from 'node:http';
 import { isIP } from 'node:net';
 import { pathToFileURL } from 'node:url';

@@ -9,7 +9,7 @@ import { isDue, validateJob } from '../lib/scheduler/store.mjs';
 import { runScheduler, sendTelegram } from '../lib/scheduler/daemon.mjs';
 import { controlSchedules } from '../lib/scheduler/control.mjs';
 
-// 실제 s8-config.yml을 읽지 않도록 Telegram 설정은 항상 주입한다.
+// 실제 config.yml을 읽지 않도록 Telegram 설정은 항상 주입한다.
 const telegram = { allowedUserIds: ['123'], allowedGroupIds: [], scheduleChatId: '123' };
 const job = { id: 'morning', time: '09:00', timezone: 'Asia/Seoul', enabled: true, script: 'echo hello' };
 
