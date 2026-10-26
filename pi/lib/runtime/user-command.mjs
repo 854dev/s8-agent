@@ -14,6 +14,8 @@ const HELP = `사용법: ./s8.sh [--mode project|general] [--cwd 경로] [Pi 옵
   --mode general  범용 에이전트 (프로젝트 서비스 없음)
   --cwd 경로      작업 디렉터리 (모든 모드, 기본: 실행 위치)
   모드 생략 시 터미널에서 선택, 자동화에서는 명시 필수
+  --session 생략 시 터미널에서 세션 이름 입력 (빈 입력: 모드 기본 세션)
+  --reset 생략 시 터미널에서 기존 세션 유지 / 모두 종료를 선택 (자동화 기본: 유지)
   (인자 없음)      프로젝트 / 범용 모드 선택
   --no-scheduler   스케줄러 자동 시작 제외
   work UID         승인된 작업의 워커를 s8-workers 세션에 실행 (start-worker-agent.sh)
@@ -26,7 +28,8 @@ const HELP = `사용법: ./s8.sh [--mode project|general] [--cwd 경로] [Pi 옵
   --no-telegram    Telegram 없이 단독 실행
   --manager        기본 매니저의 별칭 (일반 대화·파일·Bash·Projectman·KB·예약)
   --sessions       실행 중인 S8 tmux 세션 목록
-  --session 이름   s8-infra를 뺀 tmux 세션 종료 후 s8-이름 생성 (자동 접속 없음)
+  --session 이름   s8-이름 세션 생성·재시작, 다른 tmux 세션은 유지 (자동 접속 없음)
+  --reset          s8-infra를 뺀 기존 tmux 세션을 모두 종료한 뒤 시작
   project 모드는 인프라(./start-infra.sh)가 떠 있어야 시작한다
   --help, -h       이 도움말 표시
   Pi 옵션: --continue, --no-session, --model, --provider, --thinking
@@ -56,6 +59,7 @@ function parseOptions(input) {
     }
     else if (arg === '--no-telegram') options.telegram = false;
     else if (arg === '--no-scheduler') options.scheduler = false;
+    else if (arg === '--reset') options.reset = true;
     else if (['--model', '--provider', '--thinking'].includes(arg)) options.args.push(arg, input[++i]);
     else options.args.push(arg);
   }
@@ -90,8 +94,29 @@ async function chooseTelegram(prompt) {
   throw usageError('잘못된 Telegram 선택입니다.');
 }
 
+/** 세션 이름을 입력받는다. 빈 입력은 모드 기본 세션, s8- 접두어는 생략할 수 있다. */
+async function chooseSession(prompt, mode) {
+  const fallback = defaultSession(mode);
+  const name = await prompt.ask(`세션 이름 (s8- 생략 가능) [${fallback.slice(3)}]: `);
+  if (!name) return fallback;
+  const session = name.startsWith('s8-') ? name : `s8-${name}`;
+  if (!validSession(session)) throw usageError('잘못된 세션 이름입니다.');
+  return session;
+}
+
+/** 다른 tmux 세션을 유지(false)할지, s8-infra를 뺀 모든 세션을 종료(true)할지 선택받는다. */
+async function chooseReset(prompt) {
+  console.log('기존 tmux 세션: 1) 유지하고 이 세션만 (재)시작  2) s8-infra를 뺀 모든 세션 종료 후 시작');
+  const selected = await prompt.ask('선택 [1]: ');
+  if (selected === '' || selected === '1' || selected === 'keep') return false;
+  if (selected === '2' || selected === 'reset') return true;
+  throw usageError('잘못된 세션 선택입니다.');
+}
+
+const defaultSession = mode => mode === 'general' ? 's8-general' : 's8-main';
+
 async function startRuntime(root, options) {
-  options.session ??= options.mode === 'general' ? 's8-general' : 's8-main';
+  options.session ??= defaultSession(options.mode);
   // tmux 서버를 종료하기 전에 검증해야 잘못된 입력으로 기존 세션을 잃지 않는다.
   if (!validSession(options.session)) throw new Error('잘못된 세션 이름입니다.');
   validatePiOptions(options.args);
@@ -105,7 +130,9 @@ async function startRuntime(root, options) {
     }
   }
   console.log(`S8 런타임 시작: ${options.session} (${options.mode} 모드)`);
-  const result = await restartPiRuntime(root, { ...options, resetTmux: true }, { onProgress: line => console.log(`  - ${line}`) });
+  // 기본은 대상 세션만 (재)시작하고 다른 세션은 유지한다. --reset일 때만 s8-infra를 뺀 세션을 모두 종료한다.
+  const { reset, ...runtimeOptions } = options;
+  const result = await restartPiRuntime(root, { ...runtimeOptions, resetTmux: Boolean(reset) }, { onProgress: line => console.log(`  - ${line}`) });
   console.log(`tmux 세션: ${result.session}`);
   for (const window of result.windows) console.log(`  ${result.session}:${window}`);
   console.log(result.telegramStatus);
@@ -131,7 +158,9 @@ export async function runUserCommand(root, input) {
       options.mode = await chooseMode(prompt);
     }
     if (!['project', 'general'].includes(options.mode)) throw usageError('모드는 project 또는 general이어야 합니다.');
+    if (options.session === undefined && prompt) options.session = await chooseSession(prompt, options.mode);
     if (options.telegram === undefined && prompt) options.telegram = await chooseTelegram(prompt);
+    if (options.reset === undefined && prompt) options.reset = await chooseReset(prompt);
   } finally { prompt?.close(); }
   options.cwd = await realpath(options.cwd);
   await startRuntime(root, options);

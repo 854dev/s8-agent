@@ -118,7 +118,8 @@ alias s8='"/path/to/s8-agent/s8.sh"'
 ./s8.sh --mode project                          # 매니저·스케줄러·상주 워커
 ./s8.sh --mode general --cwd /path/to/work      # 범용 에이전트(프로젝트 서비스 없음)
 ./s8.sh --continue                              # 최근 대화 이어가기
-./s8.sh --session work                          # s8-work 세션으로 시작
+./s8.sh --session work                          # s8-work 세션으로 시작(다른 세션 유지)
+./s8.sh --reset                                 # s8-infra를 뺀 모든 tmux 세션 종료 후 시작
 ./s8.sh --no-scheduler                          # 스케줄러 제외
 ./s8.sh --telegram take | --telegram off        # Telegram 연결 이전·해제
 ./s8.sh --sessions                              # S8 세션 목록
@@ -132,12 +133,15 @@ alias s8='"/path/to/s8-agent/s8.sh"'
 `s8.sh` 동작:
 
 - project 모드는 먼저 `s8-infra` 세션의 서비스 창(router, kb-browser, frontend, projectman-console, terminal-gateway, `projectman.startCommand`를 설정했으면 phcms)이 실행 중인지 확인한다. 창이 없거나 서비스가 종료돼 셸만 남은 창이 있으면 `./start-infra.sh`로 먼저 시작하라고 안내하고 아무것도 바꾸지 않은 채 종료한다. general 모드는 확인하지 않는다.
-- 런타임을 시작하면 `s8-infra`를 뺀 현재 tmux 서버의 모든 세션을 종료한 뒤 선택한 세션을 새로 만든다. 다른 S8 세션, 워커, 웹 터미널 호스트 셸(`s8-host-shell`), 개인 tmux 세션도 종료된다. `--sessions`, `work`, `finish`, `service`, 도움말은 세션을 종료하지 않는다.
+- 런타임을 시작하면 선택한 세션만 만들거나 그 세션의 `pi`(project 모드는 `scheduler`와 상주 워커 루프 포함) 창을 다시 띄운다. 다른 S8 세션, 작업 중인 워커 창, 개인 tmux 세션은 그대로 둔다. 그래서 `--session 이름`으로 에이전트 세션을 여러 개 함께 띄울 수 있다. 같은 이름의 세션이 다른 체크아웃 소유이거나 S8이 만들지 않은 세션이면 바꾸지 않고 실패한다.
+- `--reset`을 주면 예전처럼 `s8-infra`를 뺀 현재 tmux 서버의 모든 세션을 종료한 뒤 선택한 세션을 새로 만든다. 다른 S8 세션, 워커, 웹 터미널 호스트 셸(`s8-host-shell`), 개인 tmux 세션도 종료된다. `--sessions`, `work`, `finish`, `service`, 도움말은 세션을 종료하지 않는다.
 - 터미널에서 모드를 생략하면 `project` / `general`을 고른다. 자동화는 `--mode`를 명시한다. `--manager`는 `--mode project`의 별칭이다.
+- 터미널에서 `--session`을 생략하면 모드 다음에 세션 이름을 입력받는다. 빈 입력은 모드 기본 세션(`s8-main` / `s8-general`)이고 `s8-` 접두어는 생략할 수 있다(`t23` → `s8-t23`).
+- 터미널에서 `--reset`을 생략하면 모드·Telegram 다음에 기존 tmux 세션 처리를 고른다: 1) 유지하고 이 세션만 (재)시작(기본) 2) `s8-infra`를 뺀 모든 세션 종료 후 시작. 비대화형 실행에서 생략하면 유지한다.
 - project 모드는 `s8-main` 세션에 `shell`·`pi`·`scheduler` 창을 만들고 `s8-workers` 세션에 상주 워커 창을 띄운다. 매니저의 작업 디렉터리는 호출 위치이며 `--cwd`로 바꿀 수 있다. 스케줄러는 `kbRoot`, 워커는 각 작업에 지정된 디렉터리를 사용한다. general 모드는 `s8-general` 세션에서 범용 에이전트(`start-general-agent.sh`)를 KB·Projectman 설정과 서비스 없이 실행하며, 대화 이력은 세션·작업 디렉터리별로 나눈다.
 - 자동 접속하지 않고 창 목록만 출력한다. 웹 터미널에서 세션을 고르거나 `tmux attach-session -t s8-main`으로 접속한다.
 - 재시작 제어는 터미널과 분리된 프로세스가 끝까지 수행한다. 현재 Pi 안에서 `s8.sh`를 호출해 호출자가 종료돼도 새 Pi와 Telegram 연결을 올린다. 결과는 `.s8-runtime/runtime-restarts/`에 남는다.
-- 런타임을 다시 시작하면 작업 중인 워커 창도 종료된다. 진행 중이던 작업은 `./s8.sh work <UID>`로 같은 작업 디렉터리에서 이어간다.
+- `--reset`으로 다시 시작하면 작업 중인 워커 창도 종료된다. 진행 중이던 작업은 `./s8.sh work <UID>`로 같은 작업 디렉터리에서 이어간다.
 - tmux 밖에서 살아 있는 서비스는 중복 실행하지 않는다. 종료된 PID의 남은 잠금만 정리한다. `--no-scheduler`는 그 호출의 자동 시작만 뺀다.
 - 패키지 관리 명령, `--version`, `--print`는 `start-*-agent.sh`로 실행한다.
 - 서비스 창은 `tmux attach -t s8-main` 후 `Ctrl+B`, `W`로 고르고 `Ctrl+C`로 끈다. 종료된 창은 로그 확인을 위해 남는다. `Ctrl+B`, `D`는 접속만 해제한다.

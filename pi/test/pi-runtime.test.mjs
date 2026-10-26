@@ -78,11 +78,12 @@ test('both runtime modes use the caller directory and honor an explicit cwd', as
   }
 });
 
-test('s8 runtime recreates all sessions and services and connects Telegram by default', async t => {
+test('s8 runtime keeps other sessions by default, resets them with --reset, and connects Telegram by default', async t => {
   const f = await fixture(t);
   const result = await f.launch(['--model', 'fixture model']);
   assert.match(result.stdout, /tmux 세션: s8-main/);
-  for (const step of ['s8-infra를 뺀 기존 tmux 세션 종료', 'scheduler: 실행 확인', 'Pi 실행 확인']) assert.ok(result.stdout.includes(step), step);
+  for (const step of ['scheduler: 실행 확인', 'Pi 실행 확인']) assert.ok(result.stdout.includes(step), step);
+  assert.ok(!result.stdout.includes('s8-infra를 뺀 기존 tmux 세션 종료'));
   for (const name of ['shell', 'pi', 'scheduler']) assert.ok(result.stdout.includes(`s8-main:${name}`));
   assert.equal((await f.run(['list-clients'])).stdout.trim(), '');
   const record = JSON.parse((await readFile(path.join(f.root, 'starts'), 'utf8')).trim());
@@ -94,15 +95,16 @@ test('s8 runtime recreates all sessions and services and connects Telegram by de
   await f.run(['new-session', '-d', '-s', 'personal', 'sleep 60']);
   await f.run(['new-session', '-d', '-s', 's8-worker0', 'sleep 60']);
   await f.launch([]);
+  assert.deepEqual((await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n').sort(), ['personal', 's8-infra', 's8-main', 's8-worker0']);
+  assert.ok((await f.launch(['--reset'])).stdout.includes('s8-infra를 뺀 기존 tmux 세션 종료'));
   const records = (await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').map(JSON.parse);
-  assert.equal(records.length, 2);
-  assert.ok(!records[1].args.includes('--continue'));
-  assert.ok(!records[1].args.includes('--model'));
+  assert.equal(records.length, 3);
+  assert.ok(records.slice(1).every(record => !record.args.includes('--continue') && !record.args.includes('--model') && !record.args.includes('--reset')));
   assert.deepEqual((await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n').sort(), ['s8-infra', 's8-main']);
   const after = (await readFile(path.join(f.root, 'service-starts'), 'utf8')).trim().split('\n').map(JSON.parse);
-  assert.equal(after.length, 2);
+  assert.equal(after.length, 3);
   assert.ok(after.slice(1).every(item => !before.some(previous => previous.pid === item.pid)));
-  assert.equal((await readFile(path.join(f.root, 'telegram'), 'utf8')).trim().split('\n').length, 2);
+  assert.equal((await readFile(path.join(f.root, 'telegram'), 'utf8')).trim().split('\n').length, 3);
   assert.equal((await f.run(['list-windows', '-t', 's8-main', '-F', '#W'])).stdout.trim().split('\n').length, 3);
   assert.match((await f.launch(['--sessions'])).stdout, /s8-main/);
   await f.launch(['--model', 'changed model']);
@@ -110,7 +112,7 @@ test('s8 runtime recreates all sessions and services and connects Telegram by de
   assert.equal(changed.args[changed.args.indexOf('--model') + 1], 'changed model');
 });
 
-test('named runtime honors exclusions, validates arguments, and replaces existing sessions', async t => {
+test('named runtime honors exclusions, validates arguments, and replaces existing sessions with --reset', async t => {
   const f = await fixture(t);
   await assert.rejects(f.launch(['--tools', 'bash']), /Unsupported/);
   await assert.rejects(f.launch(['--session', 'bad;name']), /잘못된 세션/);
@@ -118,12 +120,15 @@ test('named runtime honors exclusions, validates arguments, and replaces existin
   await f.launch(['--session', 'work', '--no-scheduler']);
   assert.deepEqual((await f.run(['list-windows', '-t', 's8-work', '-F', '#W'])).stdout.trim().split('\n').sort(), ['pi', 'shell']);
   await f.run(['new-session', '-d', '-s', 's8-main', 'sleep 60']);
-  await f.launch([]);
+  // 다른 소유자의 s8-main은 기본 실행이 덮어쓰지 않는다.
+  await assert.rejects(f.launch([]), /이 저장소의 세션이 아닙니다/);
+  await f.run(['has-session', '-t', '=s8-work']);
+  await f.launch(['--reset']);
   await f.run(['has-session', '-t', '=s8-main']);
   await assert.rejects(f.run(['has-session', '-t', '=s8-work']));
 });
 
-test('each launch replaces the prior session and honors its Telegram option', async t => {
+test('named sessions coexist by default and each honors its Telegram option', async t => {
   const f = await fixture(t);
   await f.launch([]);
   await f.launch(['--session', 'work']);
@@ -133,7 +138,8 @@ test('each launch replaces the prior session and honors its Telegram option', as
   const general = records.find(record => record.session === 's8-general');
   assert.ok(general.args.includes(path.join(f.root, 'pi/extensions/managed-session.mjs')));
   assert.equal((await f.run(['show-option', '-qv', '-t', 's8-general', '@s8-telegram'])).stdout.trim(), 'off');
-  await f.launch([]);
+  assert.deepEqual((await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n').sort(), ['s8-general', 's8-infra', 's8-main', 's8-work']);
+  await f.launch(['--reset']);
   assert.deepEqual((await readFile(path.join(f.root, 'telegram'), 'utf8')).trim().split('\n'), ['s8-main', 's8-work', 's8-main']);
   const sessions = (await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n').sort();
   assert.deepEqual(sessions, ['s8-infra', 's8-main']);
@@ -169,7 +175,10 @@ test('failed services retain output until restart and exclusions omit services a
   await writeFile(path.join(f.root, 'pi/bin/scheduler.mjs'), 'setInterval(() => {}, 1000);');
   await f.launch([]);
   assert.equal((await f.run(['display-message', '-p', '-t', 's8-main:scheduler', '#{pane_dead}'])).stdout.trim(), '0');
+  // 제외 옵션은 실행 중인 서비스를 끄지 않는다. 세션을 새로 만드는 --reset 뒤에만 창이 빠진다.
   await f.launch(['--no-scheduler']);
+  assert.equal((await f.run(['list-windows', '-t', 's8-main', '-F', '#W'])).stdout.trim().split('\n').length, 3);
+  await f.launch(['--no-scheduler', '--reset']);
   assert.equal((await f.run(['list-windows', '-t', 's8-main', '-F', '#W'])).stdout.trim().split('\n').length, 2);
 });
 
@@ -249,13 +258,13 @@ test('telegram take/off aliases work and unspecified preference resets to the mo
   await assert.rejects(f.launch(['--telegram', 'unknown']), /take 또는 off/);
 });
 
-test('interactive startup shows mode and Telegram choices and defaults to keeping the connection', async t => {
+test('interactive startup asks mode, session name, Telegram, and reset and defaults to keeping them', async t => {
   const f = await fixture(t);
   const script = `import os, pty, select, subprocess, sys, time
 master, slave = pty.openpty()
 p = subprocess.Popen(['bash', sys.argv[1]], stdin=slave, stdout=slave, stderr=slave)
 os.close(slave)
-os.write(master, b'2\\n1\\n')
+os.write(master, sys.argv[2].encode())
 output = bytearray()
 deadline = time.monotonic() + 20
 while time.monotonic() < deadline:
@@ -273,13 +282,23 @@ os.close(master)
 sys.stdout.buffer.write(output)
 sys.exit(p.wait())
 `;
-  const { stdout } = await exec('python3', ['-c', script, path.join(f.root, 's8.sh')], {
+  const interactive = input => exec('python3', ['-c', script, path.join(f.root, 's8.sh'), input], {
     cwd: f.root, env: { ...process.env, PATH: `${f.root}/tools:${process.env.PATH}`, TMUX: '' }, timeout: 25000,
   });
+  await f.run(['new-session', '-d', '-s', 'personal', 'sleep 60']);
+  const { stdout } = await interactive('2\n\n1\n\n');
   assert.match(stdout, /실행 모드/);
+  assert.match(stdout, /세션 이름 \(s8- 생략 가능\) \[general\]/);
+  assert.match(stdout, /기존 tmux 세션: 1\) 유지/);
+  await f.run(['has-session', '-t', '=personal']);
   assert.match(stdout, /Telegram 현재 연결/);
   assert.match(stdout, /현재 연결 유지/);
   assert.match(stdout, /여기로 가져오기/);
   assert.match(stdout, /s8-general/);
   assert.equal((await f.run(['show-option', '-qv', '-t', 's8-general', '@s8-telegram'])).stdout.trim(), 'off');
+  await interactive('2\nt23\n1\n\n');
+  assert.deepEqual((await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n').sort(), ['personal', 's8-general', 's8-infra', 's8-t23']);
+  await assert.rejects(interactive('2\nbad;name\n'), error => /잘못된 세션 이름/.test(error.stdout));
+  await interactive('2\n\n1\n2\n');
+  assert.deepEqual((await f.run(['list-sessions', '-F', '#S'])).stdout.trim().split('\n').sort(), ['s8-general', 's8-infra']);
 });
