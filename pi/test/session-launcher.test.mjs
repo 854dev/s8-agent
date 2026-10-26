@@ -35,7 +35,7 @@ test('s8 service runs the scheduler in the KB with the Pi environment and reject
   await writeFile(path.join(dir, 'pi/node_modules/.bin/pi'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   await writeFile(path.join(dir, 'pi/bin/scheduler.mjs'), "console.log(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),kb:process.env.S8_KB_ROOT,config:process.env.S8_PI_CONFIG_ROOT}));");
   const options = { encoding: 'utf8', env: { ...process.env }, cwd: dir };
-  const scheduler = JSON.parse(execFileSync('bash', [s8, 'service', 'scheduler'], options));
+  const scheduler = JSON.parse(execFileSync('bash', [s8, 'service', 'scheduler'], options).trim().split('\n').at(-1));
   assert.equal(scheduler.cwd, dir);
   assert.equal(scheduler.kb, dir);
   assert.equal(scheduler.config, path.join(dir, 'pi'));
@@ -91,7 +91,7 @@ test('general and worker launchers run in the invocation directory and package c
   await mkdir(path.join(dir, 'pi/lib/runtime'), { recursive: true });
   await writeFile(path.join(dir, 'pi/lib/runtime/user-command.mjs'), 'export async function runUserCommand(_root, input) { console.log(JSON.stringify({ runtime: input })); }');
   for (const input of [[], ['--mode', 'project', '--telegram', 'off', '--session', 'work']]) {
-    assert.deepEqual(JSON.parse(execFileSync('bash', [s8, ...input], options)).runtime, input);
+    assert.deepEqual(JSON.parse(execFileSync('bash', [s8, ...input], options).trim().split('\n').at(-1)).runtime, input);
   }
 });
 

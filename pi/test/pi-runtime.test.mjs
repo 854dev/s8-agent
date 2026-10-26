@@ -36,7 +36,7 @@ import('node:fs').then(async fs => {
   const {execFileSync, spawn} = await import('node:child_process');
   const net = await import('node:net');
   const session = execFileSync('tmux', ['display-message', '-p', '#S'], {encoding:'utf8'}).trim();
-  fs.appendFileSync(${JSON.stringify(path.join(root, 'starts'))}, JSON.stringify({session,args:process.argv.slice(2)})+'\\n');
+  fs.appendFileSync(${JSON.stringify(path.join(root, 'starts'))}, JSON.stringify({session,cwd:process.cwd(),args:process.argv.slice(2)})+'\\n');
   if (execFileSync('tmux', ['show-option', '-qv', '@s8-telegram'], {encoding:'utf8'}).trim() !== 'take') { setInterval(() => {}, 1000); return; }
   const socket = process.env.S8_PI_RESTART_DIR + '/' + session + '.sock';
   if (fs.existsSync(socket)) fs.unlinkSync(socket);
@@ -49,7 +49,8 @@ import('node:fs').then(async fs => {
   })).listen(socket);
 });
 `, { mode: 0o755 });
-  const launch = args => exec('bash', [path.join(root, 's8.sh'), '--mode', 'project', ...args], {
+  const launch = (args, cwd = root) => exec('bash', [path.join(root, 's8.sh'), '--mode', 'project', ...args], {
+    cwd,
     env: { ...process.env, PATH: `${root}/tools:${process.env.PATH}`, TMUX: '' }, timeout: 12000,
   });
   // project 모드는 s8-infra 세션의 서비스 창이 실행 중이어야 시작한다(start-infra.sh 대역).
@@ -60,6 +61,22 @@ import('node:fs').then(async fs => {
   await infra();
   return { root, run, launch, infra };
 }
+
+test('both runtime modes use the caller directory and honor an explicit cwd', async t => {
+  const f = await fixture(t);
+  const caller = path.join(f.root, "caller directory 'quoted'");
+  const override = path.join(caller, 'override');
+  await mkdir(override, { recursive: true });
+  for (const mode of ['project', 'general']) {
+    for (const args of [[], ['--cwd', 'override']]) {
+      await f.launch(['--mode', mode, '--no-telegram', '--no-scheduler', ...args], caller);
+      const record = (await readFile(path.join(f.root, 'starts'), 'utf8')).trim().split('\n').map(JSON.parse).at(-1);
+      const expected = args.length ? override : caller;
+      assert.equal(record.cwd, expected, mode);
+      assert.equal((await f.run(['show-option', '-qv', '-t', record.session, '@s8-cwd'])).stdout.trim(), expected);
+    }
+  }
+});
 
 test('s8 runtime recreates all sessions and services and connects Telegram by default', async t => {
   const f = await fixture(t);

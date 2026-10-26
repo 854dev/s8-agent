@@ -92,6 +92,14 @@ sysctl net.ipv4.ip_unprivileged_port_start   # 80이면 적용됨
 
 스크립트는 경로를 스크립트 위치 기준으로 계산하므로 다른 디렉터리에서도 실행할 수 있다.
 
+어느 디렉터리에서든 `s8`로 실행하려면 Bash는 `~/.bashrc`, Zsh는 `~/.zshrc`에 아래 alias를 추가한다. `/path/to/s8-agent`는 이 저장소의 실제 절대 경로로 바꾼다. 경로에 공백이 있어도 되도록 큰따옴표를 유지한다.
+
+```bash
+alias s8='"/path/to/s8-agent/s8.sh"'
+```
+
+새 터미널을 열거나 Bash에서 `source ~/.bashrc`, Zsh에서 `source ~/.zshrc`로 적용한다. 이후 `s8`, `s8 --mode general`, `s8 --help`처럼 기존 옵션을 그대로 사용할 수 있다. 실행하면 먼저 현재 작업 경로(명령을 호출한 디렉터리)를 출력한다. project·general 모드 모두 호출한 위치의 `pwd`를 에이전트 작업 경로로 사용한다. 다른 경로에서 작업하려면 `s8 --mode project --cwd /path/to/work`처럼 지정한다.
+
 | 스크립트 | 역할 |
 | --- | --- |
 | `start-general-agent.sh` | 범용 에이전트 하나를 이 터미널에서 실행 |
@@ -126,7 +134,7 @@ sysctl net.ipv4.ip_unprivileged_port_start   # 80이면 적용됨
 - project 모드는 먼저 `s8-infra` 세션의 서비스 창(router, kb-browser, frontend, projectman-console, terminal-gateway, `projectman.startCommand`를 설정했으면 phcms)이 실행 중인지 확인한다. 창이 없거나 서비스가 종료돼 셸만 남은 창이 있으면 `./start-infra.sh`로 먼저 시작하라고 안내하고 아무것도 바꾸지 않은 채 종료한다. general 모드는 확인하지 않는다.
 - 런타임을 시작하면 `s8-infra`를 뺀 현재 tmux 서버의 모든 세션을 종료한 뒤 선택한 세션을 새로 만든다. 다른 S8 세션, 워커, 웹 터미널 호스트 셸(`s8-host-shell`), 개인 tmux 세션도 종료된다. `--sessions`, `work`, `finish`, `service`, 도움말은 세션을 종료하지 않는다.
 - 터미널에서 모드를 생략하면 `project` / `general`을 고른다. 자동화는 `--mode`를 명시한다. `--manager`는 `--mode project`의 별칭이다.
-- project 모드는 `s8-main` 세션에 `shell`·`pi`·`scheduler` 창을 만들고 `s8-workers` 세션에 상주 워커 창을 띄운다. 작업 디렉터리는 `kbRoot`다. general 모드는 `s8-general` 세션에서 범용 에이전트(`start-general-agent.sh`)를 KB·Projectman 설정과 서비스 없이 실행하며, 대화 이력은 세션·작업 디렉터리별로 나눈다.
+- project 모드는 `s8-main` 세션에 `shell`·`pi`·`scheduler` 창을 만들고 `s8-workers` 세션에 상주 워커 창을 띄운다. 매니저의 작업 디렉터리는 호출 위치이며 `--cwd`로 바꿀 수 있다. 스케줄러는 `kbRoot`, 워커는 각 작업에 지정된 디렉터리를 사용한다. general 모드는 `s8-general` 세션에서 범용 에이전트(`start-general-agent.sh`)를 KB·Projectman 설정과 서비스 없이 실행하며, 대화 이력은 세션·작업 디렉터리별로 나눈다.
 - 자동 접속하지 않고 창 목록만 출력한다. 웹 터미널에서 세션을 고르거나 `tmux attach-session -t s8-main`으로 접속한다.
 - 재시작 제어는 터미널과 분리된 프로세스가 끝까지 수행한다. 현재 Pi 안에서 `s8.sh`를 호출해 호출자가 종료돼도 새 Pi와 Telegram 연결을 올린다. 결과는 `.s8-runtime/runtime-restarts/`에 남는다.
 - 런타임을 다시 시작하면 작업 중인 워커 창도 종료된다. 진행 중이던 작업은 `./s8.sh work <UID>`로 같은 작업 디렉터리에서 이어간다.
@@ -141,7 +149,7 @@ sysctl net.ipv4.ip_unprivileged_port_start   # 80이면 적용됨
 | 모드 | 작업 위치 | 도구 | 스킬 |
 | --- | --- | --- | --- |
 | 범용 | 실행 위치(`--cwd`) | read, bash, edit, write, grep, find, ls | `projectman`, `ponytail`, `test-driven-development`, `systematic-debugging`, `verification-before-completion`, `s8-self-review` |
-| 매니저 | `kbRoot` | projectman, kb, scheduler, run_worker, set_worker_mode, read, bash, edit, write, grep, find, ls | `projectman`, `projectman-manager`, `s8-requirements`, `s8-task-plan`, `s8-plan-review`, `s8-operations` |
+| 매니저 | `s8` 호출 위치(`--cwd`), 단독 실행 기본값은 `kbRoot` | projectman, kb, scheduler, run_worker, set_worker_mode, read, bash, edit, write, grep, find, ls | `projectman`, `projectman-manager`, `s8-requirements`, `s8-task-plan`, `s8-plan-review`, `s8-operations` |
 | 워커 | 작업 디렉터리 | projectman, read, bash, edit, write, grep, find, ls | 범용 스킬 + `projectman-worker` |
 
 - Projectman 사용법은 [공통](pi/skills/projectman/SKILL.md)·[매니저](pi/skills/projectman-manager/SKILL.md)·[워커](pi/skills/projectman-worker/SKILL.md) 스킬로 관리한다. 시스템 프롬프트는 역할·자율성·협업 원칙을 정하고 도구 사용법은 해당 스킬을 참고한다. 범용은 공통, 매니저와 워커는 공통·역할별 스킬을 프로필에서 로드한다. 스킬을 제공해도 범용에 Projectman 도구·인증이 추가되지는 않는다. 변경한 스킬·시스템 프롬프트는 해당 Pi 프로세스를 재시작하면 적용된다.

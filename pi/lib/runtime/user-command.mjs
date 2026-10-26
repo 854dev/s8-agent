@@ -12,7 +12,7 @@ import { isPackageCommand, validatePiOptions, usageError } from '../agent/launch
 const HELP = `사용법: ./s8.sh [--mode project|general] [--cwd 경로] [Pi 옵션]
   --mode project  Projectman 관리·개발 위임 (기존 실행)
   --mode general  범용 에이전트 (프로젝트 서비스 없음)
-  --cwd 경로      범용 모드 작업 디렉터리 (기본: 실행 위치)
+  --cwd 경로      작업 디렉터리 (모든 모드, 기본: 실행 위치)
   모드 생략 시 터미널에서 선택, 자동화에서는 명시 필수
   (인자 없음)      프로젝트 / 범용 모드 선택
   --no-scheduler   스케줄러 자동 시작 제외

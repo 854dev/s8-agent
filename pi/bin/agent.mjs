@@ -13,8 +13,9 @@ const HELP = {
 범용 에이전트: Projectman 없이 실행 위치에서 파일·셸·코드를 수정한다.
   --cwd 경로       작업 디렉터리 (기본: 실행 위치)
 ${COMMON}`,
-  manager: `사용법: ./start-manager-agent.sh [옵션]
+  manager: `사용법: ./start-manager-agent.sh [--cwd 경로] [옵션]
 Projectman 매니저: KB 저장소에서 프로젝트·작업을 만들고 갱신하며 워커 보고를 받는다.
+  --cwd 경로       작업 디렉터리 (기본: KB 저장소, s8 런타임은 호출 위치 전달)
 ${COMMON}`,
   worker: `사용법: ./start-worker-agent.sh [--uid UID] [--cwd 경로] [옵션]
 Projectman 워커: 실행 위치 저장소에서 UID 작업을 직접 claim·수행·보고한다.

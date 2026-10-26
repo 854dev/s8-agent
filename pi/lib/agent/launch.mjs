@@ -129,14 +129,16 @@ function startChild(command, args) {
  * 에이전트를 이 터미널에서 실행하고 종료 코드를 돌려준다.
  * Pi가 .pi-runtime/restart-<이 프로세스 PID> 파일을 남기고 종료하면(/restart) 최근 대화로 다시 시작한다.
  */
-export async function runAgent(root, { mode, cwd = process.cwd(), telegram = false, control = false, sessionDir, uid, args = [] }) {
+export async function runAgent(root, { mode, cwd, telegram = false, control = false, sessionDir, uid, args = [] }) {
   const resolved = resolveMode(mode);
   if (!resolved) throw usageError(`모드는 ${MODES.join(', ')} 중 하나여야 합니다: ${mode}`);
   if (uid !== undefined && resolved !== 'worker') throw usageError('--uid는 worker 모드에서만 사용합니다.');
   if (uid !== undefined && !/^[\w-]{1,100}$/.test(uid)) throw usageError(`잘못된 UID입니다: ${uid}`);
   const profile = loadProfile(resolved, root);
   if (profile.loadEnv || telegram || control) loadEnv(root);
-  const workDir = profile.workDir === 'kb' ? await kbRoot(root) : await realpath(cwd);
+  // s8 런타임이 전달한 호출 위치(--cwd)는 매니저의 기본 KB 경로보다 우선한다.
+  const workDir = cwd !== undefined ? await realpath(cwd)
+    : profile.workDir === 'kb' ? await kbRoot(root) : await realpath(process.cwd());
   const { configRoot, agentDir, binary } = await preparePiEnvironment(root);
   await linkSharedSettings(agentDir, configRoot);
   if (sessionDir && path.relative(agentDir, path.resolve(sessionDir)).startsWith('..')) throw usageError('--session-dir는 .pi-runtime 아래여야 합니다.');

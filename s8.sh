@@ -7,4 +7,5 @@
 #   ./s8.sh service scheduler  예약 데몬 전경 실행
 # 에이전트 하나만 실행하려면 ./start-general-agent.sh, ./start-manager-agent.sh, ./start-worker-agent.sh를 사용한다.
 set -euo pipefail
+printf '현재 작업 경로: %s\n' "$(pwd)"
 exec node "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/pi/bin/s8.mjs" "$@"
