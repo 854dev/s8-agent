@@ -14,6 +14,7 @@ import { connectCommCenter } from '../../apps/comm-center/client.mjs';
 import { issueToken, readTokenFile } from '../../apps/comm-center/registry.mjs';
 
 const exec = promisify(execFile);
+const AGENTS = ['a', 'b', 'kb-harness'];
 const source = fileURLToPath(new URL('../..', import.meta.url));
 const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
 async function until(check, timeoutMs = 30_000) {
@@ -34,11 +35,13 @@ async function fixture(t) {
   const cleanup = [];
   t.after(async () => { for (const action of cleanup.reverse()) await action().catch(() => {}); await rm(base, { recursive: true, force: true }); });
   const handled = new Set();
+  const kbRequests = [];
   // Scripted model: answer each injected message once with agent_message result, addressed to the manager by default.
   const api = http.createServer(async (req, res) => {
     if (req.url !== '/v1/chat/completions') { res.writeHead(404); res.end(); return; }
     let raw = ''; for await (const chunk of req) raw += chunk;
     const body = JSON.parse(raw), incoming = latestMessage(body);
+    if (body.model === 'kb-harness') kbRequests.push(body);
     let tool;
     if (incoming && !handled.has(`${body.model}:${incoming.id}`)) {
       handled.add(`${body.model}:${incoming.id}`);
@@ -81,7 +84,7 @@ async function fixture(t) {
   await centerRun(['set-option', '-w', '-t', 'center:comm-center', 'remain-on-exit', 'on']);
 
   const roots = { centerRun, centerCommand };
-  for (const id of ['a', 'b']) {
+  for (const id of AGENTS) {
     const root = path.join(base, id);
     roots[id] = root;
     await mkdir(path.join(root, 'pi'), { recursive: true });
@@ -90,37 +93,56 @@ async function fixture(t) {
     await cp(path.join(source, 'apps/comm-center'), path.join(root, 'apps/comm-center'), { recursive: true, filter: file => !file.includes('node_modules') });
     await mkdir(path.join(root, 'apps/telegram-gateway'), { recursive: true });
     await copyFile(path.join(source, 'apps/telegram-gateway/gateway.mjs'), path.join(root, 'apps/telegram-gateway/gateway.mjs'));
-    for (const script of ['s8.sh', 'start-worker-agent.sh']) await copyFile(path.join(source, script), path.join(root, script));
+    for (const script of ['s8.sh', 'start-worker-agent.sh', 'start-kb-agent.sh']) await copyFile(path.join(source, script), path.join(root, script));
     for (const dir of ['node_modules', 'skills']) await symlink(path.join(source, 'pi', dir), path.join(root, 'pi', dir), 'dir');
     await writeFile(path.join(root, 'pi/settings.json'), JSON.stringify({ packages: [], defaultProvider: 'fixture', defaultModel: id, retry: { enabled: false }, compaction: { enabled: false } }));
     await mkdir(path.join(root, '.pi-runtime'), { recursive: true });
-    await writeFile(path.join(root, '.pi-runtime/models.json'), JSON.stringify({ providers: { fixture: { baseUrl: `${apiUrl}/v1`, api: 'openai-completions', apiKey: 'fixture-only', models: ['a', 'b'].map(model => ({ id: model, contextWindow: 32768, maxTokens: 2048 })) } } }));
+    await writeFile(path.join(root, '.pi-runtime/models.json'), JSON.stringify({ providers: { fixture: { baseUrl: `${apiUrl}/v1`, api: 'openai-completions', apiKey: 'fixture-only', models: AGENTS.map(model => ({ id: model, contextWindow: 32768, maxTokens: 2048 })) } } }));
     await issueToken({ agentsFile, id, role: 'worker', tokenFile: path.join(root, 'comm-token.json') });
-    await writeFile(path.join(root, 'config.yml'), `kbRoot: ${root}\ncommunication:\n  enabled: true\n  url: ws://127.0.0.1:${port}\n  tokenFile: comm-token.json\n`);
+    const isKb = id === 'kb-harness';
+    let kbConfig = '';
+    if (isKb) {
+      await mkdir(path.join(root, 'manuals'));
+      for (const file of ['README.md', 'PLAN.md', 'SETUP_COMMON_codex.md', 'AGENT_SETUP_pi.md']) await writeFile(path.join(root, 'manuals', file), 'Fixture manual');
+      await mkdir(path.join(root, 'kit/skills/ingest'), { recursive: true });
+      await writeFile(path.join(root, 'kit/skills/ingest/SKILL.md'), '---\nname: ingest\ndescription: Ingest fixture documents.\n---\nRead the source and preserve it.\n');
+      kbConfig = 'kbAgent:\n  harnessRoot: manuals\n  kitRoot: kit\n  tokenFile: comm-token.json\n';
+    }
+    await writeFile(path.join(root, 'config.yml'), `kbRoot: ${root}\n${kbConfig}communication:\n  enabled: true\n  url: ws://127.0.0.1:${port}\n  tokenFile: ${isKb ? 'unused-manager-token.json' : 'comm-token.json'}\n`);
     const run = await tmux(id, root);
     roots[`${id}Run`] = run;
-    roots[`${id}Start`] = () => run(['new-session', '-d', '-s', 's8-main', '-n', 'pi', '-c', root, `exec bash ${quote(path.join(root, 'start-worker-agent.sh'))}`], { CLINE_API_KEY: 'fixture-only', CLINE_API_BASE: apiUrl });
+    roots[`${id}Start`] = () => run(['new-session', '-d', '-s', 's8-main', '-n', 'pi', '-c', root, `exec bash ${quote(path.join(root, isKb ? 'start-kb-agent.sh' : 'start-worker-agent.sh'))}`], { CLINE_API_KEY: 'fixture-only', CLINE_API_BASE: apiUrl });
   }
   // The center reads its registry at start, so restart it after registering the Workers.
   await centerRun(['respawn-window', '-k', '-t', 'center:comm-center']);
   const results = [];
   const manager = connectCommCenter({ url: `ws://127.0.0.1:${port}`, token: await readTokenFile(path.join(centerRoot, 'manager-token.json')), reconnectMs: 100, onMessage: message => { results.push(message); return 'injected'; } });
   cleanup.push(() => manager.close());
-  for (const id of ['a', 'b']) await roots[`${id}Start`]();
-  return { ...roots, manager, results };
+  for (const id of AGENTS) await roots[`${id}Start`]();
+  return { ...roots, manager, results, kbRequests };
 }
 
-test('actual CLI Worker sessions exchange text through a comm-center process without Projectman or UID', { timeout: 90_000 }, async t => {
+test('actual CLI Worker and KB sessions exchange text through a comm-center process without Projectman or UID', { timeout: 90_000 }, async t => {
   const f = await fixture(t);
   const connectedWorkers = async () => (await f.manager.peers()).peers?.filter(peer => peer.role === 'worker' && peer.connected).length ?? 0;
   try {
-    await until(async () => await connectedWorkers() === 2);
-    const sent = await Promise.all(['a', 'b'].map(to => f.manager.send({ to, type: 'request', text: 'Compare the evidence.', groupId: 'comparison' })));
+    await until(async () => await connectedWorkers() === AGENTS.length);
+    const sent = await Promise.all(AGENTS.map(to => f.manager.send({ to, type: 'request', text: 'Compare the evidence.', groupId: 'comparison' })));
     assert.equal(sent.every(result => result.state === 'pending'), true);
-    await until(() => f.results.length === 2);
-    assert.deepEqual(new Set(f.results.map(message => message.from)), new Set(['a', 'b']));
+    await until(() => f.results.length === AGENTS.length);
+    assert.deepEqual(new Set(f.results.map(message => message.from)), new Set(AGENTS));
     assert.equal(f.results.every(message => message.groupId === 'comparison' && sent.some(item => item.id === message.replyTo)), true);
-    for (const id of ['a', 'b']) {
+    // 실제 모델 입력에 외부 매뉴얼 경로와 정본 ingest가 로드되고 역할 도구만 노출된다.
+    const kbRequest = f.kbRequests[0];
+    assert.ok(kbRequest);
+    const context = JSON.stringify(kbRequest.messages);
+    assert.ok(context.includes(path.join(f['kb-harness'], 'manuals')));
+    assert.ok(context.includes(path.join(f['kb-harness'], 'kit/skills/ingest/SKILL.md')));
+    const tools = kbRequest.tools.map(tool => tool.function.name);
+    assert.ok(tools.includes('agent_message'));
+    assert.ok(tools.includes('bash'));
+    assert.ok(!tools.includes('projectman'));
+    for (const id of AGENTS) {
       const windows = (await f[`${id}Run`](['list-windows', '-a', '-F', '#{window_name}'])).stdout.trim().split('\n');
       assert.deepEqual(windows, ['pi']);
       const files = await readdir(path.join(f[id], '.s8-runtime')).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
@@ -131,12 +153,12 @@ test('actual CLI Worker sessions exchange text through a comm-center process wit
     await until(async () => (await f.centerRun(['display-message', '-p', '-t', 'center:comm-center', '#{pane_dead}'])).stdout.trim() === '1');
     await until(() => !f.manager.connected);
     await f.centerRun(['respawn-window', '-t', 'center:comm-center']);
-    await until(async () => f.manager.connected && await connectedWorkers() === 2);
-    assert.equal(f.results.length, 2);
+    await until(async () => f.manager.connected && await connectedWorkers() === AGENTS.length);
+    assert.equal(f.results.length, AGENTS.length);
     assert.equal((await f.manager.send({ to: 'a', type: 'request', text: 'After reconnect' })).state, 'pending');
-    await until(() => f.results.length === 3);
+    await until(() => f.results.length === AGENTS.length + 1);
   } catch (error) {
-    for (const id of ['a', 'b']) {
+    for (const id of AGENTS) {
       const pane = await f[`${id}Run`](['capture-pane', '-p', '-S', '-25', '-t', 's8-main:pi']).catch(() => ({ stdout: '' }));
       t.diagnostic(`${id}: ${pane.stdout}`);
     }

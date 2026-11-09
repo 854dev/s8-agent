@@ -115,7 +115,7 @@ const expandHome = value => value === '~' || value.startsWith('~/') ? path.join(
 
 /** config.yml을 읽어 검증하고 기본값을 채운다. 상대 kbRoot는 저장소 루트 기준 절대 경로로 바꾼다. */
 export function loadS8Config(root = agentRoot) {
-  const data = fields(readConfigFile(path.join(root, 'config.yml')), ['kbRoot', 'projectman', 'network', 'workers', 'telegram', 'publicUrl', 'communication'], 'top-level');
+  const data = fields(readConfigFile(path.join(root, 'config.yml')), ['kbRoot', 'projectman', 'network', 'workers', 'telegram', 'publicUrl', 'communication', 'kbAgent'], 'top-level');
   const projectman = fields(data.projectman, ['apiUrl', 'startCommand'], 'projectman');
   const network = fields(data.network, ['bindIp', 'httpPort'], 'network');
   const bindIp = network.bindIp == null ? DEFAULTS.network.bindIp : text(network.bindIp, 'network.bindIp');
@@ -124,8 +124,16 @@ export function loadS8Config(root = agentRoot) {
   if (!Number.isInteger(httpPort) || httpPort < 1 || httpPort > 65535) throw new Error('config.yml: network.httpPort must be a port number');
   const communication = normalizeCommunication(data.communication, root);
   const workers = normalizeWorkers(data.workers);
+  const kbRoot = path.resolve(root, data.kbRoot == null ? DEFAULTS.kbRoot : expandHome(text(data.kbRoot, 'kbRoot')));
+  const kbAgent = fields(data.kbAgent, ['harnessRoot', 'kitRoot', 'tokenFile'], 'kbAgent');
+  const agentPath = (name, fallback) => path.resolve(root, expandHome(kbAgent[name] == null ? fallback : text(kbAgent[name], `kbAgent.${name}`)));
   return {
-    kbRoot: path.resolve(root, data.kbRoot == null ? DEFAULTS.kbRoot : expandHome(text(data.kbRoot, 'kbRoot'))),
+    kbRoot,
+    kbAgent: {
+      harnessRoot: agentPath('harnessRoot', '~/dev_854/kb-harness'),
+      kitRoot: agentPath('kitRoot', path.join(kbRoot, 'p5 - multiplez ai/제안서-작성용-하네스/kb-proposal-kit')),
+      tokenFile: agentPath('tokenFile', '~/.config/s8/comm-kb-harness.json'),
+    },
     projectman: {
       apiUrl: projectman.apiUrl == null ? DEFAULTS.projectman.apiUrl : httpUrl(projectman.apiUrl, 'projectman.apiUrl').replace(/\/$/, ''),
       startCommand: projectman.startCommand == null ? DEFAULTS.projectman.startCommand : text(projectman.startCommand, 'projectman.startCommand'),

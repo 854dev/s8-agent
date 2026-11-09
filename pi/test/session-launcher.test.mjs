@@ -8,7 +8,7 @@ import { MANAGER_TOOLS } from '../extensions/manager.ts';
 
 /** 실행 스크립트(start-*-agent.sh, s8.sh)와 Node 진입점·프로필을 임시 저장소에 복사한다. */
 async function copyLauncher(dir) {
-  for (const file of ['start-general-agent.sh', 'start-manager-agent.sh', 'start-worker-agent.sh', 's8.sh', 'agents/general/profile.json', 'agents/manager/profile.json', 'agents/worker/profile.json']) {
+  for (const file of ['start-general-agent.sh', 'start-manager-agent.sh', 'start-worker-agent.sh', 'start-kb-agent.sh', 's8.sh', 'agents/general/profile.json', 'agents/manager/profile.json', 'agents/worker/profile.json', 'agents/kb/profile.json']) {
     await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
     await copyFile(new URL(`../../${file}`, import.meta.url), path.join(dir, file));
   }
@@ -142,4 +142,43 @@ else if (fs.readFileSync(runs, 'utf8').trim().split('\\n').length === 1) fs.writ
   for (let i = 0; i < 100 && (await readFile(path.join(dir, 'runs'), 'utf8')).trim().split('\n').length < 3; i++) await new Promise(resolve => setTimeout(resolve, 50));
   child.kill('SIGTERM');
   assert.equal(await new Promise(resolve => child.once('exit', code => resolve(code))), 0);
+});
+
+
+test('KB launcher keeps manual and ingest references fixed and isolates sessions by customer cwd', async t => {
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), 's8-kb-launcher-')));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await copyLauncher(dir);
+  await echoPi(dir);
+  const harness = path.join(dir, "manuals with 'quotes'");
+  const kit = path.join(dir, 'kit');
+  const customer = path.join(dir, 'customer');
+  await mkdir(harness);
+  await mkdir(customer);
+  await mkdir(path.join(kit, 'skills/ingest'), { recursive: true });
+  for (const file of ['README.md', 'PLAN.md', 'SETUP_COMMON_codex.md', 'AGENT_SETUP_pi.md']) await writeFile(path.join(harness, file), 'Fixture manual');
+  await writeFile(path.join(kit, 'skills/ingest/SKILL.md'), 'Fixture ingest');
+  await writeFile(path.join(dir, 'config.yml'), `kbAgent:\n  harnessRoot: ${JSON.stringify(harness)}\n  kitRoot: kit\n`);
+  const script = path.join(dir, 'start-kb-agent.sh');
+  const options = { encoding: 'utf8', cwd: dir, env: { ...process.env } };
+  const launch = args => JSON.parse(execFileSync('bash', [script, ...args], options));
+  const first = launch(['--print']);
+  assert.equal(first.cwd, harness);
+  assert.ok(first.args.includes(path.join(kit, 'skills/ingest')));
+  assert.ok(first.args.includes(path.join(dir, 'pi/extensions/kb.mjs')));
+  assert.equal(first.args[first.args.indexOf('--tools') + 1], 'agent_message,read,bash,edit,write,grep,find,ls');
+  const context = record => record.args[record.args.indexOf('--append-system-prompt') + 1];
+  assert.ok(context(first).includes(JSON.stringify(harness)));
+  assert.ok(context(first).includes(JSON.stringify(kit)));
+  const second = launch(['--cwd', 'customer', '--continue']);
+  assert.equal(second.cwd, customer);
+  assert.equal(context(second), context(first));
+  const session = record => record.args[record.args.indexOf('--session-dir') + 1];
+  assert.ok(session(first).startsWith(path.join(dir, '.pi-runtime/kb/')));
+  assert.notEqual(session(first), session(second));
+  assert.equal(session(second), session(launch(['--cwd', customer])));
+  assert.throws(() => execFileSync('bash', [script, '--uid', 'task-1'], { ...options, stdio: 'pipe' }), /worker 모드/);
+  await rm(path.join(harness, 'PLAN.md'));
+  assert.throws(() => execFileSync('bash', [script], { ...options, stdio: 'pipe' }), /PLAN.md/);
+  assert.match(execFileSync('bash', [script, '--help'], options), /kbAgent.harnessRoot/);
 });

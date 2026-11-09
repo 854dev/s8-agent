@@ -3,9 +3,19 @@
 # 생략한 항목은 아래 주석의 기본값을 쓴다. 모르는 키가 있으면 시작하지 않는다.
 # 확인: node pi/bin/s8-config.mjs show
 
-# KB 저장소 경로. 매니저·스케줄러의 작업 위치이고 KB Browser가 읽는 문서 경로다.
+# KB 저장소 경로. 단독 매니저의 기본 작업 위치·스케줄러 작업 위치·KB Browser 문서 경로다.
 # 상대 경로는 이 저장소 기준, ~/는 홈 디렉터리. 기본값: ../854_md
 kbRoot: /home/user/kb_root
+
+# KB 구축 전문 에이전트(./start-kb-agent.sh). 각 경로는 저장소 기준, ~/는 홈 디렉터리다.
+# harnessRoot: 매뉴얼 정본이자 --cwd 생략 시 작업 위치. 기본값: ~/dev_854/kb-harness
+# kitRoot: KB 규칙·ingest·변환기 정본. 기본값: <kbRoot>/p5 - multiplez ai/제안서-작성용-하네스/kb-proposal-kit
+# tokenFile: 통신에서 사용할 별도 worker 토큰. 기본값: ~/.config/s8/comm-kb-harness.json
+# 통신 주소·사용 여부는 아래 communication을 공유한다. 토큰 내용을 YAML에 넣지 않는다.
+# kbAgent:
+#   harnessRoot: ~/dev_854/kb-harness
+#   kitRoot: /path/to/kb-proposal-kit
+#   tokenFile: ~/.config/s8/comm-kb-harness.json
 
 projectman:
   # PH-CMS Projectman API 주소. HTTPS 또는 루프백 HTTP. 없으면 Projectman 도구를 쓸 수 없다. 기본값: 없음

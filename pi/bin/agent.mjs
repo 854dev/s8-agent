@@ -1,4 +1,4 @@
-// start-{general,manager,worker}-agent.sh의 진입점: 첫 인자로 받은 모드의 에이전트 하나를 이 터미널에서 실행한다.
+// start-{general,manager,worker,kb}-agent.sh의 진입점: 첫 인자로 받은 모드의 에이전트 하나를 이 터미널에서 실행한다.
 import { fileURLToPath } from 'node:url';
 import { runAgent, usageError } from '../lib/agent/launch.mjs';
 
@@ -7,8 +7,15 @@ const COMMON = `  --telegram       Telegram 연결 (TELEGRAM_BOT_TOKEN, config.y
   --help, -h       이 도움말 표시
   Pi 옵션: --continue, --print, --no-session, --version, --model, --provider, --thinking
   Pi 패키지 명령: install, remove, uninstall, update, list, config (모든 에이전트가 공유)
-  다른 에이전트: start-general-agent.sh, start-manager-agent.sh, start-worker-agent.sh · tmux 런타임: ./s8.sh`;
+  다른 에이전트: start-general-agent.sh, start-manager-agent.sh, start-worker-agent.sh, start-kb-agent.sh · tmux 런타임: ./s8.sh`;
 const HELP = {
+  kb: `사용법: ./start-kb-agent.sh [--cwd 경로] [옵션]
+KB 구축 전문 에이전트: 매뉴얼·ingest 정본을 참조해 고객 KB 설치·검증·인수인계를 수행한다.
+  --cwd 경로       고객 작업 디렉터리 (기본: config.yml의 kbAgent.harnessRoot)
+  매뉴얼·키트: config.yml의 kbAgent.harnessRoot·kitRoot
+  매니저 통신: communication 설정과 kbAgent.tokenFile의 별도 worker 토큰
+  대화 이력은 KB 역할·작업 경로별로 보관한다. --continue로 이어간다.
+${COMMON}`,
   general: `사용법: ./start-general-agent.sh [--cwd 경로] [옵션]
 범용 에이전트: Projectman 없이 실행 위치에서 파일·셸·코드를 수정한다.
   --cwd 경로       작업 디렉터리 (기본: 실행 위치)
@@ -34,7 +41,7 @@ function parseOptions(input) {
       if (!input[i + 1]) throw usageError(`${arg} 값이 필요합니다.`);
       return input[++i];
     };
-    if (arg === '--mode') throw usageError('모드는 실행 스크립트로 고릅니다: start-general-agent.sh, start-manager-agent.sh, start-worker-agent.sh');
+    if (arg === '--mode') throw usageError('모드는 실행 스크립트로 고릅니다: start-general-agent.sh, start-manager-agent.sh, start-worker-agent.sh, start-kb-agent.sh');
     else if (arg === '--cwd') options.cwd = value();
     else if (arg === '--uid') options.uid = value();
     else if (arg === '--session-dir') options.sessionDir = value();
@@ -49,7 +56,7 @@ function parseOptions(input) {
 
 try {
   const [mode, ...input] = process.argv.slice(2);
-  if (!HELP[mode]) throw usageError('start-general-agent.sh, start-manager-agent.sh, start-worker-agent.sh로 실행하세요.');
+  if (!HELP[mode]) throw usageError('start-general-agent.sh, start-manager-agent.sh, start-worker-agent.sh, start-kb-agent.sh로 실행하세요.');
   const options = parseOptions(input);
   if (options.help) console.log(HELP[mode]);
   else process.exitCode = await runAgent(root, { ...options, mode });

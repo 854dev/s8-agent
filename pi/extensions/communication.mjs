@@ -10,7 +10,7 @@ const ALERTS = { UNAUTHORIZED: 'comm-center rejected this token', VERSION_MISMAT
 const json = value => ({ content: [{ type: 'text', text: JSON.stringify(value) }], details: undefined });
 
 /** Connect this session to comm-center. Identity and role come from the token; this never creates agents or starts tasks. */
-export function registerCommunication(pi, { root }) {
+export function registerCommunication(pi, { root, tokenFile }) {
   let inbox, client;
   const shutdown = async () => {
     inbox?.close(); inbox = null;
@@ -22,7 +22,7 @@ export function registerCommunication(pi, { root }) {
     if (!config.enabled) return;
     let token;
     // S8_COMM_TOKEN_FILE lets several sessions in one checkout use separate identities.
-    try { token = await readTokenFile(process.env.S8_COMM_TOKEN_FILE || config.tokenFile); }
+    try { token = await readTokenFile(process.env.S8_COMM_TOKEN_FILE || tokenFile || config.tokenFile); }
     catch (error) { if (ctx.hasUI) ctx.ui.notify(error.message, 'error'); return; }
     let alerted;
     inbox = sessionInbox(pi, ctx, {

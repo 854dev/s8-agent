@@ -21,6 +21,11 @@ test('a missing file uses defaults, the file is the only source, and environment
   t.after(() => { if (previous === undefined) delete process.env.TELEGRAM_ALLOWED_USER_IDS; else process.env.TELEGRAM_ALLOWED_USER_IDS = previous; });
   assert.deepEqual(loadS8Config(root), {
     kbRoot: path.resolve(root, '../854_md'),
+    kbAgent: {
+      harnessRoot: path.join(os.homedir(), 'dev_854/kb-harness'),
+      kitRoot: path.resolve(root, '../854_md/p5 - multiplez ai/제안서-작성용-하네스/kb-proposal-kit'),
+      tokenFile: path.join(os.homedir(), '.config/s8/comm-kb-harness.json'),
+    },
     projectman: { apiUrl: null, startCommand: null },
     network: { bindIp: '127.0.0.1', httpPort: 80 },
     workers: [],
@@ -47,6 +52,11 @@ publicUrl: https://s8.example.invalid/s8/
 `);
   assert.deepEqual(loadS8Config(root), {
     kbRoot: path.join(root, 'kb'),
+    kbAgent: {
+      harnessRoot: path.join(os.homedir(), 'dev_854/kb-harness'),
+      kitRoot: path.join(root, 'kb/p5 - multiplez ai/제안서-작성용-하네스/kb-proposal-kit'),
+      tokenFile: path.join(os.homedir(), '.config/s8/comm-kb-harness.json'),
+    },
     projectman: { apiUrl: 'http://127.0.0.1:8000/api/v2', startCommand: 'cd ../ph-cms && pnpm dev' },
     network: { bindIp: '100.64.0.1', httpPort: 8080 },
     workers: [{ id: 'dev-a', mode: 'active' }, { id: 'dev-b', mode: 'passive' }],
@@ -181,3 +191,18 @@ test('removed communicator settings are rejected', async t => {
   }
 });
 
+
+
+test('KB agent paths expand relative and home paths and reject invalid configuration', async t => {
+  const root = await tempRoot(t, 's8-kb-agent-config-');
+  await writeFile(path.join(root, 'config.yml'), 'kbAgent:\n  harnessRoot: manuals\n  kitRoot: ~/kits/kb\n  tokenFile: tokens/kb.json\n');
+  assert.deepEqual(loadS8Config(root).kbAgent, {
+    harnessRoot: path.join(root, 'manuals'),
+    kitRoot: path.join(os.homedir(), 'kits/kb'),
+    tokenFile: path.join(root, 'tokens/kb.json'),
+  });
+  for (const fragment of ['harnessRoot: []', 'kitRoot: false', 'tokenFile: 123', 'unexpected: path']) {
+    await writeFile(path.join(root, 'config.yml'), `kbAgent:\n  ${fragment}\n`);
+    assert.throws(() => loadS8Config(root), /kbAgent/);
+  }
+});

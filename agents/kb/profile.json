@@ -1,0 +1,8 @@
+{
+  "systemPrompt": "SYSTEM.md",
+  "extensions": ["kb.mjs"],
+  "tools": ["agent_message", "read", "bash", "edit", "write", "grep", "find", "ls"],
+  "skills": ["s8-self-review"],
+  "workDir": "harness",
+  "loadEnv": true
+}

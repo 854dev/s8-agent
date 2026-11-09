@@ -7,11 +7,12 @@ import { DefaultResourceLoader, ModelRuntime, SettingsManager, loadSkills } from
 import { loadProfile, resolveMode } from '../lib/agent/profile.mjs';
 import { piArgs, validatePiOptions } from '../lib/agent/launch.mjs';
 
-test('only the three launcher modes resolve', () => {
+test('only the supported launcher modes resolve', () => {
   assert.equal(resolveMode('general'), 'general');
   assert.equal(resolveMode('local'), null);
   assert.equal(resolveMode('manager'), 'manager');
   assert.equal(resolveMode('worker'), 'worker');
+  assert.equal(resolveMode('kb'), 'kb');
   assert.equal(resolveMode('rpc'), null);
 });
 
@@ -24,6 +25,10 @@ test('profiles define role extension, prompt, tools, work directory and connecti
   assert.equal(manager.workDir, 'kb');
   assert.ok(manager.extensions[0].endsWith('pi/extensions/manager.ts'));
   assert.ok(manager.systemPrompt.endsWith('agents/manager/SYSTEM.md'));
+  const kb = loadProfile('kb');
+  assert.equal(kb.workDir, 'harness');
+  assert.ok(kb.tools.includes('agent_message'));
+  assert.ok(!kb.tools.includes('projectman'));
   const worker = loadProfile('worker');
   assert.deepEqual(worker.tools, ['agent_message', 'projectman', 'read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']);
   assert.equal(worker.workDir, 'cwd');
@@ -36,9 +41,13 @@ test('Pi arguments load the common provider alongside profile, Telegram or contr
   const args = piArgs('/s8', profile, { sessionDir: '/s8/.pi-runtime/x' });
   for (const flag of ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-context-files']) assert.ok(args.includes(flag));
   const provider = '/s8/pi/node_modules/pi-clinepass-provider/src/index.ts';
-  assert.deepEqual(args.filter((_, i) => args[i - 1] === '--extension'), [provider, ...profile.extensions]);
-  for (const mode of ['general', 'manager', 'worker']) {
-    for (const control of [false, true]) assert.ok(piArgs('/s8', loadProfile(mode), { control }).includes(provider));
+  const bridge = '/s8/pi/node_modules/pi-opencode-bridge/index.ts';
+  assert.deepEqual(args.filter((_, i) => args[i - 1] === '--extension'), [provider, bridge, ...profile.extensions]);
+  for (const mode of ['general', 'manager', 'worker', 'kb']) {
+    for (const control of [false, true]) {
+      assert.ok(piArgs('/s8', loadProfile(mode), { control }).includes(provider));
+      assert.ok(piArgs('/s8', loadProfile(mode), { control }).includes(bridge));
+    }
   }
   assert.deepEqual(args.filter((_, i) => args[i - 1] === '--skill'), profile.skills);
   assert.equal(args[args.indexOf('--tools') + 1], profile.tools.join(','));
@@ -90,7 +99,7 @@ test('user Pi options reject permission, session, file and prompt injection', ()
 
 test('Pi loads every profile skill without diagnostics, and vendored skills keep their license and source', () => {
   const names = {};
-  for (const mode of ['general', 'manager', 'worker']) {
+  for (const mode of ['general', 'manager', 'worker', 'kb']) {
     const { skills } = loadProfile(mode);
     const result = loadSkills({ cwd: os.tmpdir(), agentDir: path.join(os.tmpdir(), 's8-no-agent-dir'), skillPaths: skills, includeDefaults: false });
     assert.deepEqual(result.diagnostics, [], mode);
@@ -102,6 +111,7 @@ test('Pi loads every profile skill without diagnostics, and vendored skills keep
   // 워커와 범용(즉석 개발)은 구현·검증 스킬, 매니저는 설계 스킬을 받는다. 커밋·서브에이전트를 지시하는 스킬은 넣지 않는다.
   assert.deepEqual(names.worker, ['projectman', 'projectman-worker', 'ponytail', 'test-driven-development', 'systematic-debugging', 'verification-before-completion', 's8-self-review']);
   assert.deepEqual(names.general, names.worker.filter(name => name !== 'projectman-worker'));
+  assert.deepEqual(names.kb, ['s8-self-review']);
   assert.deepEqual(names.manager, ['projectman', 'projectman-manager', 's8-operations', 's8-requirements', 's8-task-plan', 's8-plan-review']);
 });
 
@@ -118,5 +128,5 @@ test('every role replaces bash with one that hides secret environment values fro
   assert.ok(!output.includes('fixture-secret-value'));
   assert.ok(!output.includes('fixture-clinepass-secret'));
   // 매니저·워커·범용 확장 모두 이 bash를 등록한다.
-  for (const file of ['manager.ts', 'worker.ts', 'general.mjs']) assert.match(readFileSync(new URL(`../extensions/${file}`, import.meta.url), 'utf8'), /registerSecretFreeBash\(pi/);
+  for (const file of ['manager.ts', 'worker.ts', 'general.mjs', 'kb.mjs']) assert.match(readFileSync(new URL(`../extensions/${file}`, import.meta.url), 'utf8'), /registerSecretFreeBash\(pi/);
 });

@@ -5,8 +5,9 @@ import os from 'node:os';
 import { existsSync } from 'node:fs';
 import { access, chmod, constants, lstat, mkdir, readlink, realpath, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { MODES, loadProfile, resolveMode } from './profile.mjs';
-import { applyS8Config } from '../config/s8-config.mjs';
+import { applyS8Config, loadS8Config } from '../config/s8-config.mjs';
 
 /** 사용법 오류. 진입점이 종료 코드 2로 끝낸다. */
 export const usageError = message => Object.assign(new Error(message), { exitCode: 2 });
@@ -98,9 +99,10 @@ export function validatePiOptions(input) {
  * 프로필과 실행 옵션으로 Pi 실행 인자를 만든다. 자동 발견을 끄고 공통 provider와 프로필의 확장·스킬을 로드한다.
  * control: tmux 런타임 창에서 실행(세션 제어 확장이 Telegram을 맡는다). telegram: 단독 실행에서 Telegram 연결.
  */
-export function piArgs(root, profile, { sessionDir, telegram = false, control = false } = {}) {
+export function piArgs(root, profile, { sessionDir, telegram = false, control = false, appendSystemPrompt } = {}) {
   const extensions = [
     path.join(root, 'pi/node_modules/pi-clinepass-provider/src/index.ts'),
+    path.join(root, 'pi/node_modules/pi-opencode-bridge/index.ts'),
     ...profile.extensions,
   ];
   if (control) extensions.push(path.join(root, 'pi/extensions/managed-session.mjs'));
@@ -110,6 +112,7 @@ export function piArgs(root, profile, { sessionDir, telegram = false, control = 
     ...extensions.flatMap(file => ['--extension', file]),
     ...profile.skills.flatMap(directory => ['--skill', directory]),
     '--system-prompt', profile.systemPrompt,
+    ...(appendSystemPrompt ? ['--append-system-prompt', appendSystemPrompt] : []),
     '--tools', profile.tools.join(','),
     ...(sessionDir ? ['--session-dir', sessionDir] : []),
   ];
@@ -135,11 +138,27 @@ export async function runAgent(root, { mode, cwd, telegram = false, control = fa
   if (uid !== undefined && resolved !== 'worker') throw usageError('--uid는 worker 모드에서만 사용합니다.');
   if (uid !== undefined && !/^[\w-]{1,100}$/.test(uid)) throw usageError(`잘못된 UID입니다: ${uid}`);
   const profile = loadProfile(resolved, root);
+  let harness, appendSystemPrompt;
+  if (resolved === 'kb') {
+    const config = loadS8Config(root).kbAgent;
+    // --cwd가 고객 폴더를 가리켜도 매뉴얼과 키트 정본은 고정된 경로로 참조한다.
+    harness = await realpath(config.harnessRoot).catch(() => { throw usageError('KB 매뉴얼 경로를 찾을 수 없습니다. config.yml의 kbAgent.harnessRoot를 확인하세요.'); });
+    const kit = await realpath(config.kitRoot).catch(() => { throw usageError('KB 키트 경로를 찾을 수 없습니다. config.yml의 kbAgent.kitRoot를 확인하세요.'); });
+    for (const file of ['README.md', 'PLAN.md', 'SETUP_COMMON_codex.md', 'AGENT_SETUP_pi.md']) {
+      await access(path.join(harness, file), constants.R_OK).catch(() => { throw usageError(`KB 매뉴얼 파일을 읽을 수 없습니다: ${file}`); });
+    }
+    const ingest = path.join(kit, 'skills/ingest');
+    await access(path.join(ingest, 'SKILL.md'), constants.R_OK).catch(() => { throw usageError('KB 키트의 skills/ingest/SKILL.md를 읽을 수 없습니다. kbAgent.kitRoot를 확인하세요.'); });
+    profile.skills.push(ingest);
+    appendSystemPrompt = `KB 구축 참조 경로(JSON, 고객 작업 위치와 별개): ${JSON.stringify({ harnessRoot: harness, kitRoot: kit })}\n작업 전에 harnessRoot의 README.md와 PLAN.md를 read로 읽고, 업무에 필요한 매뉴얼과 kitRoot의 정본을 참조한다.`;
+  }
   if (profile.loadEnv || telegram || control) loadEnv(root);
   // s8 런타임이 전달한 호출 위치(--cwd)는 매니저의 기본 KB 경로보다 우선한다.
   const workDir = cwd !== undefined ? await realpath(cwd)
+    : profile.workDir === 'harness' ? harness
     : profile.workDir === 'kb' ? await kbRoot(root) : await realpath(process.cwd());
   const { configRoot, agentDir, binary } = await preparePiEnvironment(root);
+  if (resolved === 'kb') sessionDir ??= path.join(agentDir, 'kb', createHash('sha256').update(workDir).digest('hex').slice(0, 16));
   await linkSharedSettings(agentDir, configRoot);
   if (sessionDir && path.relative(agentDir, path.resolve(sessionDir)).startsWith('..')) throw usageError('--session-dir는 .pi-runtime 아래여야 합니다.');
   Object.assign(process.env, { PI_TELEMETRY: '0', S8_PI_RESTART_DIR: agentDir, S8_AGENT_MODE: resolved });
@@ -152,7 +171,7 @@ export async function runAgent(root, { mode, cwd, telegram = false, control = fa
   let current, stopping = false;
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => { stopping = true; current?.kill('SIGTERM'); });
   const restartFile = path.join(agentDir, `restart-${process.pid}`);
-  const base = piArgs(root, profile, { sessionDir, telegram, control });
+  const base = piArgs(root, profile, { sessionDir, telegram, control, appendSystemPrompt });
   // --uid가 있으면 첫 실행에 작업 지시를 넣는다. /restart 재개(--continue)에는 다시 넣지 않는다.
   let extra = uid ? [`uid ${uid} 의 업무를 수행해라.`] : [];
   while (true) {

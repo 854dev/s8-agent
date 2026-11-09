@@ -17,6 +17,7 @@ dev_854/
 - [설정 파일](#설정-파일)
 - [실행 스크립트](#실행-스크립트)
 - [에이전트 모드](#에이전트-모드)
+- [KB 전문 에이전트](#kb-전문-에이전트)
 - [개발 흐름](#개발-흐름)
 - [상주 워커](#상주-워커)
 - [인프라와 웹 콘솔](#인프라와-웹-콘솔)
@@ -105,6 +106,7 @@ alias s8='"/path/to/s8-agent/s8.sh"'
 | `start-general-agent.sh` | 범용 에이전트 하나를 이 터미널에서 실행 |
 | `start-manager-agent.sh` | 매니저 에이전트 하나를 이 터미널에서 실행 |
 | `start-worker-agent.sh` | 워커 에이전트 하나를 이 터미널에서 실행 |
+| `start-kb-agent.sh` | KB 구축 전문 에이전트 하나를 이 터미널에서 실행 |
 | `s8.sh` | tmux 런타임(매니저·스케줄러·상주 워커) 시작과 작업 실행 명령 |
 | `start-infra.sh` | `s8-infra` 세션(라우터·KB Browser·frontend·콘솔 API·웹 터미널·PH-CMS) 재시작 |
 
@@ -154,6 +156,7 @@ alias s8='"/path/to/s8-agent/s8.sh"'
 | --- | --- | --- | --- |
 | 범용 | 실행 위치(`--cwd`) | read, bash, edit, write, grep, find, ls | `projectman`, `ponytail`, `test-driven-development`, `systematic-debugging`, `verification-before-completion`, `s8-self-review` |
 | 매니저 | `s8` 호출 위치(`--cwd`), 단독 실행 기본값은 `kbRoot` | projectman, kb, scheduler, run_worker, set_worker_mode, read, bash, edit, write, grep, find, ls | `projectman`, `projectman-manager`, `s8-requirements`, `s8-task-plan`, `s8-plan-review`, `s8-operations` |
+| KB 전문 | `kbAgent.harnessRoot` 또는 `--cwd` | agent_message, read, bash, edit, write, grep, find, ls | 정본 `ingest`, `s8-self-review` |
 | 워커 | 작업 디렉터리 | projectman, read, bash, edit, write, grep, find, ls | 범용 스킬 + `projectman-worker` |
 
 - Projectman 사용법은 [공통](pi/skills/projectman/SKILL.md)·[매니저](pi/skills/projectman-manager/SKILL.md)·[워커](pi/skills/projectman-worker/SKILL.md) 스킬로 관리한다. 시스템 프롬프트는 역할·자율성·협업 원칙을 정하고 도구 사용법은 해당 스킬을 참고한다. 범용은 공통, 매니저와 워커는 공통·역할별 스킬을 프로필에서 로드한다. 스킬을 제공해도 범용에 Projectman 도구·인증이 추가되지는 않는다. 변경한 스킬·시스템 프롬프트는 해당 Pi 프로세스를 재시작하면 적용된다.
@@ -163,6 +166,50 @@ alias s8='"/path/to/s8-agent/s8.sh"'
 - 모든 모드의 bash에는 토큰·비밀번호 환경변수를 넘기지 않는다. 같은 사용자 권한으로 실행되므로 완전한 격리는 아니다.
 - 외부 스킬은 `pi/skills/vendor/`에 원본 그대로 두고 출처·버전은 `SOURCE.md`, 라이선스는 `LICENSE`에 있다. S8 규칙과 다른 지시(사람에게 묻기, 커밋 등)는 역할 `SYSTEM.md`가 우선한다.
 - `/restart`로 종료하면 최근 대화로 다시 시작한다.
+
+## KB 전문 에이전트
+
+`start-kb-agent.sh`는 고객 KB 환경 조사·규칙과 변환 도구 설치·시범 자료 반영·검증·인수인계를 담당한다. 역할은 `agents/kb/`, 수행 매뉴얼은 외부 `kb-harness/`, 규칙·ingest·변환기 정본은 기존 `kb-proposal-kit/`에 둔다. 실행기는 정본 ingest를 직접 로드하고, 매뉴얼 경로를 시스템 지침에 전달한다. 고객 작업 경로를 바꿔도 참조 경로는 유지한다.
+
+`config.yml`에서 다음 경로를 지정할 수 있다. 생략하면 `harnessRoot`는 `~/dev_854/kb-harness`, `kitRoot`는 `<kbRoot>/p5 - multiplez ai/제안서-작성용-하네스/kb-proposal-kit`, `tokenFile`은 `~/.config/s8/comm-kb-harness.json`이다.
+
+```yaml
+kbAgent:
+  harnessRoot: ~/dev_854/kb-harness
+  kitRoot: /path/to/kb-proposal-kit
+  tokenFile: ~/.config/s8/comm-kb-harness.json
+```
+
+```bash
+./start-kb-agent.sh                            # 매뉴얼 디렉터리에서 시작
+./start-kb-agent.sh --cwd /path/to/customer     # 고객 작업 디렉터리에서 시작
+./start-kb-agent.sh --cwd /path/to/customer --continue
+```
+
+시작 시 매뉴얼 필수 파일과 ingest 존재 여부를 확인한다. 대화 이력은 `.pi-runtime/kb/<작업경로 해시>/`에 보관하므로 역할·고객 작업 경로별로 분리된다. 인증과 모델 설정은 기존 Pi 설정을 공유한다. 모델을 통해 실제 고객 자료를 변환하거나 고객 환경의 설치를 검증한 것인지는 각 작업 결과로 따로 확인한다.
+
+매니저와 연결하려면 [에이전트 메시지 통신](#에이전트-메시지-통신)의 comm-center 설정을 완료한 뒤 KB 전용 worker 토큰을 발급한다. 아래 등록부 경로는 사용 중인 comm-center의 등록부 경로와 맞춘다.
+
+```bash
+npm run issue --prefix apps/comm-center -- ~/.config/s8/comm-center-agents.json kb-harness worker ~/.config/s8/comm-kb-harness.json
+```
+
+등록 후 comm-center를 재시작하고 `communication.enabled`·`communication.url`·매니저의 `communication.tokenFile`을 설정한다. KB 에이전트는 같은 주소에 `kbAgent.tokenFile`로 연결하므로 매니저와 토큰을 공유하지 않는다. 실행 명령에 기존 `S8_COMM_TOKEN_FILE`을 지정하면 해당 경로가 우선한다. 통신이 비활성화된 경우 로컬 작업은 가능하며 시작 화면에 안내한다.
+
+매니저는 `agent_message`의 `list`에서 `kb-harness`의 연결을 확인하고 다음과 같이 요청한다.
+
+```json
+{"action":"request","to":["kb-harness"],"text":"/path/to/customer의 시험 자료 10건을 대상으로 KB 구축 상태를 조사해라. 원본은 보존하고, 변환 결과·출처 답변 검증·미검증 항목을 보고해라."}
+```
+
+이 역할은 메시지 요청을 수행하며 Projectman UID claim이나 ready 작업 자동 수집을 하지 않는다. Projectman 작업 기록과 개발 워커 배정은 매니저가 맡는다. 자동 기동은 추가하지 않았으므로 별도 터미널에서 실행한다. 터미널을 닫아도 유지하려면 별도 tmux 서버를 사용할 수 있다.
+
+```bash
+tmux -L s8-kb new-session -d -s kb-harness 'exec bash /path/to/s8-agent/start-kb-agent.sh'
+tmux -L s8-kb attach-session -t kb-harness
+```
+
+위 `/path/to/s8-agent`는 실제 저장소 경로로 바꾼다. 별도 tmux 서버는 기본 S8 웹 터미널 목록에 표시되지 않으며 위 attach 명령으로 접속한다. 기본 tmux 서버에 띄운 KB 세션은 `s8.sh --reset` 실행 시 종료된다.
 
 ## 개발 흐름
 
@@ -374,7 +421,7 @@ curl -fsS http://127.0.0.1:4178/s8/
 
 ```text
 s8-agent/
-├── agents/{general,manager,worker}/  # 모드별 profile.json·SYSTEM.md
+├── agents/{general,manager,worker,kb}/  # 모드별 profile.json·SYSTEM.md
 ├── apps/
 │   ├── kb-browser/          # 지식베이스·업로드 API
 │   ├── terminal-gateway/    # 호스트 PTY·tmux 웹 터미널
@@ -421,7 +468,7 @@ s8-agent/
 
 ## 에이전트 메시지 통신
 
-실행 중인 매니저·워커 Pi 세션이 `apps/comm-center`를 거쳐 텍스트를 주고받는다. 매니저와 워커는 같은 클라이언트이고, 정체성과 역할은 comm-center 등록부가 토큰으로 정한다. 워커 간 대화는 매니저가 중개한다. 원격 작업 실행·워커 모드 변경·파일 전송·에이전트 자동 생성은 지원하지 않는다. 로컬 Projectman 작업과 상주 워커 관리는 기존 실행기로 처리한다.
+실행 중인 매니저·워커·KB 전문 Pi 세션이 `apps/comm-center`를 거쳐 텍스트를 주고받는다. 매니저와 워커는 같은 클라이언트이고, 정체성과 역할은 comm-center 등록부가 토큰으로 정한다. 워커 간 대화는 매니저가 중개한다. 원격 작업 실행·워커 모드 변경·파일 전송·에이전트 자동 생성은 지원하지 않는다. 로컬 Projectman 작업과 상주 워커 관리는 기존 실행기로 처리한다.
 
 ```text
 매니저 Pi ─┐
@@ -458,7 +505,7 @@ Pi는 `apps/comm-center/client.mjs`를 경로로 불러오며 Node 내장 WebSoc
 
 ### 실행과 대화
 
-설정이 있으면 매니저·워커 에이전트가 시작할 때 연결한다.
+설정이 있으면 매니저·워커·KB 전문 에이전트가 시작할 때 연결한다.
 
 ```bash
 ./start-manager-agent.sh
@@ -499,6 +546,15 @@ npm ci --ignore-scripts --prefix pi
 
 키는 모델 통신에 사용되며 에이전트의 bash 도구 환경에서는 제거된다. 다른 장비에서는 각 장비에 키를 따로 설정한다.
 
+[pi-opencode-bridge](https://pi.dev/packages/pi-opencode-bridge) `0.2.1`도 공통 의존성으로 설치되어 모든 에이전트에서 로드된다. OpenCode 모델 목록이 없는 장비에서는 먼저 다음 명령으로 목록을 준비한다. 기존 OpenCode 캐시가 있으면 덮어쓰지 않는다.
+
+```bash
+mkdir -p ~/.cache/opencode
+test -e ~/.cache/opencode/models.json || curl -fsSL https://models.dev/api.json -o ~/.cache/opencode/models.json
+```
+
+에이전트를 시작해 `/opencode-go-key`를 입력하고 표시되는 입력창에 OpenCode Go API 키를 넣는다. 키는 OpenCode와 Pi의 홈 디렉터리 인증 파일에 저장된다. `/opencode-status`로 저장 여부를 확인하고 `/model`에서 `oc-sdk-go` 모델을 선택한다. 새 모델이 추가되면 캐시를 갱신하거나 OpenCode CLI로 갱신한 후 에이전트를 재시작한다. 이 상태 확인은 API 키의 유효성이나 구독 권한을 검증하지 않는다.
+
 선택 Pi 패키지는 아래처럼 설치한다. 자동 발견을 끄므로 설치해도 도구가 자동으로 늘지 않는다. MCP를 쓰려면 구현 하나를 골라 프로필의 확장과 도구 목록을 함께 고친다.
 
 ```bash
@@ -519,7 +575,7 @@ npm test --prefix apps/kb-browser
 npm run test:run --prefix frontend
 npm run lint --prefix frontend
 npm run build --prefix frontend
-bash -n start-general-agent.sh start-manager-agent.sh start-worker-agent.sh s8.sh start-infra.sh
+bash -n start-general-agent.sh start-manager-agent.sh start-worker-agent.sh start-kb-agent.sh s8.sh start-infra.sh
 git diff --check
 ```
 
