@@ -11,7 +11,7 @@
     "npm:pi-mcp-extension@1.5.0"
   ],
   "lastChangelogVersion": "1.4.0",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-6.1-sol",
+  "defaultProvider": "clinepass",
+  "defaultModel": "cline-pass/deepseek-v4-pro",
   "theme": "dark"
 }
