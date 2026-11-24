@@ -355,13 +355,29 @@ test('oversized, duplicate and failing attachments report a usable answer', asyn
   assert.ok(files.some(name => /-2\.md$/.test(name)), files.join(','));
 });
 
+test('two same-date attachments saved concurrently do not overwrite each other', async t => {
+  const dir = await inbox();
+  const { sent, fetchImpl } = mediaTransport();
+  const bot = new Bot({ token: 'fake', users: new Set(['123']), groups: new Set(), fetchImpl, inboxDir: dir,
+    spawnPi: () => { throw new Error('Pi must not start for an attachment-only message'); } });
+  t.after(() => bot.stop());
+  const seconds = 1764000000;
+  await Promise.all([
+    bot.route({ message: photoMessage(123, seconds) }),
+    bot.route({ message: photoMessage(123, seconds) }),
+  ]);
+  const files = (await readdir(dir)).sort();
+  assert.equal(files.length, 2, files.join(','));
+  assert.ok(files.some(name => /-2\.jpg$/.test(name)), files.join(','));
+});
+
 test('an attachment with a caption is saved and the caption still reaches Pi', async t => {
   const dir = await inbox();
   const { sent, fetchImpl } = mediaTransport({ filePath: 'documents/report.pdf' });
   const { pi, commands } = fake();
   const bot = new Bot({ token: 'fake', users: new Set(['123']), groups: new Set(), fetchImpl, inboxDir: dir, spawnPi: () => pi });
   t.after(() => bot.stop());
-  await bot.route({ message: photoMessage(123, 1764000000, { text: '정리해줘' }) });
+  await bot.route({ message: photoMessage(123, 1764000000, { caption: '정리해줘' }) });
   assert.match((await readdir(dir))[0], /텔레그램 사진\.jpg$/);
   assert.ok(sent.some(item => item.text === '정리해줘') === false); // caption is not echoed as a chat message
   const prompted = commands.find(command => command.type === 'prompt').message;

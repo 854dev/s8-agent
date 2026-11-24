@@ -1,9 +1,10 @@
 import net from 'node:net';
+import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { Bot, Gateway, sessionKey, tokenUsage } from '../../apps/telegram-gateway/gateway.mjs';
+import { attachmentFile, Bot, Gateway, messageText, saveAttachment, sessionKey, tokenUsage } from '../../apps/telegram-gateway/gateway.mjs';
 import { agentRoot, loadTelegramConfig } from '../lib/config/s8-config.mjs';
 import { queuePiRuntimeRestart } from '../lib/runtime/restart.mjs';
 import { telegramOwner } from '../lib/telegram/status.mjs';
@@ -63,7 +64,7 @@ export function ownership({ port, key, onAcquire, onRelease, interval = 1000, st
   return () => { stopped = true; clearInterval(timer); release(); };
 }
 
-export function attach(pi, { port = 39485, config = process.env, fetchImpl = fetch, autoStart = true, mode = 'project', settings, session = 'Pi', persist = () => {}, restartAllImpl = requestFullRestart } = {}) {
+export function attach(pi, { port = 39485, config = process.env, fetchImpl = fetch, autoStart = true, mode = 'project', settings, session = 'Pi', persist = () => {}, restartAllImpl = requestFullRestart, inboxDir } = {}) {
   let started = process.hrtime.bigint();
   let stopOwner, gateway, telegramPrompt = false, context, enabled = autoStart;
   pi.registerCommand('telegram-new', { description: 'Telegram에서 새 대화를 시작합니다', handler: async (_args, ctx) => { await ctx.newSession(); } });
@@ -88,12 +89,12 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
         users = new Set(current.allowedUserIds); groups = new Set(current.allowedGroupIds);
         if (!users.size && !groups.size) { releaseOwner(); return; }
       } catch (error) { console.error(error.message); releaseOwner(); return; }
-      const currentBot = new Bot({ token, users, groups, fetchImpl, spawnPi: () => { throw new Error('not used'); } });
+      const currentBot = new Bot({ token, users, groups, fetchImpl, inboxDir, spawnPi: () => { throw new Error('not used'); } });
       bot = currentBot;
       currentBot.route = async update => {
         const message = update.message;
         const key = sessionKey(message, users, groups);
-        if (currentBot.closed || key === null || !message.text.trim()) return;
+        if (currentBot.closed || key === null) return;
         if (selected && selected !== key) return; // Do not leak one chat's shared CLI conversation to another.
         if (!selected) {
           selected = key;
@@ -141,11 +142,26 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
             },
           });
           await gateway.start();
-          await gateway.showMenu();
+          await gateway.showMenu().catch(() => {});
         }
         if (currentBot.closed || !gateway) return;
+        const text = messageText(message);
+        let prompt = text;
+        if (attachmentFile(message)) {
+          try {
+            const saved = await saveAttachment({ token, fetchImpl, message, inboxDir: currentBot.inboxDir });
+            const shown = `${path.basename(currentBot.inboxDir)}/${saved.name}`;
+            await gateway.send(`첨부를 저장했습니다: ${shown} (${Math.max(1, Math.round(saved.bytes / 1024))}KB)\n필요하면 이 파일을 가리켜 정리를 부탁하세요.`).catch(() => {});
+            prompt = `첨부 저장: ${shown}\n${text}`;
+          } catch (error) {
+            console.error('Telegram attachment failed:', error.message);
+            await gateway.send(error.message === 'too-big' ? '첨부가 20MB를 넘어 저장하지 못했습니다.' : '첨부를 저장하지 못했습니다.').catch(() => {});
+          }
+          if (!text.trim()) return;
+        }
+        if (!prompt.trim()) return;
         const active = gateway;
-        active.inbound = active.inbound.then(() => active.incoming(message));
+        active.inbound = active.inbound.then(() => active.incoming({ ...message, text: prompt }));
         await active.inbound;
       };
       void currentBot.run().catch(error => {

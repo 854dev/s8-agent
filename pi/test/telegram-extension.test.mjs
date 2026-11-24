@@ -2,6 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import net from 'node:net';
+import { mkdtemp } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { attach } from '../extensions/telegram.mjs';
 
 const waitFor = async predicate => {
@@ -84,6 +87,70 @@ test('authorized restart all hands chat and topic to the detached controller aft
   pi.emit('session_start', null, { mode: 'tui', isIdle: () => true, sessionManager: { getBranch: () => [] } });
   await waitFor(() => requests.length === 1);
   assert.deepEqual(requests, [{ chat: -100, thread: 7 }]);
+});
+
+test('image attachment without text does not crash the polling owner', async t => {
+  const socket = net.createServer();
+  await new Promise(resolve => socket.listen(0, '127.0.0.1', resolve));
+  const { port } = socket.address();
+  await new Promise(resolve => socket.close(resolve));
+  const pi = new EventEmitter();
+  pi.registerCommand = () => {};
+  pi.sendUserMessage = () => assert.fail('An image-only message must not prompt the model');
+  const sent = [];
+  let updates = 0;
+  const fetchImpl = async (url, options) => {
+    const method = url.split('/').at(-1);
+    const body = JSON.parse(options.body);
+    if (method === 'getUpdates') {
+      if (updates++ === 0) return { ok: true, json: async () => ({ ok: true, result: [] }) };
+      if (updates === 2) return { ok: true, json: async () => ({ ok: true, result: [
+        { update_id: 1, message: { photo: [{ file_id: 'small' }, { file_id: 'large' }], chat: { type: 'private', id: 123 }, from: { id: 123 } } },
+      ] }) };
+      return new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new Error('stopped')), { once: true }));
+    }
+    sent.push({ method, ...body });
+    // getFile without file_path makes the download fail before touching the real inbox.
+    if (method === 'getFile') return { ok: true, json: async () => ({ ok: true, result: { file_id: body.file_id } }) };
+    return { ok: true, json: async () => ({ ok: true, result: { message_id: sent.length } }) };
+  };
+  attach(pi, { port, config: { TELEGRAM_BOT_TOKEN: 'test-token' }, settings: { allowedUserIds: ['123'], allowedGroupIds: [] }, fetchImpl });
+  t.after(() => pi.emit('session_shutdown'));
+  pi.emit('session_start', null, { mode: 'tui', isIdle: () => true, abort() {}, sessionManager: { getBranch: () => [] } });
+  await waitFor(() => sent.some(item => item.text === '첨부를 저장하지 못했습니다.'));
+  assert.ok(sent.some(item => item.text === 's8 메뉴'));
+});
+
+test('image attachment with a caption saves and forwards the path to the model', async t => {
+  const socket = net.createServer();
+  await new Promise(resolve => socket.listen(0, '127.0.0.1', resolve));
+  const { port } = socket.address();
+  await new Promise(resolve => socket.close(resolve));
+  const dir = path.join(await mkdtemp(path.join(os.tmpdir(), 's8-tg-')), 'raw');
+  const pi = new EventEmitter();
+  pi.registerCommand = () => {};
+  const prompts = [];
+  pi.sendUserMessage = text => prompts.push(text);
+  let updates = 0;
+  const fetchImpl = async (url, options) => {
+    if (url.includes('/file/bot')) return { ok: true, status: 200, arrayBuffer: async () => Buffer.from('photo-bytes') };
+    const method = url.split('/').at(-1);
+    const body = JSON.parse(options.body);
+    if (method === 'getUpdates') {
+      if (updates++ === 0) return { ok: true, json: async () => ({ ok: true, result: [] }) };
+      if (updates === 2) return { ok: true, json: async () => ({ ok: true, result: [
+        { update_id: 1, message: { photo: [{ file_id: 'small' }, { file_id: 'large' }], caption: '정리해줘', chat: { type: 'private', id: 123 }, from: { id: 123 } } },
+      ] }) };
+      return new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new Error('stopped')), { once: true }));
+    }
+    const result = method === 'getFile' ? { file_path: 'documents/file_1.jpg', file_size: 11 } : { message_id: 1 };
+    return { ok: true, json: async () => ({ ok: true, result }) };
+  };
+  attach(pi, { port, config: { TELEGRAM_BOT_TOKEN: 'test-token' }, settings: { allowedUserIds: ['123'], allowedGroupIds: [] }, fetchImpl, inboxDir: dir });
+  t.after(() => pi.emit('session_shutdown'));
+  pi.emit('session_start', null, { mode: 'tui', isIdle: () => true, abort() {}, sessionManager: { getBranch: () => [] } });
+  await waitFor(() => prompts.length === 1);
+  assert.match(prompts[0], /^첨부 저장: raw\/.+\.jpg\n정리해줘$/);
 });
 
 test('older session can take ownership; off restores the waiting session and persists', async t => {

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { StringDecoder } from 'node:string_decoder';
 import { controlSchedules } from '../../pi/lib/scheduler/control.mjs';
 import { loadS8Config, loadTelegramConfig } from '../../pi/lib/config/s8-config.mjs';
@@ -63,6 +63,10 @@ export function sessionKey(message, users, groups) {
 // Bot API getFile download ceiling.
 const MAX_ATTACHMENT = 20 * 1024 * 1024;
 
+/** 텔레그램 메시지의 일반 텍스트 또는 미디어 캡션을 돌려준다. */
+export const messageText = message =>
+  typeof message?.text === 'string' ? message.text : typeof message?.caption === 'string' ? message.caption : '';
+
 /** 텔레그램 메시지의 사진·문서를 원본 후보로 바꾼다. 그 밖의 형식은 받지 않는다. */
 export function attachmentFile(message) {
   const photo = Array.isArray(message?.photo) ? message.photo.at(-1) : null;
@@ -91,14 +95,6 @@ export function attachmentName(file, seconds, remotePath = '') {
   return `${day(seconds)} ${stem}${ext}`;
 }
 
-async function unusedPath(dir, name) {
-  for (let attempt = 1; attempt < 100; attempt++) {
-    const target = path.join(dir, attempt === 1 ? name : name.replace(/(\.[^.]*)?$/, `-${attempt}$1`));
-    try { await stat(target); } catch { return target; }
-  }
-  throw new Error('첨부 파일 이름을 정하지 못했습니다');
-}
-
 /** 첨부를 받아 원본 폴더에 저장한다. 저장한 파일 이름과 크기를 돌려준다. */
 export async function saveAttachment({ token, fetchImpl = fetch, message, inboxDir }) {
   const file = attachmentFile(message);
@@ -111,8 +107,19 @@ export async function saveAttachment({ token, fetchImpl = fetch, message, inboxD
   if (!response.ok) throw new Error(`파일 내려받기 실패 (${response.status})`);
   const body = Buffer.from(await response.arrayBuffer());
   await mkdir(inboxDir, { recursive: true });
-  const target = await unusedPath(inboxDir, attachmentName(file, message.date, info.file_path));
-  await writeFile(target, body);
+  const base = attachmentName(file, message.date, info.file_path);
+  let target;
+  for (let attempt = 1; attempt < 100; attempt++) {
+    const candidate = path.join(inboxDir, attempt === 1 ? base : base.replace(/(\.[^.]*)?$/, `-${attempt}$1`));
+    try {
+      await writeFile(candidate, body, { flag: 'wx' }); // 동시 첨부가 같은 이름을 덮어쓰지 않도록 원자적으로 만든다.
+      target = candidate;
+      break;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+  }
+  if (!target) throw new Error('첨부 파일 이름을 정하지 못했습니다');
   return { name: path.basename(target), bytes: body.length };
 }
 
@@ -406,7 +413,7 @@ export class Bot {
     const message = update.message;
     const key = sessionKey(message, this.users, this.groups);
     if (key === null) return;
-    const text = typeof message.text === 'string' ? message.text : '';
+    const text = messageText(message);
     let prompt = text;
     if (attachmentFile(message)) {
       try {
