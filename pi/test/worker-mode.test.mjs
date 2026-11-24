@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
@@ -11,14 +11,15 @@ import { startWork, WORK_SESSION } from '../lib/agent/work.mjs';
 import { reportForServer, flushDevelopmentOutbox } from '../lib/development/outbox.mjs';
 import { finishStoppedRun } from '../lib/agent/finish.mjs';
 import worker from '../extensions/worker.ts';
+import { runBounded, tmuxSocketPath } from './helpers/run-bounded.mjs';
 
 const exec = promisify(execFile);
 const until = async check => { for (let i = 0; i < 100; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 20)); } assert.fail('condition timeout'); };
 
 /** 요청 ID로 멱등 처리하는 Projectman 가짜 클라이언트. loseNext면 다음 변경을 반영한 뒤 응답만 잃는다. */
-async function fixture(t, { type = 'task', state = 'ready', commandNames = [], repoPath, uids = ['task1'] } = {}) {
+async function fixture(t, { type = 'task', state = 'ready', commandNames = [], repoPath, uids = ['task1'], rootCleanup = true } = {}) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 's8-worker-mode-')));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  if (rootCleanup) t.after(() => rm(root, { recursive: true, force: true }));
   const rows = new Map(uids.map(uid => [uid, { uid, title: `Fixture ${uid}`, state, workflow: { version: 2, revision: 2, planVersion: 1, planHash: 'p', confirmation: { planVersion: 1, planHash: 'p' }, specHash: 's', grant: { specHash: 's' }, spec: { plan: 'Do it', commandNames, repoPath, dependsOn: [] } } }]));
   const applied = new Map(), operations = [];
   const client = {
@@ -92,7 +93,7 @@ test('worker file and shell tools remain available before claim and after report
 
 /** git 저장소와 격리된 tmux 서버, 인자를 기록하는 가짜 start-worker-agent.sh를 갖춘 실행기 픽스처. */
 async function workFixture(t, options) {
-  const f = await fixture(t, { ...options, repoPath: undefined });
+  const f = await fixture(t, { ...options, repoPath: undefined, rootCleanup: false });
   const repo = path.join(f.root, 'repo');
   await mkdir(repo);
   await writeFile(path.join(repo, 'base.txt'), 'base');
@@ -101,8 +102,14 @@ async function workFixture(t, options) {
   const launches = path.join(f.root, 'launches');
   await writeFile(path.join(f.root, 'start-worker-agent.sh'), `echo "$S8_WORKER_ID $*" >> '${launches}'\nexec sleep 60\n`);
   const socket = `s8-work-${randomUUID()}`;
-  const run = args => exec('tmux', ['-f', '/dev/null', '-L', socket, ...args], { timeout: 5000 });
-  t.after(() => run(['kill-server']).catch(() => {}));
+  const run = args => runBounded('tmux', ['-f', '/dev/null', '-L', socket, ...args], { timeoutMs: 5000 });
+  t.after(async () => {
+    // 서버를 먼저 꺼야 cwd를 물고 있는 워커가 사라져 rm이 ENOTEMPTY로 실패하지 않는다.
+    const socketPath = await tmuxSocketPath(run, socket).catch(() => '');
+    await run(['kill-server']).catch(() => {});
+    if (socketPath) await unlink(socketPath).catch(() => {});
+    await rm(f.root, { recursive: true, force: true });
+  });
   const start = (uid = 'task1') => startWork(f.root, uid, { client: f.client, run, workerId: 'w1' });
   const launched = () => readFile(launches, 'utf8').then(text => text.trim().split('\n'), () => []);
   return { ...f, repo, run, start, launched };

@@ -1,7 +1,8 @@
 import net from 'node:net';
 
 // Query the local polling owner without loading credentials.
-export async function telegramOwner({ port = 39485 } = {}) {
+// S8_TELEGRAM_OWNER_PORT는 테스트가 실제 게이트웨이와 격리되도록 재정의할 수 있는 포트다.
+export async function telegramOwner({ port = Number(process.env.S8_TELEGRAM_OWNER_PORT) || 39485 } = {}) {
   return new Promise(resolve => {
     const socket = net.connect(port, '127.0.0.1');
     let data = '';

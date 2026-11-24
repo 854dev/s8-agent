@@ -50,7 +50,10 @@ export async function resetTmuxSessions(run, { keep = ['s8-infra'] } = {}) {
 export async function queuePiRuntimeRestart(root, options) {
   const id = randomUUID(), directory = path.join(root, '.s8-runtime/runtime-restarts', id);
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  await writeFile(path.join(directory, 'request.json'), JSON.stringify(options), { mode: 0o600 });
+  // 대기 중인 호출자가 쓰다 만 파일을 읽지 않도록 결과와 마찬가지로 임시 파일에 쓴 뒤 원자적으로 이름을 바꾼다.
+  const request = path.join(directory, 'request.json');
+  await writeFile(`${request}.tmp`, JSON.stringify(options), { mode: 0o600 });
+  await rename(`${request}.tmp`, request);
   const log = await open(path.join(directory, 'controller.log'), 'a', 0o600);
   try {
     const child = spawn(process.execPath, [path.join(root, 'pi/bin/pi-runtime-worker.mjs'), id], { cwd: root, detached: true, stdio: ['ignore', log.fd, log.fd] });

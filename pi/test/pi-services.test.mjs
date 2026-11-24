@@ -1,19 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, realpath, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { startPiServices } from '../lib/runtime/services.mjs';
-const exec = promisify(execFile);
+import { runBounded, tmuxSocketPath } from './helpers/run-bounded.mjs';
 const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
 async function fixture(t) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "s8-services-'")));
   const socket = `s8-test-${randomUUID()}`;
-  const run = args => exec('tmux', ['-L', socket, ...args], { timeout: 5000 });
-  t.after(async () => { await run(['kill-server']).catch(() => {}); await rm(root, { recursive: true, force: true }); });
+  const run = args => runBounded('tmux', ['-L', socket, ...args], { timeoutMs: 5000 });
+  t.after(async () => {
+    const socketPath = await tmuxSocketPath(run, socket).catch(() => '');
+    await run(['kill-server']).catch(() => {});
+    if (socketPath) await unlink(socketPath).catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  });
   // Each actual tmux service executes a harmless isolated stub, never real work.
   await writeFile(path.join(root, 'config.yml'), 'telegram: {}\n');
   await writeFile(path.join(root, 's8.sh'), `#!/bin/sh\ntest "$1" = service || exit 2\nprintf '%s\\n' "$2" >> ${quote(path.join(root, 'starts'))}\nexec sleep 60\n`);

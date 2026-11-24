@@ -72,7 +72,11 @@ function createPrompt() {
   const lines = rl[Symbol.asyncIterator]();
   return {
     async ask(text) { process.stdout.write(text); return ((await lines.next()).value ?? '').trim(); },
-    close: () => rl.close(),
+    close: () => {
+      rl.close();
+      // TTY stdin은 readline이 닫혀도 이벤트 루프를 물고 있을 수 있어 명시적으로 끊는다.
+      try { process.stdin.pause(); process.stdin.destroy(); } catch { /* 이미 닫혔으면 무시 */ }
+    },
   };
 }
 

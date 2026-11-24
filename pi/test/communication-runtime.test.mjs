@@ -5,13 +5,14 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { cp, copyFile, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, copyFile, mkdir, mkdtemp, readdir, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { connectCommCenter } from '../../apps/comm-center/client.mjs';
 import { issueToken, readTokenFile } from '../../apps/comm-center/registry.mjs';
+import { runBounded, tmuxSocketPath } from './helpers/run-bounded.mjs';
 
 const exec = promisify(execFile);
 const AGENTS = ['a', 'b', 'kb-harness'];
@@ -69,8 +70,12 @@ async function fixture(t) {
     await writeFile(tmuxConfig, 'set -g default-shell /bin/sh\nset -g default-command /bin/sh\n');
     await mkdir(path.join(root, 'tools'), { recursive: true });
     await writeFile(path.join(root, 'tools/tmux'), `#!/bin/sh\nexec ${quote(tmuxBinary)} -f ${quote(tmuxConfig)} -L ${quote(socket)} "$@"\n`, { mode: 0o755 });
-    cleanup.push(() => exec(tmuxBinary, ['-L', socket, 'kill-server']));
-    return (args, env = {}) => exec(path.join(root, 'tools/tmux'), args, { env: { PATH: `${root}/tools:${path.dirname(nodeBinary)}:/usr/bin:/bin`, TERM: 'xterm-256color', LANG: 'C.UTF-8', ...env }, timeout: 10_000 });
+    cleanup.push(async () => {
+      const socketPath = await tmuxSocketPath(args => runBounded(tmuxBinary, ['-L', socket, ...args]), socket).catch(() => '');
+      await runBounded(tmuxBinary, ['-L', socket, 'kill-server']).catch(() => {});
+      if (socketPath) await unlink(socketPath).catch(() => {});
+    });
+    return (args, env = {}) => runBounded(path.join(root, 'tools/tmux'), args, { env: { PATH: `${root}/tools:${path.dirname(nodeBinary)}:/usr/bin:/bin`, TERM: 'xterm-256color', LANG: 'C.UTF-8', ...env }, timeoutMs: 10_000 });
   };
 
   // comm-center runs from its own directory through the real entry point.

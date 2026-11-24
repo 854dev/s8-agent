@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, realpath, mkdir, copyFile, writeFile, readFile, readdir, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, realpath, mkdir, copyFile, writeFile, readFile, readdir, rm, symlink, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import net from 'node:net';
+import { runBounded, tmuxSocketPath } from './helpers/run-bounded.mjs';
 const exec = promisify(execFile);
 const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
 
@@ -14,8 +15,13 @@ async function fixture(t) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "s8 runtime-'")));
   const socket = `s8-runtime-${randomUUID()}`;
   const tmux = (await exec('which', ['tmux'])).stdout.trim();
-  const run = args => exec(tmux, ['-f', '/dev/null', '-L', socket, ...args], { timeout: 5000 });
-  t.after(async () => { await run(['kill-server']).catch(() => {}); await rm(root, { recursive: true, force: true }); });
+  const run = args => runBounded(tmux, ['-f', '/dev/null', '-L', socket, ...args], { timeoutMs: 5000 });
+  t.after(async () => {
+    const socketPath = await tmuxSocketPath(run, socket).catch(() => '');
+    await run(['kill-server']).catch(() => {});
+    if (socketPath) await unlink(socketPath).catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  });
   for (const directory of ['pi/bin', 'pi/lib', 'pi/node_modules/.bin', 'tools']) await mkdir(path.join(root, directory), { recursive: true });
   for (const file of ['start-general-agent.sh', 'start-manager-agent.sh', 's8.sh', 'agents/general/profile.json', 'agents/manager/profile.json']) {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
@@ -49,17 +55,39 @@ import('node:fs').then(async fs => {
   })).listen(socket);
 });
 `, { mode: 0o755 });
-  const launch = (args, cwd = root) => exec('bash', [path.join(root, 's8.sh'), '--mode', 'project', ...args], {
-    cwd,
-    env: { ...process.env, PATH: `${root}/tools:${process.env.PATH}`, TMUX: '' }, timeout: 12000,
+  const startCount = async () => {
+    try { return (await readFile(path.join(root, 'starts'), 'utf8')).trim().split('\n').filter(Boolean).length; }
+    catch (error) { if (error.code === 'ENOENT') return 0; throw error; }
+  };
+  // 실제 로컬 게이트웨이(39485)와 겹치지 않도록 밀폐된 텔레그램 소유자 포트를 골라둔다.
+  const telegramPort = await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close(error => error ? reject(error) : resolve(port));
+    });
   });
+  const launch = async (args, cwd = root) => {
+    const before = await startCount();
+    const result = await exec('bash', [path.join(root, 's8.sh'), '--mode', 'project', ...args], {
+      cwd,
+      env: { ...process.env, PATH: `${root}/tools:${process.env.PATH}`, TMUX: '', S8_TELEGRAM_OWNER_PORT: String(telegramPort) }, timeout: 12000,
+    });
+    // controller가 준비를 알린 직후 파이(가상)가 starts에 한 줄을 남기기까지 짧은 간격이 있다. 빠른 장비에서 빨리 읽어 ENOENT가 나지 않도록 기록을 기다린다.
+    if (/tmux 세션:/.test(result.stdout)) {
+      const end = Date.now() + 5000;
+      while (Date.now() < end && await startCount() <= before) await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    return result;
+  };
   // project 모드는 s8-infra 세션의 서비스 창이 실행 중이어야 시작한다(start-infra.sh 대역).
   const infra = async () => {
     await run(['new-session', '-d', '-s', 's8-infra', '-n', 'router', 'sleep 600']);
     for (const name of ['kb-browser', 'frontend', 'projectman-console', 'terminal-gateway']) await run(['new-window', '-d', '-t', '=s8-infra:', '-n', name, 'sleep 600']);
   };
   await infra();
-  return { root, run, launch, infra };
+  return { root, run, launch, infra, telegramPort };
 }
 
 test('both runtime modes use the caller directory and honor an explicit cwd', async t => {
@@ -266,6 +294,8 @@ p = subprocess.Popen(['bash', sys.argv[1]], stdin=slave, stdout=slave, stderr=sl
 os.close(slave)
 os.write(master, sys.argv[2].encode())
 output = bytearray()
+marker = '접속:'.encode()
+done = False
 deadline = time.monotonic() + 20
 while time.monotonic() < deadline:
     if select.select([master], [], [], 0.1)[0]:
@@ -273,17 +303,23 @@ while time.monotonic() < deadline:
             data = os.read(master, 65536)
             if not data: break
             output.extend(data)
+            if marker in output:
+                done = True
+                break
         except OSError: break
     if p.poll() is not None: break
 if p.poll() is None:
     p.kill()
-    raise RuntimeError('interactive launch timed out')
+    p.wait()
 os.close(master)
 sys.stdout.buffer.write(output)
-sys.exit(p.wait())
+if done:
+    sys.exit(0)
+code = p.returncode
+sys.exit(code if code is not None and code >= 0 else 1)
 `;
   const interactive = input => exec('python3', ['-c', script, path.join(f.root, 's8.sh'), input], {
-    cwd: f.root, env: { ...process.env, PATH: `${f.root}/tools:${process.env.PATH}`, TMUX: '' }, timeout: 25000,
+    cwd: f.root, env: { ...process.env, PATH: `${f.root}/tools:${process.env.PATH}`, TMUX: '', S8_TELEGRAM_OWNER_PORT: String(f.telegramPort) }, timeout: 25000,
   });
   await f.run(['new-session', '-d', '-s', 'personal', 'sleep 60']);
   const { stdout } = await interactive('2\n\n1\n\n');

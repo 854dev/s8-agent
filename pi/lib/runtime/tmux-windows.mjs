@@ -71,15 +71,31 @@ async function ownedWindow(run, root, session, name) {
   return matches[0];
 }
 
-/** 창에 Ctrl-C를 보내고 프로세스가 끝날 때까지 기다린다. 시간 내 끝나지 않으면 중복 실행을 막기 위해 실패한다. */
-export async function stopWindow(run, root, session, name, { timeoutMs = 20000 } = {}) {
+const defaultKill = (pid, signal) => process.kill(pid, signal);
+
+/** 창의 전경 프로세스 그룹에 신호를 보낸다. 창이 이미 사라졌으면 아무것도 하지 않는다. */
+async function signalPane(run, target, signal, kill) {
+  try {
+    const { stdout } = await run(['display-message', '-p', '-t', target, '#{pane_pid}']);
+    const pid = Number(stdout.trim());
+    if (!Number.isSafeInteger(pid) || pid < 1) return;
+    // Pi는 raw 모드 TUI로 터미널에서 Ctrl-C가 SIGINT가 되지 않는다. 전경 프로세스 그룹에 직접 신호를 보낸다.
+    try { kill(-pid, signal); } catch { kill(pid, signal); }
+  } catch { /* 창이 이미 사라졌으면 그냥 둔다. */ }
+}
+
+/** 창 프로세스를 중지하고 끝날 때까지 기다린다. Ctrl-C가 통하지 않는 raw 모드 TUI(Pi)는 전경 프로세스 그룹에 SIGTERM을 보낸다. 시간 내 끝나지 않으면 중복 실행을 막기 위해 실패한다. */
+export async function stopWindow(run, root, session, name, { timeoutMs = 20000, kill = defaultKill } = {}) {
   const window = await ownedWindow(run, root, session, name);
   if (!window || window.dead) return;
-  await run(['send-keys', '-t', window.id, 'C-c']);
-  const stopped = await waitUntil(async () => {
+  const gone = async () => {
     const current = (await windows(run, session)).find(item => item.id === window.id);
     return !current || current.dead;
-  }, { timeoutMs });
+  };
+  await run(['send-keys', '-t', window.id, 'C-c']);
+  // raw 모드에서는 Ctrl-C가 SIGINT로 바뀌지 않으므로 바로 확인해 안 끝났으면 실제 신호를 보낸다.
+  if (!(await gone())) await signalPane(run, window.id, 'SIGTERM', kill);
+  const stopped = await waitUntil(gone, { timeoutMs });
   if (!stopped) throw new Error(`${session}:${name}가 정상 종료되지 않았습니다. 중복 실행을 막기 위해 재시작을 중단했습니다.`);
 }
 

@@ -13,7 +13,6 @@ const until = async check => { for (let i = 0; i < 200; i++) { if (await check()
 
 test('installed Pi SDK waits for the active turn, then persists one correlated custom message', async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 's8-pi-communication-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
   let release, calls = 0;
   const gate = new Promise(resolve => { release = resolve; });
   const provider = http.createServer(async (req, res) => {
@@ -41,6 +40,14 @@ test('installed Pi SDK waits for the active turn, then persists one correlated c
   const { session } = await createAgentSession({ cwd: root, agentDir: root, modelRuntime: runtime, model: runtime.getModel('fixture', 'fixture'), resourceLoader: loader, settingsManager, sessionManager, tools: [] });
   await session.bindExtensions({ mode: 'print' });
   t.after(async () => { inbox.close(); await session.abort(); session.dispose(); });
+  // t.after는 등록 순서(FIFO)로 실행되므로, rm을 마지막에 등록해 세션·서버를 먼저 정리한다.
+  t.after(async () => {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try { await rm(root, { recursive: true, force: true }); return; }
+      catch (error) { if (error.code !== 'ENOTEMPTY') throw error; await new Promise(resolve => setTimeout(resolve, 20)); }
+    }
+    await rm(root, { recursive: true, force: true });
+  });
   const firstTurn = session.prompt('Inspect the task.');
   await until(() => calls === 1);
   const input = message('request', 'manager', 'What evidence supports your conclusion?');

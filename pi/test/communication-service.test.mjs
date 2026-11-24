@@ -12,7 +12,6 @@ const until = async check => { for (let i = 0; i < 300; i++) { if (await check()
 // One comm-center and a separate checkout root per agent, as on different machines.
 async function fixture(t) {
   const base = await mkdtemp(path.join(os.tmpdir(), 's8-comm-'));
-  t.after(() => rm(base, { recursive: true, force: true }));
   const agentsFile = path.join(base, 'agents.json');
   const roots = {};
   for (const [id, role] of [['manager', 'manager'], ['a', 'worker'], ['b', 'worker']]) {
@@ -20,7 +19,16 @@ async function fixture(t) {
     await issueToken({ agentsFile, id, role, tokenFile: path.join(roots[id], 'token.json') });
   }
   const center = await startCommCenter({ agentsFile, port: 0 });
-  t.after(() => center.close());
+  // 센터를 먼저 닫고 마지막에 임시 디렉터리를 지운다. rm이 ENOTEMPTY로 실패해
+  // 뒤 청소가 건너뛰어져 center가 열린 채 남는 것을 막는다.
+  t.after(async () => {
+    await center.close().catch(() => {});
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try { await rm(base, { recursive: true, force: true }); return; }
+      catch (error) { if (error.code !== 'ENOTEMPTY') throw error; await new Promise(resolve => setTimeout(resolve, 20)); }
+    }
+    await rm(base, { recursive: true, force: true });
+  });
   for (const root of Object.values(roots)) {
     await writeFile(path.join(root, 'config.yml'), `communication:\n  enabled: true\n  url: ws://127.0.0.1:${center.address.port}\n  tokenFile: token.json\n`);
   }
