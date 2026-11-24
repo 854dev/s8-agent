@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { Bot, Gateway, sessionKey, visible, toolOutput, tokenUsage } from './gateway.mjs';
+import { mkdtemp, readdir, readFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { attachmentName, Bot, Gateway, sessionKey, visible, toolOutput, tokenUsage } from './gateway.mjs';
 
 function fake() {
   const commands = [];
@@ -281,4 +284,92 @@ test('general Telegram hides schedules and blocks access to shared project sched
   await gateway.incoming(privateMessage(123, '/help'));
   assert.match(sent.at(-1).text, /범용 Pi 재시작/);
   assert.ok(!sent.at(-1).text.includes('/jobs'));
+});
+
+// Attachments: the bot saves photos and documents to the wiki inbox so the manager can ingest them.
+function mediaTransport({ filePath = 'documents/file_1.jpg', bytes = 'photo-bytes', downloadFails = false } = {}) {
+  const sent = [];
+  const fetchImpl = async (url, options = {}) => {
+    if (url.includes('/file/bot')) {
+      return downloadFails ? { ok: false, status: 404 } : { ok: true, status: 200, arrayBuffer: async () => Buffer.from(bytes) };
+    }
+    const method = url.split('/').at(-1);
+    const body = options.body ? JSON.parse(options.body) : {};
+    sent.push({ method, ...body });
+    const result = method === 'getFile' ? { file_path: filePath, file_size: Buffer.byteLength(bytes) } : { message_id: sent.length };
+    return { ok: true, json: async () => ({ ok: true, result }) };
+  };
+  return { sent, fetchImpl };
+}
+const inbox = async () => path.join(await mkdtemp(path.join(os.tmpdir(), 's8-tg-')), 'raw');
+const dayOf = seconds => {
+  const date = new Date(seconds * 1000);
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+const photoMessage = (user, seconds, extra = {}) => ({ ...privateMessage(user, undefined), date: seconds,
+  photo: [{ file_id: 'small' }, { file_id: 'large' }], ...extra });
+
+test('attachments are saved to the inbox with a dated name and need no Pi session', async t => {
+  const dir = await inbox();
+  const { sent, fetchImpl } = mediaTransport();
+  const bot = new Bot({ token: 'fake', users: new Set(['123']), groups: new Set(), fetchImpl, inboxDir: dir,
+    spawnPi: () => { throw new Error('Pi must not start for an attachment-only message'); } });
+  t.after(() => bot.stop());
+  const seconds = 1764000000;
+  await bot.route({ message: photoMessage(123, seconds) });
+  const files = await readdir(dir);
+  assert.deepEqual(files, [`${dayOf(seconds)} 텔레그램 사진.jpg`]);
+  assert.equal(await readFile(path.join(dir, files[0]), 'utf8'), 'photo-bytes');
+  assert.equal(sent.find(item => item.method === 'getFile').file_id, 'large'); // largest size of the photo
+  assert.equal(sent.find(item => item.method === 'getFile').method, 'getFile');
+  assert.match(sent.at(-1).text, /첨부를 저장했습니다/);
+  assert.match(sent.at(-1).text, /raw\//);
+});
+
+test('attachment senders are authorized like text senders', async t => {
+  const dir = await inbox();
+  const { sent, fetchImpl } = mediaTransport();
+  const bot = new Bot({ token: 'fake', users: new Set(['123']), groups: new Set(['-1009']), fetchImpl, inboxDir: dir });
+  t.after(() => bot.stop());
+  await bot.route({ message: photoMessage(999, 1764000000) });
+  await bot.route({ message: { ...photoMessage(-1009, 1764000000), chat: { id: -1010, type: 'supergroup' } } });
+  assert.deepEqual(await readdir(dir).catch(() => []), []); // nothing saved, so the inbox may not exist yet
+  assert.deepEqual(sent, []);
+  assert.equal(sessionKey(photoMessage(123, 1764000000), new Set(['123']), new Set()), '123');
+});
+
+test('oversized, duplicate and failing attachments report a usable answer', async t => {
+  const dir = await inbox();
+  const { sent, fetchImpl } = mediaTransport();
+  const bot = new Bot({ token: 'fake', users: new Set(['123']), groups: new Set(), fetchImpl, inboxDir: dir });
+  t.after(() => bot.stop());
+  await bot.route({ message: { ...privateMessage(123), date: 1764000000, document: { file_id: 'huge', file_name: 'big.zip', file_size: 25 * 1024 * 1024 } } });
+  assert.match(sent.at(-1).text, /20MB/);
+  assert.deepEqual(await readdir(dir).catch(() => []), []);
+  await bot.route({ message: { ...privateMessage(123), date: 1764000000, document: { file_id: 'doc', file_name: 'notes/file:name?.md' } } });
+  await bot.route({ message: { ...privateMessage(123), date: 1764000000, document: { file_id: 'doc', file_name: 'notes/file:name?.md' } } });
+  const files = (await readdir(dir)).sort();
+  assert.equal(files.length, 2);
+  assert.ok(files.every(name => !/[/:?]/.test(name)), files.join(','));
+  assert.ok(files.some(name => /-2\.md$/.test(name)), files.join(','));
+});
+
+test('an attachment with a caption is saved and the caption still reaches Pi', async t => {
+  const dir = await inbox();
+  const { sent, fetchImpl } = mediaTransport({ filePath: 'documents/report.pdf' });
+  const { pi, commands } = fake();
+  const bot = new Bot({ token: 'fake', users: new Set(['123']), groups: new Set(), fetchImpl, inboxDir: dir, spawnPi: () => pi });
+  t.after(() => bot.stop());
+  await bot.route({ message: photoMessage(123, 1764000000, { text: '정리해줘' }) });
+  assert.match((await readdir(dir))[0], /텔레그램 사진\.jpg$/);
+  assert.ok(sent.some(item => item.text === '정리해줘') === false); // caption is not echoed as a chat message
+  const prompted = commands.find(command => command.type === 'prompt').message;
+  assert.match(prompted, /^첨부 저장: raw\/.+\.jpg\n정리해줘$/); // Pi learns which file the caption is about
+});
+
+test('attachment names are dated and stripped of path separators', () => {
+  const name = attachmentName({ name: '../../etc/pas:sw?ord.md' }, 1764000000, 'documents/x.md');
+  assert.equal(name, `${dayOf(1764000000)} password.md`);
+  assert.equal(attachmentName({ name: '텔레그램 파일' }, 1764000000, 'documents/file_1.JPG'), `${dayOf(1764000000)} 텔레그램 파일.JPG`);
 });

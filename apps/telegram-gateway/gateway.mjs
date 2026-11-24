@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { StringDecoder } from 'node:string_decoder';
 import { controlSchedules } from '../../pi/lib/scheduler/control.mjs';
-import { loadTelegramConfig } from '../../pi/lib/config/s8-config.mjs';
+import { loadS8Config, loadTelegramConfig } from '../../pi/lib/config/s8-config.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const visible = text => String(text)
@@ -46,7 +47,7 @@ async function telegram(token, fetchImpl, method, body, signal) {
 // Private chats require an allowed sender; group chats require an allowed group ID.
 // An allowed sender in an unlisted group is NOT enough to authorize the group.
 export function sessionKey(message, users, groups) {
-  if (!message || typeof message.text !== 'string') return null;
+  if (!message || (typeof message.text !== 'string' && !attachmentFile(message))) return null;
   const chat = message.chat;
   if (chat?.type === 'private') {
     if (!users.has(String(message.from?.id))) return null;
@@ -57,6 +58,62 @@ export function sessionKey(message, users, groups) {
   const thread = message.message_thread_id;
   if (thread !== undefined && (!Number.isSafeInteger(thread) || thread < 0)) return null;
   return `${chat.id}${thread === undefined ? '' : `-${thread}`}`;
+}
+
+// Bot API getFile download ceiling.
+const MAX_ATTACHMENT = 20 * 1024 * 1024;
+
+/** 텔레그램 메시지의 사진·문서를 원본 후보로 바꾼다. 그 밖의 형식은 받지 않는다. */
+export function attachmentFile(message) {
+  const photo = Array.isArray(message?.photo) ? message.photo.at(-1) : null;
+  if (photo?.file_id) return { fileId: photo.file_id, name: '텔레그램 사진', ext: '.jpg', size: photo.file_size };
+  const document = message?.document;
+  if (document?.file_id) return { fileId: document.file_id, name: document.file_name ?? '텔레그램 파일', size: document.file_size };
+  return null;
+}
+
+const day = seconds => {
+  const date = new Date((Number.isFinite(seconds) ? seconds : Math.floor(Date.now() / 1000)) * 1000);
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+
+/** 파일 이름을 저장해도 안전한 한 줄로 줄인다. 원본 이름은 날짜 뒤에 남긴다. */
+export function attachmentName(file, seconds, remotePath = '') {
+  const raw = path.basename(String(file.name ?? '').replace(/\\/g, '/'));
+  const ext = path.extname(raw) || file.ext || path.extname(remotePath) || '';
+  const stem = path.basename(raw, ext)
+    .replace(/[\u0000-\u001f/:*?"<>|]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[.\s]+/, '')
+    .trim()
+    .slice(0, 60) || '텔레그램 첨부';
+  return `${day(seconds)} ${stem}${ext}`;
+}
+
+async function unusedPath(dir, name) {
+  for (let attempt = 1; attempt < 100; attempt++) {
+    const target = path.join(dir, attempt === 1 ? name : name.replace(/(\.[^.]*)?$/, `-${attempt}$1`));
+    try { await stat(target); } catch { return target; }
+  }
+  throw new Error('첨부 파일 이름을 정하지 못했습니다');
+}
+
+/** 첨부를 받아 원본 폴더에 저장한다. 저장한 파일 이름과 크기를 돌려준다. */
+export async function saveAttachment({ token, fetchImpl = fetch, message, inboxDir }) {
+  const file = attachmentFile(message);
+  if (!file) return null;
+  if (Number.isFinite(file.size) && file.size > MAX_ATTACHMENT) throw new Error('too-big');
+  const info = await telegram(token, fetchImpl, 'getFile', { file_id: file.fileId });
+  if (!info?.file_path) throw new Error('파일 경로를 받지 못했습니다');
+  if (Number.isFinite(info.file_size) && info.file_size > MAX_ATTACHMENT) throw new Error('too-big');
+  const response = await fetchImpl(`https://api.telegram.org/file/bot${token}/${info.file_path}`, { signal: AbortSignal.timeout(120000) });
+  if (!response.ok) throw new Error(`파일 내려받기 실패 (${response.status})`);
+  const body = Buffer.from(await response.arrayBuffer());
+  await mkdir(inboxDir, { recursive: true });
+  const target = await unusedPath(inboxDir, attachmentName(file, message.date, info.file_path));
+  await writeFile(target, body);
+  return { name: path.basename(target), bytes: body.length };
 }
 
 export class Gateway {
@@ -319,7 +376,7 @@ export class Gateway {
 }
 
 export class Bot {
-  constructor({ token, users, groups, fetchImpl = fetch, spawnPi = (key) => spawn(path.join(root, 'start-manager-agent.sh'), [
+  constructor({ token, users, groups, fetchImpl = fetch, inboxDir = path.join(loadS8Config(root).kbRoot, 'raw'), spawnPi = (key) => spawn(path.join(root, 'start-manager-agent.sh'), [
     '--mode', 'rpc', '--continue', '--session-dir', path.join(root, '.pi-runtime', 'telegram-sessions', key),
   ], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] }) }) {
     if (!token || (!users.size && !groups.size)) throw new Error('Telegram requires an environment bot token and allowed IDs in config.yml');
@@ -327,6 +384,7 @@ export class Bot {
     this.users = users;
     this.groups = groups;
     this.fetch = fetchImpl;
+    this.inboxDir = inboxDir;
     this.spawnPi = spawnPi;
     this.sessions = new Map();
     this.closed = false;
@@ -347,19 +405,37 @@ export class Bot {
   async route(update) {
     const message = update.message;
     const key = sessionKey(message, this.users, this.groups);
-    if (key === null || !message.text.trim()) return;
+    if (key === null) return;
+    const text = typeof message.text === 'string' ? message.text : '';
+    let prompt = text;
+    if (attachmentFile(message)) {
+      try {
+        const saved = await saveAttachment({ token: this.token, fetchImpl: this.fetch, message, inboxDir: this.inboxDir });
+        const shown = `${path.basename(this.inboxDir)}/${saved.name}`;
+        await this.reply(message, `첨부를 저장했습니다: ${shown} (${Math.max(1, Math.round(saved.bytes / 1024))}KB)\n필요하면 이 파일을 가리켜 정리를 부탁하세요.`);
+        prompt = `첨부 저장: ${shown}\n${text}`;
+      } catch (error) {
+        console.error('Telegram attachment failed:', error.message);
+        await this.reply(message, error.message === 'too-big' ? '첨부가 20MB를 넘어 저장하지 못했습니다.' : '첨부를 저장하지 못했습니다.');
+      }
+      if (!text.trim()) return;
+    }
+    if (!prompt.trim()) return;
     try {
       const session = await this.getSession(key, message);
-      session.inbound = session.inbound.then(() => session.incoming(message));
+      session.inbound = session.inbound.then(() => session.incoming({ ...message, text: prompt }));
       await session.inbound;
     } catch (error) {
       console.error('Telegram session failed:', error.message);
-      await telegram(this.token, this.fetch, 'sendMessage', {
-        chat_id: message.chat.id,
-        ...(message.message_thread_id === undefined ? {} : { message_thread_id: message.message_thread_id }),
-        text: 'Pi 세션을 시작하지 못했습니다. 작업 디렉터리와 Pi 설치 상태를 확인하세요.',
-      }).catch(() => {});
+      await this.reply(message, 'Pi 세션을 시작하지 못했습니다. 작업 디렉터리와 Pi 설치 상태를 확인하세요.');
     }
+  }
+  reply(message, text) {
+    return telegram(this.token, this.fetch, 'sendMessage', {
+      chat_id: message.chat.id,
+      ...(message.message_thread_id === undefined ? {} : { message_thread_id: message.message_thread_id }),
+      text,
+    }).catch(() => {});
   }
   async run() {
     const latest = await telegram(this.token, this.fetch, 'getUpdates', { offset: -1, timeout: 0, allowed_updates: ['message'] });
