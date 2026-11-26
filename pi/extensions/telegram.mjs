@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { attachmentFile, Bot, Gateway, messageText, saveAttachment, sessionKey, tokenUsage } from '../../apps/telegram-gateway/gateway.mjs';
+import { attachmentPrompt, attachmentFile, Bot, Gateway, messageText, saveAttachment, sessionKey, tokenUsage } from '../../apps/telegram-gateway/gateway.mjs';
 import { agentRoot, loadTelegramConfig } from '../lib/config/s8-config.mjs';
 import { queuePiRuntimeRestart } from '../lib/runtime/restart.mjs';
 import { telegramOwner } from '../lib/telegram/status.mjs';
@@ -151,13 +151,13 @@ export function attach(pi, { port = 39485, config = process.env, fetchImpl = fet
           try {
             const saved = await saveAttachment({ token, fetchImpl, message, inboxDir: currentBot.inboxDir });
             const shown = `${path.basename(currentBot.inboxDir)}/${saved.name}`;
-            await gateway.send(`첨부를 저장했습니다: ${shown} (${Math.max(1, Math.round(saved.bytes / 1024))}KB)\n필요하면 이 파일을 가리켜 정리를 부탁하세요.`).catch(() => {});
-            prompt = `첨부 저장: ${shown}\n${text}`;
+            await gateway.send(`첨부를 저장했습니다: ${shown} (${Math.max(1, Math.round(saved.bytes / 1024))}KB)\n파일을 읽고 위키 갱신을 시작합니다.`).catch(() => {});
+            prompt = attachmentPrompt(currentBot.inboxDir, saved, text);
           } catch (error) {
             console.error('Telegram attachment failed:', error.message);
             await gateway.send(error.message === 'too-big' ? '첨부가 20MB를 넘어 저장하지 못했습니다.' : '첨부를 저장하지 못했습니다.').catch(() => {});
+            return;
           }
-          if (!text.trim()) return;
         }
         if (!prompt.trim()) return;
         const active = gateway;

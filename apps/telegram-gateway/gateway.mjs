@@ -123,6 +123,13 @@ export async function saveAttachment({ token, fetchImpl = fetch, message, inboxD
   return { name: path.basename(target), bytes: body.length };
 }
 
+/** 저장된 원본은 유지하고, 실행 위치와 무관하게 위키 수집 작업을 요청한다. */
+export function attachmentPrompt(inboxDir, saved, caption = '') {
+  return `텔레그램 첨부 원본: ${JSON.stringify(path.resolve(inboxDir, saved.name))}
+위키 루트: ${JSON.stringify(path.resolve(inboxDir, '..'))}
+위키 루트의 AGENTS.md와 rules/ingest.md를 먼저 읽고, 첨부파일을 읽어 기존 지침과 구조에 따라 위키 내용을 갱신하세요. raw의 원본 파일은 수정하거나 삭제하지 말고 보관하세요. 처리 결과와 갱신한 문서를 알려주세요. 파일을 읽을 수 없으면 이유를 알려주세요.${caption.trim() ? `\n사용자 요청:\n${caption}` : ''}`;
+}
+
 export class Gateway {
   constructor({ mode = 'project', token, pi, chat, thread, fetchImpl = fetch, editInterval = 1000, onClose = () => {}, commandImpl, schedulerImpl = (action, id) => controlSchedules(path.join(root, '.s8-runtime', 'scheduler'), action, id) }) {
     this.mode = mode;
@@ -419,13 +426,13 @@ export class Bot {
       try {
         const saved = await saveAttachment({ token: this.token, fetchImpl: this.fetch, message, inboxDir: this.inboxDir });
         const shown = `${path.basename(this.inboxDir)}/${saved.name}`;
-        await this.reply(message, `첨부를 저장했습니다: ${shown} (${Math.max(1, Math.round(saved.bytes / 1024))}KB)\n필요하면 이 파일을 가리켜 정리를 부탁하세요.`);
-        prompt = `첨부 저장: ${shown}\n${text}`;
+        await this.reply(message, `첨부를 저장했습니다: ${shown} (${Math.max(1, Math.round(saved.bytes / 1024))}KB)\n파일을 읽고 위키 갱신을 시작합니다.`);
+        prompt = attachmentPrompt(this.inboxDir, saved, text);
       } catch (error) {
         console.error('Telegram attachment failed:', error.message);
         await this.reply(message, error.message === 'too-big' ? '첨부가 20MB를 넘어 저장하지 못했습니다.' : '첨부를 저장하지 못했습니다.');
+        return;
       }
-      if (!text.trim()) return;
     }
     if (!prompt.trim()) return;
     try {

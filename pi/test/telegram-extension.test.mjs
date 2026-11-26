@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import net from 'node:net';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { attach } from '../extensions/telegram.mjs';
@@ -121,7 +121,7 @@ test('image attachment without text does not crash the polling owner', async t =
   assert.ok(sent.some(item => item.text === 's8 메뉴'));
 });
 
-test('image attachment with a caption saves and forwards the path to the model', async t => {
+for (const caption of [undefined, '정리해줘']) test(`attachment saves and reaches the model with caption: ${caption}`, async t => {
   const socket = net.createServer();
   await new Promise(resolve => socket.listen(0, '127.0.0.1', resolve));
   const { port } = socket.address();
@@ -139,7 +139,7 @@ test('image attachment with a caption saves and forwards the path to the model',
     if (method === 'getUpdates') {
       if (updates++ === 0) return { ok: true, json: async () => ({ ok: true, result: [] }) };
       if (updates === 2) return { ok: true, json: async () => ({ ok: true, result: [
-        { update_id: 1, message: { photo: [{ file_id: 'small' }, { file_id: 'large' }], caption: '정리해줘', chat: { type: 'private', id: 123 }, from: { id: 123 } } },
+        { update_id: 1, message: { photo: [{ file_id: 'small' }, { file_id: 'large' }], caption, document: { file_id: 'doc', file_name: 'report.md' }, photo: undefined, chat: { type: 'private', id: 123 }, from: { id: 123 } } },
       ] }) };
       return new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new Error('stopped')), { once: true }));
     }
@@ -150,7 +150,12 @@ test('image attachment with a caption saves and forwards the path to the model',
   t.after(() => pi.emit('session_shutdown'));
   pi.emit('session_start', null, { mode: 'tui', isIdle: () => true, abort() {}, sessionManager: { getBranch: () => [] } });
   await waitFor(() => prompts.length === 1);
-  assert.match(prompts[0], /^첨부 저장: raw\/.+\.jpg\n정리해줘$/);
+  const files = await readdir(dir);
+  assert.equal(await readFile(path.join(dir, files[0]), 'utf8'), 'photo-bytes');
+  assert.ok(prompts[0].includes(JSON.stringify(path.join(dir, files[0]))));
+  assert.match(prompts[0], /위키.*갱신/);
+  assert.match(prompts[0], /원본 파일은 수정하거나 삭제하지/);
+  if (caption) assert.ok(prompts[0].endsWith(caption));
 });
 
 test('older session can take ownership; off restores the waiting session and persists', async t => {

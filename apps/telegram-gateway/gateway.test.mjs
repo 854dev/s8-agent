@@ -310,11 +310,11 @@ const dayOf = seconds => {
 const photoMessage = (user, seconds, extra = {}) => ({ ...privateMessage(user, undefined), date: seconds,
   photo: [{ file_id: 'small' }, { file_id: 'large' }], ...extra });
 
-test('attachments are saved to the inbox with a dated name and need no Pi session', async t => {
+test('attachments are saved and automatically sent to Pi without a caption', async t => {
   const dir = await inbox();
   const { sent, fetchImpl } = mediaTransport();
   const bot = new Bot({ token: 'fake', users: new Set(['123']), groups: new Set(), fetchImpl, inboxDir: dir,
-    spawnPi: () => { throw new Error('Pi must not start for an attachment-only message'); } });
+    spawnPi: () => fake().pi });
   t.after(() => bot.stop());
   const seconds = 1764000000;
   await bot.route({ message: photoMessage(123, seconds) });
@@ -323,8 +323,8 @@ test('attachments are saved to the inbox with a dated name and need no Pi sessio
   assert.equal(await readFile(path.join(dir, files[0]), 'utf8'), 'photo-bytes');
   assert.equal(sent.find(item => item.method === 'getFile').file_id, 'large'); // largest size of the photo
   assert.equal(sent.find(item => item.method === 'getFile').method, 'getFile');
-  assert.match(sent.at(-1).text, /첨부를 저장했습니다/);
-  assert.match(sent.at(-1).text, /raw\//);
+  assert.ok(sent.some(item => item.text?.includes('첨부를 저장했습니다')));
+  assert.ok(sent.some(item => item.text?.includes('raw/')));
 });
 
 test('attachment senders are authorized like text senders', async t => {
@@ -342,7 +342,7 @@ test('attachment senders are authorized like text senders', async t => {
 test('oversized, duplicate and failing attachments report a usable answer', async t => {
   const dir = await inbox();
   const { sent, fetchImpl } = mediaTransport();
-  const bot = new Bot({ token: 'fake', users: new Set(['123']), groups: new Set(), fetchImpl, inboxDir: dir });
+  const bot = new Bot({ token: 'fake', users: new Set(['123']), groups: new Set(), fetchImpl, inboxDir: dir, spawnPi: () => fake().pi });
   t.after(() => bot.stop());
   await bot.route({ message: { ...privateMessage(123), date: 1764000000, document: { file_id: 'huge', file_name: 'big.zip', file_size: 25 * 1024 * 1024 } } });
   assert.match(sent.at(-1).text, /20MB/);
@@ -359,7 +359,7 @@ test('two same-date attachments saved concurrently do not overwrite each other',
   const dir = await inbox();
   const { sent, fetchImpl } = mediaTransport();
   const bot = new Bot({ token: 'fake', users: new Set(['123']), groups: new Set(), fetchImpl, inboxDir: dir,
-    spawnPi: () => { throw new Error('Pi must not start for an attachment-only message'); } });
+    spawnPi: () => fake().pi });
   t.after(() => bot.stop());
   const seconds = 1764000000;
   await Promise.all([
@@ -381,7 +381,9 @@ test('an attachment with a caption is saved and the caption still reaches Pi', a
   assert.match((await readdir(dir))[0], /텔레그램 사진\.jpg$/);
   assert.ok(sent.some(item => item.text === '정리해줘') === false); // caption is not echoed as a chat message
   const prompted = commands.find(command => command.type === 'prompt').message;
-  assert.match(prompted, /^첨부 저장: raw\/.+\.jpg\n정리해줘$/); // Pi learns which file the caption is about
+  assert.ok(prompted.includes(JSON.stringify(path.join(dir, (await readdir(dir))[0]))));
+  assert.match(prompted, /위키.*갱신/);
+  assert.match(prompted, /사용자 요청:\n정리해줘$/); // Pi learns which file the caption is about
 });
 
 test('attachment names are dated and stripped of path separators', () => {
